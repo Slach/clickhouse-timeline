@@ -1,0 +1,1 @@
+﻿clickhouse-client -q "SELECT toStartOfInterval(event_time, INTERVAL 1 minute) AS t, normalized_query_hash, quantile(0.9)(memory_usage) AS memory FROM system.query_log WHERE memory_usage > 0 AND event_date >= today() GROUP BY ALL FORMAT TSVRaw" | rare heat -m "([^\t]+)\t([^\t]+)\t([^\t]+)" -e '{timeformat {time {1}} "15:04" }' -e "{2}" -e "{floor {3}}" --rows 50 --scale log2

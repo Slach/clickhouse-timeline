@@ -1,0 +1,23 @@
+services:
+  clickhouse:
+    image: ${CLICKHOUSE_IMAGE:-clickhouse/clickhouse-server}:${CLICKHOUSE_VERSION:-latest}
+    ports:
+      - "9000:9000"
+      - "8123:8123"
+  grafana:
+    image: ${GRAFANA_IMAGE:-grafana/grafana}:${GRAFANA_VERSION:-latest}
+    volumes:
+      - ../grafana-waterfall-panel:/var/lib/grafana/plugins/
+      - ./docker/grafana/provisioning/:/etc/grafana/provisioning/
+      - ./docker/grafana/dashboards/:/var/lib/grafana/dashboards/
+
+    environment:
+      GF_INSTALL_PLUGINS: grafana-piechart-panel,grafana-worldmap-panel,grafana-clickhouse-datasource,vertamedia-clickhouse-datasource
+      GF_LOG_LEVEL: debug
+      GF_DATABASE_WAL: "true"
+      GF_UNIFIED_ALERTING_ENABLED: ${GF_UNIFIED_ALERTING_ENABLED:-false}
+      GF_ALERTING_ENABLED: ${GF_ALERTING_ENABLED:-true}
+    ports:
+      - "3001:3000"
+    depends_on:
+      - clickhouse
