@@ -38,17 +38,30 @@ caregory is error name + normalized query hash
 
 ![Heatmap send bytes](./screenshots/heatmap_network_receive_bytes.jpg)
 
+## Bytes read timeline `heatmap_read_bytes.sh`
+
+![Heatmap send bytes](./screenshots/heatmap_read_bytes.jpg)
+
+## Bytes write timeline `heatmap_written_bytes.sh`
+
+![Heatmap send bytes](./screenshots/heatmap_written_bytes.jpg)
+
 # Query analyze by normalized_query_hash
 
 ## Details about each query hash can bet get via EXPLAIN
 
 ```bash
-clickhouse-client -q "SELECT 'EXPLAIN indexes=1 ' || query || ';' FROM system.query_log WHERE normalized_query_hash=? AND event_date=? AND event_time BETWEEN ? AND ? LIMIT 10 FORMAT TSVRaw" | clickhouse-client -mn --echo
+clickhouse-client -q "SELECT DISTINCT 'EXPLAIN indexes=1 ' || query || ';' FROM system.query_log WHERE normalized_query_hash=? AND event_date=? AND event_time BETWEEN ? AND ? AND query_kind='Select' ORDER BY query_duration_ms DESC LIMIT 10 FORMAT TSVRaw" | clickhouse-client -mn --echo --output-format=PrettyCompactMonoBlock
 ```
+
 
 ## flamegraph for each query can be get via clickhouse-flamegraph
 
 ```bash
-clickhouse-client -q "SELECT 'clickhouse-flamegraph --query-ids=' || arrayStringConcat(groupArray(10)(query_id),',') || '\n' FROM system.query_log WHERE normalized_query_hash=? AND event_date=? AND event_time BETWEEN ? AND ? LIMIT 10 FORMAT TSVRaw" | bash
+clickhouse-client -q "SELECT 'clickhouse-flamegraph --query-ids=' || arrayStringConcat(groupArray(10)(query_id),',') || '\n' FROM (SELECT query_id FROM system.query_log WHERE normalized_query_hash=? AND event_date=? AND event_time BETWEEN ? AND ? ORDER BY query_duration_ms DESC LIMIT 10) FORMAT TSVRaw" | bash
 ```
+
+clickhouse-client -q "SELECT 'clickhouse-flamegraph --query-ids=' || arrayStringConcat(groupArray(10)(
+query_id),',') || '\n' FROM (SELECT query_id FROM system.query_log WHERE normalized_query_hash=7656918731087999937 AND
+event_date=today() ORDER BY query_duration_ms DESC LIMIT 10) FORMAT TSVRaw" | bash 
 
