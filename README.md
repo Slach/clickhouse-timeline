@@ -60,8 +60,3 @@ clickhouse-client -q "SELECT DISTINCT 'EXPLAIN indexes=1 ' || query || ';' FROM 
 ```bash
 clickhouse-client -q "SELECT 'clickhouse-flamegraph --query-ids=' || arrayStringConcat(groupArray(10)(query_id),',') || '\n' FROM (SELECT query_id FROM system.query_log WHERE normalized_query_hash=? AND event_date=? AND event_time BETWEEN ? AND ? ORDER BY query_duration_ms DESC LIMIT 10) FORMAT TSVRaw" | bash
 ```
-
-clickhouse-client -q "SELECT 'clickhouse-flamegraph --query-ids=' || arrayStringConcat(groupArray(10)(
-query_id),',') || '\n' FROM (SELECT query_id FROM system.query_log WHERE normalized_query_hash=7656918731087999937 AND
-event_date=today() ORDER BY query_duration_ms DESC LIMIT 10) FORMAT TSVRaw" | bash 
-
