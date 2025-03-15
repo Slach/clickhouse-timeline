@@ -11,7 +11,7 @@ Main idea template
 clickhouse-clent -q "SELECT time, category, metric FROM system.query_log WHERE event_date=today() GROUP BY ALL" | rare heat -m "([^\t]+)\t([^\t]+)\t([^\t]+)" -e '{timeformat {time {1}} "15:04" }' -e "{2}" -e "{3}" --rows 50 --scale log2
 ```
 
-Timeline examples
+[Timeline examples](./timeline-examples)
 
 ## Errors timeline `heatmap_errors.sh`
 
