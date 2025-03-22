@@ -347,28 +347,16 @@ func (a *App) showHeatmap() {
 						fromTime := timestamp
 						toTime := timestamp.Add(time.Duration(intervalSeconds) * time.Second)
 
-						// Open flamegraph form with selected parameters
+						// Directly generate flamegraph
 						a.pages.SwitchToPage("main")
-						a.showFlamegraphForm(FlamegraphParams{
-							CategoryType:  categoryType,
-							CategoryValue: category,
-							TraceType:     traceType,
-							FromTime:      fromTime,
-							ToTime:        toTime,
-						})
+						a.generateFlamegraph(categoryType, category, traceType, fromTime, toTime, a.cluster)
 						return nil
 					} else if row > 0 && col == 0 {
 						// Category row header - use global time range
 						category := categories[row-1]
 
 						a.pages.SwitchToPage("main")
-						a.showFlamegraphForm(FlamegraphParams{
-							CategoryType:  categoryType,
-							CategoryValue: category,
-							TraceType:     traceType,
-							FromTime:      a.fromTime,
-							ToTime:        a.toTime,
-						})
+						a.generateFlamegraph(categoryType, category, traceType, a.fromTime, a.toTime, a.cluster)
 						return nil
 					} else if row == 0 && col > 0 {
 						// Timestamp column header - use all categories
@@ -390,12 +378,7 @@ func (a *App) showHeatmap() {
 						toTime := timestamp.Add(timeWindow / 2)
 
 						a.pages.SwitchToPage("main")
-						a.showFlamegraphForm(FlamegraphParams{
-							CategoryType: "", // Empty means all categories
-							TraceType:    traceType,
-							FromTime:     fromTime,
-							ToTime:       toTime,
-						})
+						a.generateFlamegraph("", "", traceType, fromTime, toTime, a.cluster)
 						return nil
 					}
 				}
