@@ -1,9 +1,9 @@
 package config
 
 import (
-	"os"
-
+	"github.com/pkg/errors"
 	"gopkg.in/yaml.v3"
+	"os"
 )
 
 type Context struct {
@@ -26,14 +26,14 @@ type Config struct {
 }
 
 func Load(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
+	data, readErr := os.ReadFile(path)
+	if readErr != nil {
+		return nil, errors.WithStack(readErr) // Wrap with stack trace
 	}
 
 	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, err
+	if unmarshalErr := yaml.Unmarshal(data, &cfg); unmarshalErr != nil {
+		return nil, errors.WithStack(unmarshalErr) // Wrap with stack trace
 	}
 
 	return &cfg, nil

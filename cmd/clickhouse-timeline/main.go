@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -13,27 +14,33 @@ import (
 var version = "dev"
 
 func main() {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to get user home directory")
+	logging.InitConsoleStdErrLog()
+	home, homeErr := os.UserHomeDir()
+	if homeErr != nil {
+		fmt.Println(homeErr.Error())
+		log.Fatal().Stack().Err(homeErr).Msg("failed to get user home directory")
 	}
+	home = filepath.Join(home, ".clickhouse-timeline")
 
 	// Initialize logging
-	if err = logging.InitLogFile(
-		filepath.Join(home, ".clickhouse-timeline", "clickhouse-timeline.log"),
+	if initLogErr := logging.InitLogFile(
+		filepath.Join(home, "clickhouse-timeline.log"),
 		version,
-	); err != nil {
-		log.Fatal().Stack().Err(err).Msg("failed to initialize logger")
+	); initLogErr != nil {
+		fmt.Println(initLogErr.Error())
+		log.Fatal().Stack().Err(initLogErr).Msg("failed to initialize logger")
 	}
 
 	configPath := filepath.Join(home, "clickhouse-timeline.yml")
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		log.Fatal().Stack().Err(err)
+	cfg, configErr := config.Load(configPath)
+	if configErr != nil {
+		fmt.Println(configErr.Error())
+		log.Fatal().Stack().Err(configErr).Send()
 	}
 
 	app := tui.NewApp(cfg, version)
-	if err := app.Run(); err != nil {
-		log.Fatal().Stack().Err(err)
+	if runErr := app.Run(); runErr != nil {
+		fmt.Println(runErr.Error())
+		log.Fatal().Stack().Err(runErr).Send()
 	}
 }

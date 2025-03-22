@@ -104,6 +104,7 @@ func (c *Client) connect() error {
 }
 
 func (c *Client) Query(query string) (*sql.Rows, error) {
+	log.Info().Msg(query)
 	return c.db.QueryContext(context.Background(), query)
 }
 

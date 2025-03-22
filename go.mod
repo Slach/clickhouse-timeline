@@ -3,11 +3,11 @@ module github.com/Slach/clickhouse-timeline
 go 1.24.0
 
 require (
-	github.com/ClickHouse/clickhouse-go/v2 v2.33.0
+	github.com/ClickHouse/clickhouse-go/v2 v2.33.1
 	github.com/gdamore/tcell/v2 v2.8.1
 	github.com/pkg/errors v0.9.1
 	github.com/rivo/tview v0.0.0-20241227133733-17b7edb88c57
-	github.com/rs/zerolog v1.33.0
+	github.com/rs/zerolog v1.34.0
 	golang.org/x/text v0.23.0
 	gopkg.in/yaml.v3 v3.0.1
 )

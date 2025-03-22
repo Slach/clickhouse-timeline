@@ -27,15 +27,33 @@ type App struct {
 	fromTime  time.Time
 	toTime    time.Time
 	rangeForm *tview.Form
+
+	// Heatmap fields
+	category      CategoryType
+	cluster       string
+	currentMetric HeatmapMetric
+	scaleType     ScaleType
+	heatmapTable  *tview.Table
+	clusterList   *tview.List
+	categoryList  *tview.List
+	metricList    *tview.List
+	scaleList     *tview.List
+
+	// Selection fields for flamegraph integration
+	selectedCategory  string
+	selectedTimestamp time.Time
 }
 
 func NewApp(cfg *config.Config, version string) *App {
 	app := &App{
-		cfg:      cfg,
-		tviewApp: tview.NewApplication(),
-		version:  version,
-		fromTime: time.Now().Add(-24 * time.Hour), // Default: 24 hours ago
-		toTime:   time.Now(),                      // Default: now
+		cfg:           cfg,
+		tviewApp:      tview.NewApplication(),
+		version:       version,
+		fromTime:      time.Now().Add(-24 * time.Hour), // Default: 24 hours ago
+		toTime:        time.Now(),                      // Default: now
+		category:      CategoryQueryHash,               // Default category
+		currentMetric: MetricCount,                     // Default metric
+		scaleType:     ScaleLinear,                     // Default scale
 	}
 
 	app.setupUI()
@@ -74,44 +92,47 @@ func (a *App) setupUI() {
 	a.pages.AddPage("contexts", a.connectList, true, false)
 
 	a.tviewApp.SetRoot(a.pages, true)
+	a.tviewApp.EnableMouse(true)
 
 	a.setupKeybindings()
 }
 
-func (a *App) setupKeybindings() {
-	a.tviewApp.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		// Check if we're currently in a time field by examining the focused primitive
-		currentFocus := a.tviewApp.GetFocus()
+func (a *App) defaultInputHandler(event *tcell.EventKey) *tcell.EventKey {
+	// Check if we're currently in a time field by examining the focused primitive
+	currentFocus := a.tviewApp.GetFocus()
 
-		// Don't trigger command mode when editing time fields
-		if event.Rune() == ':' {
-			// Check if we're on the datepicker page and focused on a time input
-			if frontPage, _ := a.pages.GetFrontPage(); frontPage == "datepicker" {
-				// If we're editing a time field, don't trigger command mode
-				if _, ok := currentFocus.(*tview.InputField); ok {
-					return event
-				}
-			}
-
-			// Otherwise proceed with command mode
-			if a.pages.HasPage("main") {
-				a.pages.SwitchToPage("main")
-				a.commandInput.SetText("")
-				a.mainFlex.ResizeItem(a.commandInput, 1, 0) // Show with height 1
-				a.tviewApp.SetFocus(a.commandInput)
-				return nil
+	// Don't trigger command mode when editing time fields
+	if event.Rune() == ':' {
+		// Check if we're on the datepicker page and focused on a time input
+		if frontPage, _ := a.pages.GetFrontPage(); frontPage == "datepicker" {
+			// If we're editing a time field, don't trigger command mode
+			if _, ok := currentFocus.(*tview.InputField); ok {
+				return event
 			}
 		}
 
-		// Filter mode with '/' when on the connections list
-		frontPageName, _ := a.pages.GetFrontPage()
-		if event.Rune() == '/' && a.pages.HasPage("contexts") && frontPageName == "contexts" {
-			a.showFilterInput()
+		// Otherwise proceed with command mode
+		if a.pages.HasPage("main") {
+			a.pages.SwitchToPage("main")
+			a.commandInput.SetText("")
+			a.mainFlex.ResizeItem(a.commandInput, 1, 0) // Show with height 1
+			a.tviewApp.SetFocus(a.commandInput)
 			return nil
 		}
+	}
 
-		return event
-	})
+	// Filter mode with '/' when on the connections list
+	frontPageName, _ := a.pages.GetFrontPage()
+	if event.Rune() == '/' && a.pages.HasPage("contexts") && frontPageName == "contexts" {
+		a.showFilterInput()
+		return nil
+	}
+
+	return event
+}
+
+func (a *App) setupKeybindings() {
+	a.tviewApp.SetInputCapture(a.defaultInputHandler)
 
 	a.commandInput.
 		SetAutocompleteFunc(func(currentText string) []string {
@@ -143,6 +164,16 @@ func (a *App) setupKeybindings() {
 					a.showToDatePicker()
 				case CmdRange:
 					a.showRangePicker()
+				case CmdHeatmap:
+					a.showHeatmap()
+				case CmdCategory:
+					a.showCategorySelector()
+				case CmdCluster:
+					a.showClusterSelector()
+				case CmdMetric:
+					a.showMetricSelector()
+				case CmdScale:
+					a.showScaleSelector()
 				}
 			}
 		})
@@ -156,7 +187,7 @@ func (a *App) Run() error {
 	defer func() {
 		if a.clickHouse != nil {
 			if err := a.clickHouse.Close(); err != nil {
-				log.Error().Err(err).Stack()
+				log.Error().Err(err).Stack().Send()
 			}
 		}
 	}()

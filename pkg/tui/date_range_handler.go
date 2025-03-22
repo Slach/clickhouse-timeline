@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"github.com/Slach/clickhouse-timeline/pkg/timezone"
+	"golang.org/x/text/message"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -12,7 +13,6 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"golang.org/x/text/message"
 )
 
 // Predefined ranges similar to Grafana
@@ -91,23 +91,11 @@ func (a *App) showDatePicker(title string, initialTime time.Time, onSelect func(
 	// Try to find the timezone in our list first
 	tzFound := false
 	for _, zone := range timezone.TimeZones {
-		if zone.Name == tzName {
+		if zone.Name == tzName || runtime.GOOS == "windows" && zone.WindowsName == tzName {
 			selectedTimeZone = zone.Name
 			tzDisplayText = zone.DisplayText
 			tzFound = true
 			break
-		}
-	}
-
-	// If not found by name, try to find by Windows name
-	if !tzFound && runtime.GOOS == "windows" {
-		for _, zone := range timezone.TimeZones {
-			if zone.WindowsName == tzName {
-				selectedTimeZone = zone.Name
-				tzDisplayText = zone.DisplayText
-				tzFound = true
-				break
-			}
 		}
 	}
 
@@ -373,8 +361,10 @@ func (a *App) showDatePicker(title string, initialTime time.Time, onSelect func(
 
 	// Set up calendar keyboard navigation
 	calendar.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		// Add month navigation with left/right arrow keys
-		if event.Key() == tcell.KeyLeft && event.Modifiers() == tcell.ModAlt {
+		// Add month navigation with various key combinations
+		if (event.Key() == tcell.KeyLeft && (event.Modifiers()&tcell.ModAlt != 0)) ||
+			(event.Key() == tcell.KeyLeft && (event.Modifiers()&tcell.ModCtrl != 0)) ||
+			(event.Rune() == 16) { // Ctrl+P
 			if selectedMonth == 1 {
 				selectedMonth = 12
 				selectedYear--
@@ -383,7 +373,9 @@ func (a *App) showDatePicker(title string, initialTime time.Time, onSelect func(
 			}
 			updateCalendar()
 			return nil
-		} else if event.Key() == tcell.KeyRight && event.Modifiers() == tcell.ModAlt {
+		} else if (event.Key() == tcell.KeyRight && (event.Modifiers()&tcell.ModAlt != 0)) ||
+			(event.Key() == tcell.KeyRight && (event.Modifiers()&tcell.ModCtrl != 0)) ||
+			(event.Rune() == 14) { // Ctrl+N
 			if selectedMonth == 12 {
 				selectedMonth = 1
 				selectedYear++
@@ -444,9 +436,9 @@ func (a *App) showDatePicker(title string, initialTime time.Time, onSelect func(
 		AddItem(headerText, 1, 0, false).
 		AddItem(calendar, 0, 1, true).
 		AddItem(nil, 1, 0, false). // Add padding
-		AddItem(navFlex, 1, 0, false).
-		AddItem(nil, 1, 0, false). // Add padding
 		AddItem(timeInputFlex, 2, 0, false).
+		AddItem(nil, 1, 0, false). // Add padding
+		AddItem(navFlex, 1, 0, false).
 		AddItem(nil, 1, 0, false). // Add padding
 		AddItem(buttonFlex, 1, 0, false)
 

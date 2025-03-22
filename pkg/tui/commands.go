@@ -9,6 +9,11 @@ const (
 	CmdFrom       = "from"
 	CmdTo         = "to"
 	CmdRange      = "range"
+	CmdHeatmap    = "heatmap"
+	CmdCategory   = "category"
+	CmdCluster    = "cluster"
+	CmdMetric     = "metric"
+	CmdScale      = "scale"
 )
 
 type TraceType string
@@ -20,6 +25,30 @@ const (
 	TraceMemorySample TraceType = "MemorySample"
 )
 
+// Heatmap metric types
+type HeatmapMetric string
+
+const (
+	MetricCount          HeatmapMetric = "count"
+	MetricMemoryUsage    HeatmapMetric = "memoryUsage"
+	MetricCPUUsage       HeatmapMetric = "cpuUsage"
+	MetricNetworkSent    HeatmapMetric = "networkSent"
+	MetricNetworkReceive HeatmapMetric = "networkReceive"
+	MetricReadRows       HeatmapMetric = "readRows"
+	MetricWrittenRows    HeatmapMetric = "writtenRows"
+	MetricReadBytes      HeatmapMetric = "readBytes"
+	MetricWrittenBytes   HeatmapMetric = "writtenBytes"
+)
+
+// Category types for heatmap
+type CategoryType string
+
+const (
+	CategoryQueryHash CategoryType = "normalized_query_hash"
+	CategoryTable     CategoryType = "tables"
+	CategoryHost      CategoryType = "hostName()"
+)
+
 var availableCommands = []string{
 	CmdHelp,
 	CmdConnect,
@@ -28,6 +57,11 @@ var availableCommands = []string{
 	CmdFrom,
 	CmdTo,
 	CmdRange,
+	CmdHeatmap,
+	CmdCategory,
+	CmdCluster,
+	CmdMetric,
+	CmdScale,
 }
 
 // Help text
@@ -39,6 +73,11 @@ const helpText = `ClickHouse Timeline Commands:
 :from       - Set the start time
 :to         - Set the end time
 :range      - Set time range with predefined options
+:heatmap    - Generate a heatmap visualization
+:category   - Set category for heatmap (query_hash, tables, hosts)
+:cluster    - Select cluster for queries
+:metric     - Select metric for heatmap visualization
+:scale      - Set scale type for heatmap (linear, log2, log10)
 
 Navigation:
 - Use arrow keys to navigate

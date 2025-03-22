@@ -34,15 +34,7 @@ func GetCurrentTimeZone() (ZoneInfo, error) {
 		return ZoneInfo{}, err
 	}
 
-	// For Windows, convert the timezone ID to IANA format if needed
-	if runtime.GOOS == "windows" {
-		// Check if this is a Windows timezone name that needs conversion
-		ianaName, found := WindowsToIana[tzName]
-		if found {
-			// Use the IANA name instead
-			tzName = ianaName
-		}
-	}
+	tzName = windowsToIANA(tzName)
 
 	// Load the timezone location
 	location, err := time.LoadLocation(tzName)
@@ -94,6 +86,19 @@ func GetCurrentTimeZone() (ZoneInfo, error) {
 		WindowsName: windowsName,
 		Offset:      offsetMinutes,
 	}, nil
+}
+
+func windowsToIANA(tzName string) string {
+	// For Windows, convert the timezone ID to IANA format if needed
+	if runtime.GOOS == "windows" {
+		// Check if this is a Windows timezone name that needs conversion
+		ianaName, found := WindowsToIana[tzName]
+		if found {
+			// Use the IANA name instead
+			tzName = ianaName
+		}
+	}
+	return tzName
 }
 
 // getCurrentTimezone returns the current timezone name based on the operating system
@@ -202,6 +207,27 @@ type ZoneInfo struct {
 
 var TimeZones []ZoneInfo
 
+// ConvertOffsetToIANAName returns a timezone name matching the given offset string (e.g. "+04")
+func ConvertOffsetToIANAName(offset int) (string, error) {
+	_, nowOffset := time.Now().Zone()
+	if nowOffset == offset {
+		tz, err := GetCurrentTimeZone()
+		if err != nil {
+			return "", err
+		}
+		return tz.Name, nil
+	}
+	// Find matching timezone
+	for _, tz := range TimeZones {
+		if tz.Offset == offset {
+			tzName := windowsToIANA(tz.Name)
+			return tzName, nil
+		}
+	}
+
+	return "", fmt.Errorf("no matching timezone found for offset %d", offset)
+}
+
 func init() {
 	if runtime.GOOS == "nacl" || runtime.GOOS == "" {
 		log.Error().Str("OS", runtime.GOOS).Msg("Unsupported platform for parsing timeZones")
@@ -291,7 +317,7 @@ func init() {
 
 		// Check timeZone
 		t := now.In(location)
-		offset := t.Format("-0700")
+		offset := t.Format("-07:00")
 		hours := offset[0:3]
 		minutes := offset[3:]
 

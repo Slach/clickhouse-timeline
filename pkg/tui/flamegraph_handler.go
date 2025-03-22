@@ -6,9 +6,11 @@ import (
 	"github.com/rivo/tview"
 	"os"
 	"os/exec"
+	"time"
 )
 
-const flamegraphQuery = `
+// Different query templates for flamegraph depending on the category
+const flamegraphQueryByHash = `
 SELECT
 	count() AS samples, 
 	concat(
@@ -19,62 +21,239 @@ SELECT
 		),
 		arrayStringConcat(arrayReverse(arrayMap(x -> concat( demangle(addressToSymbol(x)), '#', addressToLine(x) ), trace)), ';')
 	) AS stack
-FROM system.trace_log
+FROM clusterAllReplicas('%s', merge(system, '^trace_log'))
 WHERE query_id IN (
     SELECT query_id 
-    FROM system.query_log 
-    WHERE normalized_query_hash = %s
-    AND event_date=today() 
+    FROM clusterAllReplicas('%s', merge(system, '^query_log'))
+    WHERE normalized_query_hash = '%s'
+    AND event_date >= toDate('%s') AND event_date <= toDate('%s')
+    AND event_time >= parseDateTimeBestEffort('%s') AND event_time <= parseDateTimeBestEffort('%s')
 )
 AND trace_type = '%s'
 GROUP BY trace, trace_type
 SETTINGS allow_introspection_functions=1
 `
 
-func (a *App) showFlamegraphForm() {
+const flamegraphQueryByTable = `
+SELECT
+	count() AS samples, 
+	concat(
+		multiIf( 
+			position( toString(trace_type), 'Memory') > 0 AND sum(size) >= 0, 'allocate;',
+			position( toString(trace_type), 'Memory') > 0 AND sum(size) < 0, 'free;',
+			concat( toString(trace_type), ';')
+		),
+		arrayStringConcat(arrayReverse(arrayMap(x -> concat( demangle(addressToSymbol(x)), '#', addressToLine(x) ), trace)), ';')
+	) AS stack
+FROM clusterAllReplicas('%s', merge(system, '^trace_log'))
+WHERE query_id IN (
+    SELECT query_id 
+    FROM clusterAllReplicas('%s', merge(system, '^query_log'))
+    WHERE hasAll(tables, ['%s'])
+    AND event_date >= toDate('%s') AND event_date <= toDate('%s')
+    AND event_time >= parseDateTimeBestEffort('%s') AND event_time <= parseDateTimeBestEffort('%s')
+)
+AND trace_type = '%s'
+GROUP BY trace, trace_type
+SETTINGS allow_introspection_functions=1
+`
+
+const flamegraphQueryByHost = `
+SELECT
+	count() AS samples, 
+	concat(
+		multiIf( 
+			position( toString(trace_type), 'Memory') > 0 AND sum(size) >= 0, 'allocate;',
+			position( toString(trace_type), 'Memory') > 0 AND sum(size) < 0, 'free;',
+			concat( toString(trace_type), ';')
+		),
+		arrayStringConcat(arrayReverse(arrayMap(x -> concat( demangle(addressToSymbol(x)), '#', addressToLine(x) ), trace)), ';')
+	) AS stack
+FROM clusterAllReplicas('%s', merge(system, '^trace_log'))
+WHERE query_id IN (
+    SELECT query_id 
+    FROM clusterAllReplicas('%s', merge(system, '^query_log'))
+    WHERE hostName() = '%s'
+    AND event_date >= toDate('%s') AND event_date <= toDate('%s')
+    AND event_time >= parseDateTimeBestEffort('%s') AND event_time <= parseDateTimeBestEffort('%s')
+)
+AND trace_type = '%s'
+GROUP BY trace, trace_type
+SETTINGS allow_introspection_functions=1
+`
+
+const flamegraphQueryByTimeRange = `
+SELECT
+	count() AS samples, 
+	concat(
+		multiIf( 
+			position( toString(trace_type), 'Memory') > 0 AND sum(size) >= 0, 'allocate;',
+			position( toString(trace_type), 'Memory') > 0 AND sum(size) < 0, 'free;',
+			concat( toString(trace_type), ';')
+		),
+		arrayStringConcat(arrayReverse(arrayMap(x -> concat( demangle(addressToSymbol(x)), '#', addressToLine(x) ), trace)), ';')
+	) AS stack
+FROM clusterAllReplicas('%s', merge(system, '^trace_log'))
+WHERE query_id IN (
+    SELECT query_id 
+    FROM clusterAllReplicas('%s', merge(system, '^query_log'))
+    WHERE event_date >= toDate('%s') AND event_date <= toDate('%s')
+    AND event_time >= parseDateTimeBestEffort('%s') AND event_time <= parseDateTimeBestEffort('%s')
+)
+AND trace_type = '%s'
+GROUP BY trace, trace_type
+SETTINGS allow_introspection_functions=1
+`
+
+// FlamegraphParams Structure for storing flamegraph parameters
+type FlamegraphParams struct {
+	CategoryType  CategoryType
+	CategoryValue string
+	TraceType     TraceType
+	FromTime      time.Time
+	ToTime        time.Time
+}
+
+func (a *App) showFlamegraphForm(params ...FlamegraphParams) {
 	if a.clickHouse == nil {
 		a.mainView.SetText("Error: Please connect to a ClickHouse instance first")
 		return
 	}
 
+	// Create a form with proper type
 	form := tview.NewForm()
-	form.SetTitle("Flamegraph Parameters")
+	form.SetTitle("Flamegraph Parameters").
+		SetBorder(true)
 
-	var queryHash, traceType string
-
-	form.AddInputField("Query Hash:", "", 40, nil, func(text string) {
-		queryHash = text
+	// Add mouse support
+	form.SetMouseCapture(func(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
+		// On any click, focus the form
+		if action == tview.MouseLeftClick {
+			a.tviewApp.SetFocus(form)
+		}
+		return action, event
 	})
 
-	form.AddDropDown("Trace Type:", []string{
+	// Set mouse handler for the form
+	form.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		// Handle mouse events
+		if event.Key() == tcell.KeyRune && event.Rune() == 'M' {
+			// Mouse event
+			return event
+		}
+		return event
+	})
+
+	var categoryType = CategoryQueryHash
+	var categoryValue, traceType string
+	var fromTime, toTime time.Time
+
+	// If parameters are passed, use them
+	if len(params) > 0 {
+		categoryType = params[0].CategoryType
+		categoryValue = params[0].CategoryValue
+		if params[0].TraceType != "" {
+			traceType = string(params[0].TraceType)
+		}
+		fromTime = params[0].FromTime
+		toTime = params[0].ToTime
+	}
+
+	// If time is not set, use current time and range
+	if fromTime.IsZero() {
+		fromTime = a.fromTime
+	}
+	if toTime.IsZero() {
+		toTime = a.toTime
+	}
+
+	// Add category selection
+	categoryOptions := []string{
+		"Query Hash",
+		"Table",
+		"Host",
+		"Time Range Only",
+	}
+
+	categoryIndex := 0
+	switch categoryType {
+	case CategoryTable:
+		categoryIndex = 1
+	case CategoryHost:
+		categoryIndex = 2
+	case "":
+		categoryIndex = 3
+	}
+
+	form.AddDropDown("Category Type:", categoryOptions, categoryIndex, func(option string, index int) {
+		switch index {
+		case 0:
+			categoryType = CategoryQueryHash
+		case 1:
+			categoryType = CategoryTable
+		case 2:
+			categoryType = CategoryHost
+		case 3:
+			categoryType = ""
+		}
+	})
+
+	// Field for category value
+	form.AddInputField("Category Value:", categoryValue, 40, nil, func(text string) {
+		categoryValue = text
+	})
+
+	// Trace type selection
+	traceOptions := []string{
 		string(TraceMemory),
 		string(TraceCPU),
 		string(TraceReal),
 		string(TraceMemorySample),
-	}, 0, func(option string, _ int) {
+	}
+
+	traceIndex := 0
+	for i, opt := range traceOptions {
+		if opt == traceType {
+			traceIndex = i
+			break
+		}
+	}
+
+	form.AddDropDown("Trace Type:", traceOptions, traceIndex, func(option string, _ int) {
 		traceType = option
 	})
 
-	form.AddButton("Generate", func() {
-		if queryHash == "" || traceType == "" {
-			a.mainView.SetText("Error: Both Query Hash and Trace Type are required")
+	// Display time range
+	timeRangeText := fmt.Sprintf("from %s to %s",
+		fromTime.Format("2006-01-02 15:04:05 -07:00"),
+		toTime.Format("2006-01-02 15:04:05 -07:00"))
+	form.AddTextView("Time Range:", timeRangeText, 50, 2, true, false)
+
+	// Define generate function
+	generateFunc := func() {
+		if (categoryType != "" && categoryValue == "") || traceType == "" {
+			a.mainView.SetText("Error: Category Value and Trace Type are required")
 			return
 		}
 		// Clear the main view, switch to main page, and then generate flamegraph
 		a.mainView.Clear()
 		a.pages.SwitchToPage("main")
-		a.generateFlamegraph(queryHash, TraceType(traceType))
-	})
+		a.generateFlamegraph(categoryType, categoryValue, TraceType(traceType), fromTime, toTime, a.cluster)
+	}
 
 	cancelFunc := func() {
 		a.pages.SwitchToPage("main")
 	}
-
+	form.AddButton("Generate", generateFunc)
 	form.AddButton("Cancel", cancelFunc)
 
-	// Set form's input capture to handle Escape key
+	// Add Ctrl+Enter hotkey for Generate button
 	form.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Key() == tcell.KeyEscape {
+		if event.Key() == tcell.KeyEnter && event.Modifiers() == tcell.ModCtrl {
+			// Trigger Generate button action directly
+			generateFunc()
+			return nil
+		} else if event.Key() == tcell.KeyEscape {
 			cancelFunc()
 			return nil
 		}
@@ -86,12 +265,36 @@ func (a *App) showFlamegraphForm() {
 	a.tviewApp.SetFocus(form)
 }
 
-func (a *App) generateFlamegraph(queryHash string, traceType TraceType) {
+// getFlamegraphQuery returns the appropriate query string based on category type
+func (a *App) getFlamegraphQuery(categoryType CategoryType, categoryValue string, traceType TraceType,
+	fromDateStr, toDateStr, fromStr, toStr, cluster string) string {
+	switch categoryType {
+	case CategoryQueryHash:
+		return fmt.Sprintf(flamegraphQueryByHash, cluster, cluster, categoryValue, fromDateStr, toDateStr, fromStr, toStr, traceType)
+	case CategoryTable:
+		return fmt.Sprintf(flamegraphQueryByTable, cluster, cluster, categoryValue, fromDateStr, toDateStr, fromStr, toStr, traceType)
+	case CategoryHost:
+		return fmt.Sprintf(flamegraphQueryByHost, cluster, cluster, categoryValue, fromDateStr, toDateStr, fromStr, toStr, traceType)
+	default:
+		// If category is not specified, use only time range
+		return fmt.Sprintf(flamegraphQueryByTimeRange, cluster, cluster, fromDateStr, toDateStr, fromStr, toStr, traceType)
+	}
+}
+
+func (a *App) generateFlamegraph(categoryType CategoryType, categoryValue string, traceType TraceType, fromTime, toTime time.Time, cluster string) {
 	a.mainView.SetText("Preparing flamegraph data, please wait...")
 
 	// We carry out a request and preparation of data in go-routine so as not to block UI
 	go func() {
-		query := fmt.Sprintf(flamegraphQuery, queryHash, traceType)
+		// Format dates for the query
+		fromStr := fromTime.Format("2006-01-02 15:04:05 -07:00")
+		toStr := toTime.Format("2006-01-02 15:04:05 -07:00")
+		fromDateStr := fromTime.Format("2006-01-02")
+		toDateStr := toTime.Format("2006-01-02")
+
+		var query string
+
+		query = a.getFlamegraphQuery(categoryType, categoryValue, traceType, fromDateStr, toDateStr, fromStr, toStr, cluster)
 
 		rows, createErr := a.clickHouse.Query(query)
 		if createErr != nil {
@@ -178,7 +381,7 @@ func (a *App) generateFlamegraph(queryHash string, traceType TraceType) {
 		a.tviewApp.QueueUpdateDraw(func() {
 			a.mainView.SetText("Generating flamegraph, please wait...")
 		})
-
+		var runErr error
 		// Suspend tview and run flamelens
 		a.tviewApp.Suspend(func() {
 			// Create command to run flamelens
@@ -190,18 +393,26 @@ func (a *App) generateFlamegraph(queryHash string, traceType TraceType) {
 			fmt.Println("\nRunning flamelens, press any key to return to the application when finished...")
 
 			// Run the command and wait for it to complete
-			if runErr := cmd.Run(); runErr != nil {
-				fmt.Printf("\nError running flamelens: %v\n", runErr)
-				fmt.Println("Press any key to continue...")
-				// Wait for key press before returning
-				b := make([]byte, 1)
-				_, _ = os.Stdin.Read(b)
+			if runErr = cmd.Run(); runErr != nil {
+				// Show error in tview UI
+				a.tviewApp.QueueUpdateDraw(func() {
+					a.mainView.SetText(fmt.Sprintf("Error running flamelens: %v\nPress any key to continue...", runErr))
+				})
+				// Wait for key press in tview
+				a.tviewApp.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+					// Any key press will clear the error and restore default handler
+					a.mainView.SetText("Flamegraph generation completed! Press ':' to continue\n")
+					a.tviewApp.SetInputCapture(a.defaultInputHandler)
+					return a.defaultInputHandler(event)
+				})
 			}
 		})
 
-		// Update UI after completion
-		a.tviewApp.QueueUpdateDraw(func() {
-			a.mainView.SetText("Flamegraph generation completed! Press ':' to continue\n")
-		})
+		if runErr == nil {
+			// Update UI after completion
+			a.tviewApp.QueueUpdateDraw(func() {
+				a.mainView.SetText("Flamegraph generation completed! Press ':' to continue\n")
+			})
+		}
 	}()
 }
