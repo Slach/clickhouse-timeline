@@ -268,8 +268,8 @@ func (a *App) showHeatmap() {
 			title := fmt.Sprintf("Heatmap: %s by %s (%s to %s)",
 				getMetricName(a.currentMetric),
 				getCategoryName(a.category),
-				a.fromTime.Format("2006-01-02 15:04 -07:00"),
-				a.toTime.Format("2006-01-02 15:04 -07:00"))
+				a.fromTime.Format("2006-01-02 15:04:05 -07:00"),
+				a.toTime.Format("2006-01-02 15:04:05 -07:00"))
 
 			table.SetTitle(title).SetBorder(true)
 

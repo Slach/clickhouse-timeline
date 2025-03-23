@@ -2,45 +2,25 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
-
-	"github.com/Slach/clickhouse-timeline/pkg/config"
+	"github.com/Slach/clickhouse-timeline/pkg/cli"
 	"github.com/Slach/clickhouse-timeline/pkg/logging"
-	"github.com/Slach/clickhouse-timeline/pkg/tui"
-	"github.com/rs/zerolog/log"
+	"github.com/Slach/clickhouse-timeline/pkg/types"
+	"github.com/spf13/cobra"
+	"os"
 )
 
 var version = "dev"
 
 func main() {
 	logging.InitConsoleStdErrLog()
-	home, homeErr := os.UserHomeDir()
-	if homeErr != nil {
-		fmt.Println(homeErr.Error())
-		log.Fatal().Stack().Err(homeErr).Msg("failed to get user home directory")
-	}
-	home = filepath.Join(home, ".clickhouse-timeline")
-
-	// Initialize logging
-	if initLogErr := logging.InitLogFile(
-		filepath.Join(home, "clickhouse-timeline.log"),
-		version,
-	); initLogErr != nil {
-		fmt.Println(initLogErr.Error())
-		log.Fatal().Stack().Err(initLogErr).Msg("failed to initialize logger")
+	cliInstance := &types.CLI{}
+	rootCmd := cli.NewRootCommand(cliInstance)
+	rootCmd.Run = func(cmd *cobra.Command, args []string) {
+		cli.RunRootCommand(cliInstance, version, cmd, args)
 	}
 
-	configPath := filepath.Join(home, "clickhouse-timeline.yml")
-	cfg, configErr := config.Load(configPath)
-	if configErr != nil {
-		fmt.Println(configErr.Error())
-		log.Fatal().Stack().Err(configErr).Send()
-	}
-
-	app := tui.NewApp(cfg, version)
-	if runErr := app.Run(); runErr != nil {
-		fmt.Println(runErr.Error())
-		log.Fatal().Stack().Err(runErr).Send()
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
 	}
 }

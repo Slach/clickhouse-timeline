@@ -2,6 +2,7 @@ package logging
 
 import (
 	"fmt"
+	"github.com/Slach/clickhouse-timeline/pkg/types"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -52,7 +53,19 @@ func (h fatalStackHook) Run(e *zerolog.Event, level zerolog.Level, _ string) {
 	}
 }
 
-func InitLogFile(logPath, version string) error {
+func InitLogFile(cliInstance *types.CLI, version string) error {
+	logPath := ""
+	if cliInstance != nil && cliInstance.LogPath != "" {
+		logPath = cliInstance.LogPath
+	}
+	// If no path provided, use default in home directory
+	if logPath == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return errors.Wrap(err, "failed to get user home directory")
+		}
+		logPath = filepath.Join(home, ".clickhouse-timeline", "clickhouse-timeline.log")
+	}
 
 	// Ensure log directory exists
 	logDir := filepath.Dir(logPath)

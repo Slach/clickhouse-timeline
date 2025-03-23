@@ -4,6 +4,11 @@ services:
     ports:
       - "9000:9000"
       - "8123:8123"
+  clickhouse-timeline:
+    image: ${TIMELINE_IMAGE:-clickhousepro/clickouse-timeline}:${TIMELINE_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
   grafana:
     image: ${GRAFANA_IMAGE:-grafana/grafana}:${GRAFANA_VERSION:-latest}
     volumes:

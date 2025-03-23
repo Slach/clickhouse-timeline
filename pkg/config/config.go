@@ -1,9 +1,11 @@
 package config
 
 import (
+	"github.com/Slach/clickhouse-timeline/pkg/types"
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v3"
 	"os"
+	"path/filepath"
 )
 
 type Context struct {
@@ -25,8 +27,13 @@ type Config struct {
 	Contexts []Context `yaml:"contexts"`
 }
 
-func Load(path string) (*Config, error) {
-	data, readErr := os.ReadFile(path)
+func Load(cliInstance *types.CLI, home string) (*Config, error) {
+	configPath := filepath.Join(home, "clickhouse-timeline.yml")
+	if cliInstance != nil && cliInstance.ConfigPath != "" {
+		configPath = cliInstance.ConfigPath
+	}
+
+	data, readErr := os.ReadFile(configPath)
 	if readErr != nil {
 		return nil, errors.WithStack(readErr) // Wrap with stack trace
 	}

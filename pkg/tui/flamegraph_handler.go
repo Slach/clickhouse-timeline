@@ -114,7 +114,7 @@ type FlamegraphParams struct {
 	ToTime        time.Time
 }
 
-func (a *App) showFlamegraphForm(params ...FlamegraphParams) {
+func (a *App) ShowFlamegraphForm(params ...FlamegraphParams) {
 	if a.clickHouse == nil {
 		a.mainView.SetText("Error: Please connect to a ClickHouse instance first")
 		return

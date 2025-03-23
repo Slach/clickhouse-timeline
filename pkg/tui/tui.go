@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"fmt"
+	"github.com/Slach/clickhouse-timeline/pkg/types"
+	"github.com/araddon/dateparse"
 	"strings"
 	"time"
 
@@ -42,6 +45,121 @@ type App struct {
 	// Selection fields for flamegraph integration
 	selectedCategory  string
 	selectedTimestamp time.Time
+}
+
+func (a *App) ApplyCLIParameters(c *types.CLI, commandName string) {
+	mainMsg := ""
+	if c.ConnectTo != "" {
+		if found := a.SetConnectByName(c.ConnectTo); !found {
+			mainMsg += fmt.Sprintf("Error: Context '%s' not found\nAvailable contexts:\n%s", c.ConnectTo, a.GetContextList())
+		}
+	}
+
+	if c.FromTime != "" {
+		if t, err := dateparse.ParseAny(c.FromTime); err == nil {
+			a.SetFromTime(t)
+			mainMsg += fmt.Sprintf("Set time range from: '%s'\n", a.fromTime.Format("2006-01-02 15:04:05 -07:00"))
+		} else {
+			mainMsg += fmt.Sprintf("can't parse --from='%s': %v\n", c.FromTime, err)
+		}
+	}
+
+	if c.ToTime != "" {
+		if t, err := dateparse.ParseAny(c.ToTime); err == nil {
+			a.SetToTime(t)
+			mainMsg += fmt.Sprintf("Set time range to: '%s'\n", a.toTime.Format("2006-01-02 15:04:05 -07:00"))
+		} else {
+			mainMsg += fmt.Sprintf("can't parse --to='%s': %v\n", c.ToTime, err)
+		}
+	}
+
+	if c.RangeOption != "" {
+		a.ApplyPredefinedRange(c.RangeOption)
+		mainMsg += fmt.Sprintf("Set time range '%s' from: '%s' to: '%s'\n", c.RangeOption, a.fromTime.Format("2006-01-02 15:04:05 -07:00"), a.toTime.Format("2006-01-02 15:04:05 -07:00"))
+	}
+
+	if c.Cluster != "" {
+		a.SetCluster(c.Cluster)
+		mainMsg += fmt.Sprintf("Set cluster '%s'\n", c.Cluster)
+	}
+
+	if c.Metric != "" {
+		a.SetMetric(c.Metric)
+		mainMsg += fmt.Sprintf("Set metric '%s'\n", c.Metric)
+	}
+
+	if c.Category != "" {
+		a.SetCategory(c.Category)
+		mainMsg += fmt.Sprintf("Set category '%s'\n", c.Metric)
+	}
+	if mainMsg != "" {
+		mainMsg += "Press ':' to continue"
+		a.mainView.SetText(mainMsg)
+	}
+
+	// Switch to appropriate mode based on command
+	switch commandName {
+	case "heatmap":
+		a.showHeatmap()
+	case "flamegraph":
+		a.ShowFlamegraphForm()
+	}
+}
+
+func (a *App) SetFromTime(t time.Time) {
+	a.fromTime = t
+}
+
+func (a *App) SetToTime(t time.Time) {
+	a.toTime = t
+}
+
+func (a *App) SetCluster(cluster string) {
+	a.cluster = cluster
+}
+
+func (a *App) SetMetric(metric string) {
+	a.currentMetric = HeatmapMetric(metric)
+}
+
+func (a *App) SetCategory(category string) {
+	a.category = CategoryType(category)
+}
+
+func (a *App) GetContextList() string {
+	var contextList strings.Builder
+	for _, ctx := range a.cfg.Contexts {
+		contextList.WriteString(fmt.Sprintf("  - %s\n", ctx.Name))
+	}
+	return contextList.String()
+}
+
+func (a *App) SetConnectByName(contextName string) bool {
+	found := false
+	for i, ctx := range a.cfg.Contexts {
+		if ctx.Name == contextName {
+			a.handleContextSelection(i)
+			found = true
+			break
+		}
+	}
+	return found
+}
+
+func (a *App) ApplyPredefinedRange(rangeOption string) {
+	switch rangeOption {
+	case "1h":
+		a.fromTime = time.Now().Add(-1 * time.Hour)
+	case "24h":
+		a.fromTime = time.Now().Add(-24 * time.Hour)
+	case "7d":
+		a.fromTime = time.Now().Add(-7 * 24 * time.Hour)
+	case "30d":
+		a.fromTime = time.Now().Add(-30 * 24 * time.Hour)
+	default:
+		a.fromTime = time.Now().Add(-24 * time.Hour)
+	}
+	a.toTime = time.Now()
 }
 
 func NewApp(cfg *config.Config, version string) *App {
@@ -157,7 +275,7 @@ func (a *App) setupKeybindings() {
 				case CmdQuit:
 					a.handleQuitCommand()
 				case CmdFlamegraph:
-					a.showFlamegraphForm()
+					a.ShowFlamegraphForm()
 				case CmdFrom:
 					a.showFromDatePicker()
 				case CmdTo:

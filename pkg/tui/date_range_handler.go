@@ -506,15 +506,15 @@ func (a *App) showDatePicker(title string, initialTime time.Time, onSelect func(
 		if event.Key() == tcell.KeyTab {
 			currentFocus := a.tviewApp.GetFocus()
 			if currentFocus == calendar {
+				a.tviewApp.SetFocus(timeZoneInput)
+			} else if currentFocus == timeField {
+				a.tviewApp.SetFocus(timeZoneInput)
+			} else if currentFocus == timeZoneInput {
 				a.tviewApp.SetFocus(prevMonthBtn)
 			} else if currentFocus == prevMonthBtn {
 				a.tviewApp.SetFocus(nextMonthBtn)
 			} else if currentFocus == nextMonthBtn {
-				a.tviewApp.SetFocus(timeField)
-			} else if currentFocus == timeField {
-				a.tviewApp.SetFocus(timeZoneInput)
-			} else if currentFocus == timeZoneInput {
-				a.tviewApp.SetFocus(nowButton)
+				a.tviewApp.SetFocus(saveButton)
 			} else if currentFocus == nowButton {
 				a.tviewApp.SetFocus(saveButton)
 			} else if currentFocus == saveButton {
@@ -544,7 +544,7 @@ func (a *App) showDatePicker(title string, initialTime time.Time, onSelect func(
 
 		if event.Key() == tcell.KeyDown {
 			if currentFocus == prevMonthBtn || currentFocus == nextMonthBtn {
-				a.tviewApp.SetFocus(timeField)
+				a.tviewApp.SetFocus(saveButton)
 				return nil
 			} else if currentFocus == timeField {
 				a.tviewApp.SetFocus(timeZoneInput)
@@ -555,16 +555,16 @@ func (a *App) showDatePicker(title string, initialTime time.Time, onSelect func(
 			}
 		} else if event.Key() == tcell.KeyUp {
 			if currentFocus == nowButton || currentFocus == saveButton || currentFocus == cancelButton {
-				a.tviewApp.SetFocus(timeZoneInput)
+				a.tviewApp.SetFocus(nextMonthBtn)
 				return nil
 			} else if currentFocus == timeZoneInput {
 				a.tviewApp.SetFocus(timeField)
 				return nil
 			} else if currentFocus == timeField {
-				a.tviewApp.SetFocus(prevMonthBtn)
+				a.tviewApp.SetFocus(calendar)
 				return nil
 			} else if currentFocus == prevMonthBtn || currentFocus == nextMonthBtn {
-				a.tviewApp.SetFocus(calendar)
+				a.tviewApp.SetFocus(timeZoneInput)
 				return nil
 			}
 		} else if event.Key() == tcell.KeyRight {
