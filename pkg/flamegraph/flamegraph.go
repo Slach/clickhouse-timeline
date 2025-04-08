@@ -317,6 +317,26 @@ func (f *FlameView) SetPageSwitcher(switcher PageSwitcherFunc) {
 	f.pageSwitcher = switcher
 }
 
+// getCurrentStack returns the current stack trace and count
+func (f *FlameView) getCurrentStack() ([]string, int) {
+	if f.focused == nil || f.focused.frame == nil {
+		return []string{}, 0
+	}
+
+	// Build the stack from the focused frame up to the root
+	var stack []string
+	count := f.focused.frame.Count
+	current := f.focused.frame
+
+	// Traverse up to build the stack
+	for current != nil {
+		stack = append([]string{current.Name}, stack...)
+		current = current.Parent
+	}
+
+	return stack, count
+}
+
 // handleMouse processes mouse events for the flamegraph
 func (f *FlameView) handleMouse(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
 	if len(f.frames) == 0 {
