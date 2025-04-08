@@ -32,8 +32,8 @@ GROUP BY ALL
 SETTINGS skip_unavailable_shards=1
 `
 
-// showHeatmap displays the heatmap visualization
-func (a *App) showHeatmap() {
+// ShowHeatmap displays the heatmap visualization
+func (a *App) ShowHeatmap() {
 	if a.clickHouse == nil {
 		a.mainView.SetText("Error: Please connect to a ClickHouse instance first")
 		return
@@ -349,14 +349,14 @@ func (a *App) showHeatmap() {
 
 						// Directly generate flamegraph
 						a.pages.SwitchToPage("main")
-						a.generateFlamegraph(categoryType, category, traceType, fromTime, toTime, a.cluster)
+						a.generateFlamegraph(categoryType, category, traceType, fromTime, toTime, a.cluster, "heatmap")
 						return nil
 					} else if row > 0 && col == 0 {
 						// Category row header - use global time range
 						category := categories[row-1]
 
 						a.pages.SwitchToPage("main")
-						a.generateFlamegraph(categoryType, category, traceType, a.fromTime, a.toTime, a.cluster)
+						a.generateFlamegraph(categoryType, category, traceType, a.fromTime, a.toTime, a.cluster, "heatmap")
 						return nil
 					} else if row == 0 && col > 0 {
 						// Timestamp column header - use all categories
@@ -378,7 +378,7 @@ func (a *App) showHeatmap() {
 						toTime := timestamp.Add(timeWindow / 2)
 
 						a.pages.SwitchToPage("main")
-						a.generateFlamegraph("", "", traceType, fromTime, toTime, a.cluster)
+						a.generateFlamegraph("", "", traceType, fromTime, toTime, a.cluster, "heatmap")
 						return nil
 					}
 				}

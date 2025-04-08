@@ -45,13 +45,19 @@ type App struct {
 	// Selection fields for flamegraph integration
 	selectedCategory  string
 	selectedTimestamp time.Time
+
+	//use Native Flamegraph widget
+	flamegraphNative bool
 }
 
 func (a *App) ApplyCLIParameters(c *types.CLI, commandName string) {
 	mainMsg := ""
+	a.flamegraphNative = c.FlamegraphNative
 	if c.ConnectTo != "" {
 		if found := a.SetConnectByName(c.ConnectTo); !found {
 			mainMsg += fmt.Sprintf("Error: Context '%s' not found\nAvailable contexts:\n%s", c.ConnectTo, a.GetContextList())
+		} else {
+			mainMsg += fmt.Sprintf("Set connect context to: '%s'\n", c.ConnectTo)
 		}
 	}
 
@@ -100,7 +106,7 @@ func (a *App) ApplyCLIParameters(c *types.CLI, commandName string) {
 	// Switch to appropriate mode based on command
 	switch commandName {
 	case "heatmap":
-		a.showHeatmap()
+		a.ShowHeatmap()
 	case "flamegraph":
 		a.ShowFlamegraphForm()
 	}
@@ -283,7 +289,7 @@ func (a *App) setupKeybindings() {
 				case CmdRange:
 					a.showRangePicker()
 				case CmdHeatmap:
-					a.showHeatmap()
+					a.ShowHeatmap()
 				case CmdCategory:
 					a.showCategorySelector()
 				case CmdCluster:

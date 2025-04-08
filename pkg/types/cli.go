@@ -7,15 +7,16 @@ import (
 )
 
 type CLI struct {
-	FromTime    string
-	ToTime      string
-	RangeOption string
-	ConnectTo   string
-	Cluster     string
-	Metric      string
-	Category    string
-	ConfigPath  string
-	LogPath     string
+	FromTime         string
+	ToTime           string
+	RangeOption      string
+	ConnectTo        string
+	Cluster          string
+	Metric           string
+	Category         string
+	ConfigPath       string
+	LogPath          string
+	FlamegraphNative bool
 }
 
 func (c *CLI) ParseToTime() (time.Time, error) {

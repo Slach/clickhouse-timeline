@@ -42,7 +42,7 @@ func (a *App) showScaleSelector() {
 
 		// If we already have a heatmap, regenerate it with the new scale
 		if a.heatmapTable != nil {
-			a.showHeatmap()
+			a.ShowHeatmap()
 		}
 	})
 

@@ -89,7 +89,7 @@ func (a *App) showMetricSelector() {
 
 		// If we already have a heatmap, regenerate it with the new metric
 		if a.heatmapTable != nil {
-			a.showHeatmap()
+			a.ShowHeatmap()
 		}
 	})
 

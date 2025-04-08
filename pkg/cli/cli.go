@@ -14,10 +14,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewRootCommand(cli *types.CLI) *cobra.Command {
+func NewRootCommand(cli *types.CLI, version string) *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "clickhouse-timeline",
 		Short: "ClickHouse Timeline - interactive performance analysis tool",
+	}
+	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		return RunRootCommand(cli, version, cmd, args)
 	}
 
 	heatmapCmd := &cobra.Command{
@@ -46,6 +49,7 @@ func NewRootCommand(cli *types.CLI) *cobra.Command {
 	rootCmd.PersistentFlags().StringVar(&cli.Cluster, "cluster", "", "Cluster name to analyze")
 	rootCmd.PersistentFlags().StringVar(&cli.Metric, "metric", "", "Metric to visualize (count, memoryUsage, cpuUsage, etc)")
 	rootCmd.PersistentFlags().StringVar(&cli.Category, "category", "", "Category to group by (query_hash, tables, hosts)")
+	rootCmd.PersistentFlags().BoolVar(&cli.FlamegraphNative, "flamegraph-native", false, "Use native flamegraph viewer instead of flamelens")
 
 	// Add subcommands
 	rootCmd.AddCommand(heatmapCmd)
@@ -54,7 +58,7 @@ func NewRootCommand(cli *types.CLI) *cobra.Command {
 	return rootCmd
 }
 
-func RunRootCommand(cliInstance *types.CLI, version string, cmd *cobra.Command, args []string) {
+func RunRootCommand(cliInstance *types.CLI, version string, cmd *cobra.Command, args []string) error {
 	// Get CLI instance from command context
 	if cliInstance == nil {
 		if cliValue := cmd.Context().Value("cli"); cliValue != nil {
@@ -92,9 +96,10 @@ func RunRootCommand(cliInstance *types.CLI, version string, cmd *cobra.Command, 
 	}
 
 	if runErr := app.Run(); runErr != nil {
-		fmt.Println(runErr.Error())
-		log.Fatal().Stack().Err(runErr).Send()
+		log.Error().Stack().Err(runErr).Send()
+		return runErr
 	}
+	return nil
 }
 
 func RunSubCommand(c *types.CLI, cmd *cobra.Command, args []string) error {
@@ -107,10 +112,9 @@ func RunSubCommand(c *types.CLI, cmd *cobra.Command, args []string) error {
 	// Store the CLI instance in the context
 	ctx = context.WithValue(ctx, "cli", c)
 
-	// Set the context on both the current command and root command
+	// Set the context on the current command
 	cmd.SetContext(ctx)
-	cmd.Root().SetContext(ctx)
 
-	// Execute the root command with this context
-	return cmd.Root().ExecuteContext(ctx)
+	// Run the root command directly instead of executing again
+	return RunRootCommand(c, "", cmd, args)
 }

@@ -1,11 +1,14 @@
 package tui
 
 import (
+	"database/sql"
 	"fmt"
+	"github.com/Slach/clickhouse-timeline/pkg/flamegraph"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -112,6 +115,97 @@ type FlamegraphParams struct {
 	TraceType     TraceType
 	FromTime      time.Time
 	ToTime        time.Time
+	SourcePage    string // Tracks where the flamegraph was called from
+}
+
+func (a *App) showNativeFlamegraph(rows *sql.Rows, sourcePage string) {
+	flameView := flamegraph.NewFlamegraphView()
+	err := flameView.BuildFromRows(rows)
+	if err != nil {
+		a.mainView.SetText(fmt.Sprintf("Error building flamegraph: %v", err))
+		return
+	}
+
+	flameView.SetDirection(flamegraph.DirectionTopDown)
+	flameView.SetFrameHandler(func(stack []string, count int) {
+		// Calculate percentage of total
+		total := flameView.GetTotalCount()
+		percentage := 0.0
+		if total > 0 {
+			percentage = float64(count) / float64(total)
+		}
+
+		// Create content for the stack trace view
+		stackTraceText := fmt.Sprintf("Selected stacktrace count: %d (%.2f%% of total)\n\nFull Stack Trace:\n%s\n\n[yellow]Use arrow keys to scroll, ESC or Close button to return[-]",
+			count, percentage*100.0, flamegraph.FormatStackWithNumbers(stack))
+
+		// Create a proper TextView for the stack trace
+		stackTraceView := tview.NewTextView()
+		stackTraceView.SetTextAlign(tview.AlignLeft)
+		stackTraceView.SetScrollable(true)
+		stackTraceView.SetDynamicColors(true)
+		stackTraceView.SetBorder(true)
+		stackTraceView.SetTitle("Stack Trace")
+		stackTraceView.SetText(stackTraceText) // Set text after other properties
+		stackTraceView.ScrollToBeginning()
+
+		// Make sure the text view can receive focus for keyboard navigation
+		stackTraceView.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+			switch event.Key() {
+			case tcell.KeyEscape:
+				a.pages.SwitchToPage("flamegraph")
+				a.tviewApp.SetFocus(flameView)
+				return nil
+			default:
+				return event
+			}
+		})
+
+		// Create a button to close the stackTraceFlex
+		closeButton := tview.NewButton("Close").
+			SetSelectedFunc(func() {
+				a.pages.SwitchToPage("flamegraph")
+				a.tviewApp.SetFocus(flameView)
+			})
+
+		// Create a simple stackTraceFlex with the text view and a button
+		stackTraceFlex := tview.NewFlex().
+			SetDirection(tview.FlexRow).
+			AddItem(stackTraceView, 0, 1, true).
+			AddItem(closeButton, 1, 0, true)
+
+		a.pages.AddPage("stacktrace", stackTraceFlex, true, true)
+		a.pages.SwitchToPage("stacktrace")
+		a.tviewApp.SetFocus(stackTraceView)
+
+	})
+
+	// Set the source page for ESC key handling
+	// Set source page with stacktrace suffix if we're coming from stacktrace
+	if strings.HasSuffix(sourcePage, "stacktrace") {
+		flameView.SetSourcePage("stacktrace")
+	} else {
+		flameView.SetSourcePage(sourcePage)
+	}
+
+	// Set the page switcher function
+	flameView.SetPageSwitcher(func(targetPage string) {
+		a.pages.SwitchToPage(targetPage)
+	})
+
+	// Create help text at bottom
+	flameTitle := tview.NewTextView().
+		SetText("Flamegraph Viewer (Use arrow keys to navigate, Enter to select, ESC to go back)").
+		SetTextAlign(tview.AlignCenter)
+
+	flex := tview.NewFlex().
+		SetDirection(tview.FlexRow).
+		AddItem(flameTitle, 1, 0, false).
+		AddItem(flameView, 0, 1, true)
+
+	a.pages.AddPage("flamegraph", flex, true, true)
+	a.pages.SwitchToPage("flamegraph")
+	a.tviewApp.SetFocus(flameView)
 }
 
 func (a *App) ShowFlamegraphForm(params ...FlamegraphParams) {
@@ -238,7 +332,7 @@ func (a *App) ShowFlamegraphForm(params ...FlamegraphParams) {
 		// Clear the main view, switch to main page, and then generate flamegraph
 		a.mainView.Clear()
 		a.pages.SwitchToPage("main")
-		a.generateFlamegraph(categoryType, categoryValue, TraceType(traceType), fromTime, toTime, a.cluster)
+		a.generateFlamegraph(categoryType, categoryValue, TraceType(traceType), fromTime, toTime, a.cluster, "flamegraph_form")
 	}
 
 	cancelFunc := func() {
@@ -281,7 +375,7 @@ func (a *App) getFlamegraphQuery(categoryType CategoryType, categoryValue string
 	}
 }
 
-func (a *App) generateFlamegraph(categoryType CategoryType, categoryValue string, traceType TraceType, fromTime, toTime time.Time, cluster string) {
+func (a *App) generateFlamegraph(categoryType CategoryType, categoryValue string, traceType TraceType, fromTime, toTime time.Time, cluster string, sourcePage string) {
 	a.mainView.SetText("Preparing flamegraph data, please wait...")
 
 	// We carry out a request and preparation of data in go-routine so as not to block UI
@@ -296,123 +390,133 @@ func (a *App) generateFlamegraph(categoryType CategoryType, categoryValue string
 
 		query = a.getFlamegraphQuery(categoryType, categoryValue, traceType, fromDateStr, toDateStr, fromStr, toStr, cluster)
 
-		rows, createErr := a.clickHouse.Query(query)
-		if createErr != nil {
+		rows, queryErr := a.clickHouse.Query(query)
+		if queryErr != nil {
 			a.tviewApp.QueueUpdateDraw(func() {
-				a.mainView.SetText(fmt.Sprintf("Error ClickHouse querying\n%s\n: %v", query, createErr))
+				a.mainView.SetText(fmt.Sprintf("Error ClickHouse querying\n%s\n: %v", query, queryErr))
 			})
 			return
 		}
-		defer func() {
-			if closeErr := rows.Close(); closeErr != nil {
-				a.tviewApp.QueueUpdateDraw(func() {
-					a.mainView.SetText(fmt.Sprintf("Can't rows.Close: %v", closeErr))
-				})
-			}
-		}()
 
-		tmpFile, createErr := os.CreateTemp("", "flamegraph-*.txt")
-		if createErr != nil {
+		if a.flamegraphNative {
+			// For native flamegraph, pass rows directly to the viewer
+			// We'll clone the rows to avoid closing the original
 			a.tviewApp.QueueUpdateDraw(func() {
-				a.mainView.SetText(fmt.Sprintf("Error creating temporary file: %v", createErr))
+				a.showNativeFlamegraph(rows, sourcePage)
 			})
 			return
-		}
-		tmpFileName := tmpFile.Name()
-		defer func() {
-			if removeErr := os.Remove(tmpFileName); removeErr != nil {
-				a.tviewApp.QueueUpdateDraw(func() {
-					a.mainView.SetText(fmt.Sprintf("Error removing temp file: %v", removeErr))
-				})
-			}
-		}()
-		defer func() {
-			if err := tmpFile.Close(); err != nil {
-				a.tviewApp.QueueUpdateDraw(func() {
-					a.mainView.SetText(fmt.Sprintf("Error closing temp file: %v", err))
-				})
-			}
-		}()
+		} else {
+			// For flamelens, we still need to write to a temp file
+			defer func() {
+				if closeErr := rows.Close(); closeErr != nil {
+					a.tviewApp.QueueUpdateDraw(func() {
+						a.mainView.SetText(fmt.Sprintf("Can't rows.Close: %v", closeErr))
+					})
+				}
+			}()
 
-		// Write query results to temporary file
-		for rows.Next() {
-			var stack string
-			var count int
-			if createErr = rows.Scan(&count, &stack); createErr != nil {
+			tmpFile, createErr := os.CreateTemp("", "flamegraph-*.txt")
+			if createErr != nil {
 				a.tviewApp.QueueUpdateDraw(func() {
-					a.mainView.SetText(fmt.Sprintf("Error scanning row: %v", createErr))
+					a.mainView.SetText(fmt.Sprintf("Error creating temporary file: %v", createErr))
 				})
 				return
 			}
-			if _, createErr = fmt.Fprintf(tmpFile, "%s %d\n", stack, count); createErr != nil {
+			tmpFileName := tmpFile.Name()
+			defer func() {
+				if removeErr := os.Remove(tmpFileName); removeErr != nil {
+					a.tviewApp.QueueUpdateDraw(func() {
+						a.mainView.SetText(fmt.Sprintf("Error removing %s: %v", tmpFileName, removeErr))
+					})
+				}
+			}()
+			defer func() {
+				if closeErr := tmpFile.Close(); closeErr != nil {
+					a.tviewApp.QueueUpdateDraw(func() {
+						a.mainView.SetText(fmt.Sprintf("Error closing %s: %v", tmpFileName, closeErr))
+					})
+				}
+			}()
+
+			// Write query results to temporary file
+			for rows.Next() {
+				var stack string
+				var count int
+				if createErr = rows.Scan(&count, &stack); createErr != nil {
+					a.tviewApp.QueueUpdateDraw(func() {
+						a.mainView.SetText(fmt.Sprintf("Error scanning row: %v", createErr))
+					})
+					return
+				}
+				if _, createErr = fmt.Fprintf(tmpFile, "%s %d\n", stack, count); createErr != nil {
+					a.tviewApp.QueueUpdateDraw(func() {
+						a.mainView.SetText(fmt.Sprintf("Error writing to temp file: %v", createErr))
+					})
+					return
+				}
+			}
+
+			// Check for errors after the loop
+			if rowsErr := rows.Err(); rowsErr != nil {
 				a.tviewApp.QueueUpdateDraw(func() {
-					a.mainView.SetText(fmt.Sprintf("Error writing to temp file: %v", createErr))
+					a.mainView.SetText(fmt.Sprintf("Error reading query results: %v", rowsErr))
 				})
 				return
 			}
-		}
 
-		// Check for errors after the loop
-		if createErr = rows.Err(); createErr != nil {
-			a.tviewApp.QueueUpdateDraw(func() {
-				a.mainView.SetText(fmt.Sprintf("Error reading query results: %v", createErr))
-			})
-			return
-		}
-
-		// Flush and close the file before reading from it
-		if createErr = tmpFile.Sync(); createErr != nil {
-			a.tviewApp.QueueUpdateDraw(func() {
-				a.mainView.SetText(fmt.Sprintf("Error syncing temp file: %v", createErr))
-			})
-			return
-		}
-
-		// Find flamelens in PATH
-		flamelensPath, createErr := exec.LookPath("flamelens")
-		if createErr != nil {
-			a.tviewApp.QueueUpdateDraw(func() {
-				a.mainView.SetText(fmt.Sprintf("Can't find flamelens: %v", createErr))
-			})
-			return
-		}
-
-		// Update UI before running flamelens
-		a.tviewApp.QueueUpdateDraw(func() {
-			a.mainView.SetText("Generating flamegraph, please wait...")
-		})
-		var runErr error
-		// Suspend tview and run flamelens
-		a.tviewApp.Suspend(func() {
-			// Create command to run flamelens
-			cmd := exec.Command(flamelensPath, tmpFile.Name())
-			cmd.Stdin = os.Stdin
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-
-			fmt.Println("\nRunning flamelens, press any key to return to the application when finished...")
-
-			// Run the command and wait for it to complete
-			if runErr = cmd.Run(); runErr != nil {
-				// Show error in tview UI
+			// Flush and close the file before reading from it
+			if syncErr := tmpFile.Sync(); syncErr != nil {
 				a.tviewApp.QueueUpdateDraw(func() {
-					a.mainView.SetText(fmt.Sprintf("Error running flamelens: %v\nPress any key to continue...", runErr))
+					a.mainView.SetText(fmt.Sprintf("Error syncing temp file: %v", syncErr))
 				})
-				// Wait for key press in tview
-				a.tviewApp.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-					// Any key press will clear the error and restore default handler
+				return
+			}
+			// Find flamelens in PATH
+			flamelensPath, pathErr := exec.LookPath("flamelens")
+			if pathErr != nil {
+				a.tviewApp.QueueUpdateDraw(func() {
+					a.mainView.SetText(fmt.Sprintf("Can't find flamelens: %v", pathErr))
+				})
+				return
+			}
+
+			// Update UI before running flamelens
+			a.tviewApp.QueueUpdateDraw(func() {
+				a.mainView.SetText("Generating flamegraph, please wait...")
+			})
+			var runErr error
+			// Suspend tview and run flamelens
+			a.tviewApp.Suspend(func() {
+				// Create command to run flamelens
+				cmd := exec.Command(flamelensPath, tmpFile.Name())
+				cmd.Stdin = os.Stdin
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+
+				fmt.Println("\nRunning flamelens, press any key to return to the application when finished...")
+
+				// Run the command and wait for it to complete
+				if runErr = cmd.Run(); runErr != nil {
+					// Show error in tview UI
+					a.tviewApp.QueueUpdateDraw(func() {
+						a.mainView.SetText(fmt.Sprintf("Error running flamelens: %v\nPress any key to continue...", runErr))
+					})
+					// Wait for key press in tview
+					a.tviewApp.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+						// Any key press will clear the error and restore default handler
+						a.mainView.SetText("Flamegraph generation completed! Press ':' to continue\n")
+						a.tviewApp.SetInputCapture(a.defaultInputHandler)
+						return a.defaultInputHandler(event)
+					})
+				}
+			})
+
+			if runErr == nil {
+				// Update UI after completion
+				a.tviewApp.QueueUpdateDraw(func() {
 					a.mainView.SetText("Flamegraph generation completed! Press ':' to continue\n")
-					a.tviewApp.SetInputCapture(a.defaultInputHandler)
-					return a.defaultInputHandler(event)
 				})
 			}
-		})
-
-		if runErr == nil {
-			// Update UI after completion
-			a.tviewApp.QueueUpdateDraw(func() {
-				a.mainView.SetText("Flamegraph generation completed! Press ':' to continue\n")
-			})
 		}
 	}()
 }
