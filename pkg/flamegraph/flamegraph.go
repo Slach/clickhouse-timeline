@@ -28,6 +28,8 @@ type Frame struct {
 	Count    int
 	Parent   *Frame
 	Children []*Frame
+	Left     *Frame  // Left sibling at same level
+	Right    *Frame  // Right sibling at same level
 }
 
 // AddStack inserts a stack of frames into the tree, accumulating the count.
@@ -163,6 +165,9 @@ func (f *FlameView) BuildFromRows(rows *sql.Rows) error {
 
 	// Update root count and compute max count
 	f.updateRootAndMaxCount()
+	
+	// Link siblings after building the tree
+	f.linkSiblings(f.root)
 	return nil
 }
 
@@ -195,6 +200,31 @@ func (f *FlameView) parseData() {
 	}
 
 	f.updateRootAndMaxCount()
+	
+	// Link siblings after building the tree
+	f.linkSiblings(f.root)
+}
+
+// linkSiblings recursively links siblings at each level
+func (f *FlameView) linkSiblings(node *Frame) {
+	if len(node.Children) == 0 {
+		return
+	}
+
+	// Link siblings at this level
+	var prev *Frame
+	for i := range node.Children {
+		if prev != nil {
+			prev.Right = node.Children[i]
+			node.Children[i].Left = prev
+		}
+		prev = node.Children[i]
+	}
+
+	// Recurse for children
+	for _, child := range node.Children {
+		f.linkSiblings(child)
+	}
 }
 
 // updateRootAndMaxCount updates the root count from children totals and computes max count
@@ -380,7 +410,6 @@ func (f *FlameView) handleInput(event *tcell.EventKey) *tcell.EventKey {
 	}
 
 	current := f.frames[f.currentIdx]
-	currentY := current.y
 
 	// Let Ctrl+C pass through to allow program termination
 	if event.Key() == tcell.KeyCtrlC {
@@ -410,19 +439,25 @@ func (f *FlameView) handleInput(event *tcell.EventKey) *tcell.EventKey {
 
 	switch event.Key() {
 	case tcell.KeyRight:
-		// Find next frame at same level
-		for i := f.currentIdx + 1; i < len(f.frames); i++ {
-			if f.frames[i].y == currentY {
-				f.currentIdx = i
-				break
+		// Use Right sibling reference for O(1) navigation
+		if current.frame.Right != nil {
+			// Find the right sibling in frames list
+			for i, frame := range f.frames {
+				if frame.frame == current.frame.Right {
+					f.currentIdx = i
+					break
+				}
 			}
 		}
 	case tcell.KeyLeft:
-		// Find previous frame at same level
-		for i := f.currentIdx - 1; i >= 0; i-- {
-			if f.frames[i].y == currentY {
-				f.currentIdx = i
-				break
+		// Use Left sibling reference for O(1) navigation
+		if current.frame.Left != nil {
+			// Find the left sibling in frames list
+			for i, frame := range f.frames {
+				if frame.frame == current.frame.Left {
+					f.currentIdx = i
+					break
+				}
 			}
 		}
 	case tcell.KeyUp:
@@ -438,10 +473,13 @@ func (f *FlameView) handleInput(event *tcell.EventKey) *tcell.EventKey {
 		}
 	case tcell.KeyDown:
 		// Find first child frame
-		for i, frame := range f.frames {
-			if frame.y > currentY && frame.x <= current.x && frame.x+frame.width > current.x {
-				f.currentIdx = i
-				break
+		if len(current.frame.Children) > 0 {
+			// Find the first child in frames list
+			for i, frame := range f.frames {
+				if frame.frame == current.frame.Children[0] {
+					f.currentIdx = i
+					break
+				}
 			}
 		}
 	case tcell.KeyEnter:
