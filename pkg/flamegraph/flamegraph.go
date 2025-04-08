@@ -1,3 +1,37 @@
+package flamegraph
+
+import (
+	"strings"
+	"time"
+
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
+)
+
+// Direction represents the direction of the flamegraph (top-down or bottom-up)
+type Direction int
+
+const (
+	DirectionTopDown Direction = iota
+	DirectionBottomUp
+)
+
+// FrameHandler is a function type for handling frame selection events
+type FrameHandler func(stack []string, count int)
+
+// PageSwitcherFunc is a function type for switching between pages
+type PageSwitcherFunc func(pageName string)
+
+// Frame represents a single frame in the flamegraph
+type Frame struct {
+	Name     string
+	Count    int
+	Children []*Frame
+	Parent   *Frame
+	Left     *Frame
+	Right    *Frame
+}
+
 // FlameView is a custom tview widget for drawing flamegraphs.
 type FlameView struct {
 	*tview.Box
@@ -233,4 +267,94 @@ func drawFrame(screen tcell.Screen, x, y, width int, frame *Frame, maxCount int,
 		currentX += childWidth
 	}
 	return currentX
+}
+
+// colorForCount returns a color based on the count and maximum count
+func colorForCount(count, maxCount int, relativeRatio float64) tcell.Color {
+	// Use a gradient from blue (cold) to red (hot)
+	// Higher counts get warmer colors
+	ratio := float64(count) / float64(maxCount)
+	
+	// Adjust ratio based on relative position within parent
+	ratio = (ratio + relativeRatio) / 2
+	
+	// RGB components
+	r := int32(255 * ratio)
+	g := int32(100 * (1 - ratio))
+	b := int32(255 * (1 - ratio))
+	
+	return tcell.NewRGBColor(r, g, b)
+}
+
+// SetData sets the flamegraph data
+func (f *FlameView) SetData(data string, root *Frame, maxDepth, maxCount int) {
+	f.data = data
+	f.root = root
+	f.maxDepth = maxDepth
+	f.maxCount = maxCount
+	f.focused = nil
+	f.frames = nil
+	f.frameMap = make(map[*Frame]*FocusedFrame)
+}
+
+// SetDirection sets the direction of the flamegraph
+func (f *FlameView) SetDirection(direction Direction) {
+	f.direction = direction
+}
+
+// SetHandler sets the handler for frame selection events
+func (f *FlameView) SetHandler(handler FrameHandler) {
+	f.handler = handler
+}
+
+// SetSourcePage sets the source page that opened this flamegraph
+func (f *FlameView) SetSourcePage(page string) {
+	f.sourcePage = page
+}
+
+// SetPageSwitcher sets the function to switch between pages
+func (f *FlameView) SetPageSwitcher(switcher PageSwitcherFunc) {
+	f.pageSwitcher = switcher
+}
+
+// handleMouse processes mouse events for the flamegraph
+func (f *FlameView) handleMouse(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
+	if len(f.frames) == 0 {
+		return action, event
+	}
+
+	// Get mouse coordinates
+	mx, my := event.Position()
+	x, y, width, height := f.GetInnerRect()
+	
+	// Check if click is within the flamegraph area
+	if mx < x || mx >= x+width || my < y || my >= y+height {
+		return action, event
+	}
+
+	// Handle mouse actions
+	switch action {
+	case tview.MouseLeftClick:
+		// Find the frame at the clicked position
+		for _, frame := range f.frames {
+			if mx >= frame.x && mx < frame.x+frame.width && my == frame.y {
+				f.focused = frame
+				f.currentIdx = frame.index
+				
+				// Check for double-click
+				now := time.Now()
+				if now.Sub(f.lastClick) < 500*time.Millisecond {
+					// Double-click detected, trigger handler
+					if f.handler != nil {
+						stack, count := f.getCurrentStack()
+						f.handler(stack, count)
+					}
+				}
+				f.lastClick = now
+				break
+			}
+		}
+	}
+	
+	return action, event
 }
