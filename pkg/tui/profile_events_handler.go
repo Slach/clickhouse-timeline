@@ -41,17 +41,17 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 		fromStr := fromTime.Format("2006-01-02 15:04:05 -07:00")
 		toStr := toTime.Format("2006-01-02 15:04:05 -07:00")
 
-		// Build category filter
+		// Build category filter if categoryValue is provided
 		var categoryFilter string
-		switch categoryType {
-		case CategoryQueryHash:
-			categoryFilter = fmt.Sprintf("AND normalized_query_hash = '%s'", categoryValue)
-		case CategoryTable:
-			categoryFilter = fmt.Sprintf("AND has(tables, ['%s'])", categoryValue)
-		case CategoryHost:
-			categoryFilter = fmt.Sprintf("AND hostName() = '%s'", categoryValue)
-		default:
-			categoryFilter = ""
+		if categoryValue != "" {
+			switch categoryType {
+			case CategoryQueryHash:
+				categoryFilter = fmt.Sprintf("AND normalized_query_hash = '%s'", categoryValue)
+			case CategoryTable:
+				categoryFilter = fmt.Sprintf("AND has(tables, ['%s'])", categoryValue)
+			case CategoryHost:
+				categoryFilter = fmt.Sprintf("AND hostName() = '%s'", categoryValue)
+			}
 		}
 
 		query := fmt.Sprintf(
