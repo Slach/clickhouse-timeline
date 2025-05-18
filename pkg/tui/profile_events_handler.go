@@ -151,6 +151,46 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 					a.pages.SwitchToPage("heatmap")
 					return nil
 				}
+				if event.Key() == tcell.KeyEnter {
+					row, _ := table.GetSelection()
+					eventName := table.GetCell(row, 0).Text
+					
+					// Query event description
+					go func() {
+						query := fmt.Sprintf("SELECT description FROM system.events WHERE name = '%s'", eventName)
+						rows, err := a.clickHouse.Query(query)
+						if err != nil {
+							a.tviewApp.QueueUpdateDraw(func() {
+								a.mainView.SetText(fmt.Sprintf("Error getting event description: %v", err))
+							})
+							return
+						}
+						defer rows.Close()
+
+						var description string
+						if rows.Next() {
+							if err := rows.Scan(&description); err != nil {
+								a.tviewApp.QueueUpdateDraw(func() {
+									a.mainView.SetText(fmt.Sprintf("Error scanning description: %v", err))
+								})
+								return
+							}
+						}
+
+						// Show description in modal
+						a.tviewApp.QueueUpdateDraw(func() {
+							modal := tview.NewModal().
+								SetText(fmt.Sprintf("[yellow]%s[-]\n\n%s", eventName, description)).
+								AddButtons([]string{"OK"}).
+								SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+									a.pages.HidePage("event_desc")
+								})
+
+							a.pages.AddPage("event_desc", modal, true, true)
+						})
+					}()
+					return nil
+				}
 				return event
 			})
 
