@@ -91,31 +91,43 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 				var (
 					event string
 					count int
-					p50   string
-					p90   string
-					p99   string
+					p50   float64
+					p90   float64
+					p99   float64
+					p50s  string
+					p90s  string
+					p99s  string
 				)
 
-				if err := rows.Scan(&event, &count, &p50, &p90, &p99); err != nil {
+				if err := rows.Scan(&event, &count, &p50, &p90, &p99, &p50s, &p90s, &p99s); err != nil {
 					a.mainView.SetText(fmt.Sprintf("Error scanning row: %v", err))
 					return
 				}
 
+				// Determine cell colors based on percentile differences
+				color := tcell.ColorWhite
+				if p90 > 2*p50 {
+					color = tcell.ColorYellow
+				}
+				if p99 > 4*p50 {
+					color = tcell.ColorRed
+				}
+
 				// Add row to table
 				table.SetCell(row, 0, tview.NewTableCell(event).
-					SetTextColor(tcell.ColorWhite).
+					SetTextColor(color).
 					SetAlign(tview.AlignLeft))
 				table.SetCell(row, 1, tview.NewTableCell(fmt.Sprintf("%d", count)).
-					SetTextColor(tcell.ColorWhite).
+					SetTextColor(color).
 					SetAlign(tview.AlignRight))
-				table.SetCell(row, 2, tview.NewTableCell(p50).
-					SetTextColor(tcell.ColorWhite).
+				table.SetCell(row, 2, tview.NewTableCell(p50s).
+					SetTextColor(color).
 					SetAlign(tview.AlignRight))
-				table.SetCell(row, 3, tview.NewTableCell(p90).
-					SetTextColor(tcell.ColorWhite).
+				table.SetCell(row, 3, tview.NewTableCell(p90s).
+					SetTextColor(color).
 					SetAlign(tview.AlignRight))
-				table.SetCell(row, 4, tview.NewTableCell(p99).
-					SetTextColor(tcell.ColorWhite).
+				table.SetCell(row, 4, tview.NewTableCell(p99s).
+					SetTextColor(color).
 					SetAlign(tview.AlignRight))
 
 				row++

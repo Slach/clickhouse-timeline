@@ -298,6 +298,14 @@ func (a *App) setupKeybindings() {
 					a.showMetricSelector()
 				case CmdScale:
 					a.showScaleSelector()
+				case CmdProfileEvents:
+					a.ShowProfileEvents(
+						a.category,
+						a.selectedCategory,
+						a.fromTime,
+						a.toTime,
+						a.cluster,
+					)
 				}
 			}
 		})

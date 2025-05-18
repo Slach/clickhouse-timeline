@@ -62,7 +62,29 @@ var availableCommands = []string{
 	CmdCluster,
 	CmdMetric,
 	CmdScale,
+	CmdProfileEvents,
 }
+```
+
+2. Add the command constant:
+
+pkg\tui\commands.go
+```python
+<<<<<<< SEARCH
+const (
+	CmdHelp       = "help"
+	CmdConnect    = "connect"
+	CmdQuit       = "quit"
+	CmdFlamegraph = "flamegraph"
+	CmdFrom       = "from"
+	CmdTo         = "to"
+	CmdRange      = "range"
+	CmdHeatmap    = "heatmap"
+	CmdCategory   = "category"
+	CmdCluster    = "cluster"
+	CmdMetric     = "metric"
+	CmdScale      = "scale"
+)
 
 // Help text
 const helpText = `ClickHouse Timeline Commands:
