@@ -3,19 +3,20 @@ module github.com/Slach/clickhouse-timeline
 go 1.24.0
 
 require (
-	github.com/ClickHouse/clickhouse-go/v2 v2.33.1
+	github.com/ClickHouse/clickhouse-go/v2 v2.34.0
+	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de
 	github.com/gdamore/tcell/v2 v2.8.1
 	github.com/pkg/errors v0.9.1
-	github.com/rivo/tview v0.0.0-20250322200051-73a5bd7d6839
+	github.com/rivo/tview v0.0.0-20250501113434-0c592cd31026
 	github.com/rs/zerolog v1.34.0
-	golang.org/x/text v0.23.0
+	github.com/spf13/cobra v1.9.1
+	golang.org/x/text v0.24.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
 	github.com/ClickHouse/ch-go v0.65.1 // indirect
 	github.com/andybalholm/brotli v1.1.1 // indirect
-	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de // indirect
 	github.com/gdamore/encoding v1.0.1 // indirect
 	github.com/go-faster/city v1.0.1 // indirect
 	github.com/go-faster/errors v0.7.1 // indirect
@@ -31,10 +32,9 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/segmentio/asm v1.2.0 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
-	github.com/spf13/cobra v1.9.1 // indirect
 	github.com/spf13/pflag v1.0.6 // indirect
 	go.opentelemetry.io/otel v1.35.0 // indirect
 	go.opentelemetry.io/otel/trace v1.35.0 // indirect
-	golang.org/x/sys v0.31.0 // indirect
-	golang.org/x/term v0.30.0 // indirect
+	golang.org/x/sys v0.32.0 // indirect
+	golang.org/x/term v0.31.0 // indirect
 )

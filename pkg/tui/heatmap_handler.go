@@ -15,10 +15,12 @@ import (
 // SQL template for heatmap queries
 const heatmapQueryTemplate = `
 WITH
+/* broken in 25.3
    toStartOfInterval(toTimeZone(event_time, '%s'), INTERVAL %s) AS query_finish,
    toStartOfInterval(toTimeZone(query_start_time, '%s'), INTERVAL %s) AS query_start,
-   intDiv(toUInt32(query_finish - query_start + 1),%d) AS intervals,
-   arrayMap(i -> (query_start + i), range(0, toUInt32(query_finish - query_start + 1),%d)) as timestamps
+*/
+   intDiv(toUInt32(toStartOfInterval(toTimeZone(event_time, '%s'), INTERVAL %s) - toStartOfInterval(toTimeZone(query_start_time, '%s'), INTERVAL %s) + 1),%d) AS intervals,
+   arrayMap(i -> (toStartOfInterval(toTimeZone(query_start_time, '%s'), INTERVAL %s) + i), range(0, toUInt32(toStartOfInterval(toTimeZone(event_time, '%s'), INTERVAL %s) - toStartOfInterval(toTimeZone(query_start_time, '%s'), INTERVAL %s) + 1),%d)) as timestamps
 SELECT
     arrayJoin(timestamps) as t,
     %s AS category,
@@ -87,9 +89,12 @@ func (a *App) ShowHeatmap() {
 	}
 	tzLocation, _ := time.LoadLocation(tzName)
 
-	query := fmt.Sprintf(
-		heatmapQueryTemplate,
-		tzName, interval, tzName, interval, intervalSeconds, intervalSeconds,
+	query := fmt.Sprintf(heatmapQueryTemplate,
+		tzName, interval, tzName, interval,
+		tzName, interval, tzName, interval,
+		intervalSeconds,
+		tzName, interval, tzName, interval, tzName, interval,
+		intervalSeconds,
 		categorySQL, metricSQL, a.cluster,
 		fromStr, toStr, fromStr, toStr,
 	)
@@ -282,8 +287,7 @@ func (a *App) ShowHeatmap() {
 				AddItem(table, 0, 1, true).
 				AddItem(legend, 10, 0, false)
 
-			// Add selection handler
-			table.SetSelectedFunc(func(row, col int) {
+			selectedHandler := func(row, col int) {
 				// Handle cell selection in the data area
 				if row > 0 && col > 0 {
 					category := categories[row-1]
@@ -318,7 +322,9 @@ func (a *App) ShowHeatmap() {
 					a.mainView.SetText(info)
 					a.selectedTimestamp = timestamp
 				}
-			})
+			}
+			// Add selection handler
+			table.SetSelectedFunc(selectedHandler)
 
 			// Add key handler for the table
 			table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -374,12 +380,15 @@ func (a *App) ShowHeatmap() {
 						SetText("Select action:\n[f] Flamegraph\n[p] Profile Events").
 						AddButtons([]string{"Flamegraph (f)", "Profile Events (p)", "Cancel"}).
 						SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-							a.pages.SwitchToPage("heatmap")
 							switch buttonLabel {
 							case "Flamegraph (f)":
+								a.pages.SwitchToPage("main")
 								a.generateFlamegraph(categoryType, categoryValue, traceType, fromTime, toTime, a.cluster, "heatmap")
 							case "Profile Events (p)":
+								a.pages.SwitchToPage("main")
 								a.ShowProfileEvents(categoryType, categoryValue, fromTime, toTime, a.cluster)
+							case "Cancel":
+								a.pages.SwitchToPage("heatmap")
 							}
 						})
 
@@ -395,9 +404,7 @@ func (a *App) ShowHeatmap() {
 				if action == tview.MouseLeftDoubleClick {
 					// Get current selection and trigger the selected function
 					row, col := table.GetSelection()
-					if table.GetSelectedFunc() != nil {
-						table.GetSelectedFunc()(row, col)
-					}
+					selectedHandler(row, col)
 					return action, event
 				}
 				return action, event

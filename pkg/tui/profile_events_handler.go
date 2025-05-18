@@ -1,12 +1,10 @@
 package tui
 
 import (
-	"database/sql"
 	"fmt"
-	"strings"
-
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"time"
 )
 
 const profileEventsQueryTemplate = `
@@ -20,7 +18,7 @@ FROM clusterAllReplicas('%s', merge(system,'^query_log'))
 ARRAY JOIN mapKeys(ProfileEvents) AS key, mapValues(ProfileEvents) AS value
 WHERE
     event_date >= toDate(parseDateTimeBestEffort('%s')) AND event_date <= toDate(parseDateTimeBestEffort('%s')) AND
-    event_time >= parseDateTimeBestEffort('%s')) AND event_time <= parseDateTimeBestEffort('%s'))
+    event_time >= parseDateTimeBestEffort('%s') AND event_time <= parseDateTimeBestEffort('%s')
     AND type != 'QueryStart'
     %s
 GROUP BY key
@@ -46,7 +44,7 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 		case CategoryQueryHash:
 			categoryFilter = fmt.Sprintf("AND normalized_query_hash = '%s'", categoryValue)
 		case CategoryTable:
-			categoryFilter = fmt.Sprintf("AND hasAll(tables, ['%s'])", categoryValue)
+			categoryFilter = fmt.Sprintf("AND has(tables, ['%s'])", categoryValue)
 		case CategoryHost:
 			categoryFilter = fmt.Sprintf("AND hostName() = '%s'", categoryValue)
 		default:
@@ -79,9 +77,9 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 			// Set headers
 			headers := []string{"Event", "Count", "p50", "p90", "p99"}
 			for col, header := range headers {
-				table.SetCell(0, col, tview.NewTableCell(header).
-					SetTextColor(tcell.ColorYellow).
-					SetAlign(tview.AlignCenter)
+				table.SetCell(0, col,
+					tview.NewTableCell(header).SetTextColor(tcell.ColorYellow).SetAlign(tview.AlignCenter),
+				)
 			}
 
 			// Process rows
