@@ -28,6 +28,34 @@ GROUP BY key
 ORDER BY key
 `
 
+func (a *App) filterProfileEventsTable(table *tview.Table, originalRows [][]string, filter string) {
+	// Clear existing rows (keep headers)
+	for r := table.GetRowCount() - 1; r > 0; r-- {
+		table.RemoveRow(r)
+	}
+
+	filter = strings.ToLower(filter)
+	for _, row := range originalRows {
+		// Check if any cell in row matches filter (case insensitive)
+		match := false
+		for _, cell := range row {
+			if strings.Contains(strings.ToLower(cell), filter) {
+				match = true
+				break
+			}
+		}
+
+		if match || filter == "" {
+			r := table.GetRowCount()
+			for c, val := range row {
+				table.SetCell(r, c, tview.NewTableCell(val).
+					SetTextColor(table.GetCell(1, c).GetTextColor()).
+					SetAlign(tview.AlignLeft)
+			}
+		}
+	}
+}
+
 func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string, fromTime, toTime time.Time, cluster string) {
 	if a.clickHouse == nil {
 		a.mainView.SetText("Error: Please connect to a ClickHouse instance first")
@@ -145,28 +173,47 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 				toTime.Format("2006-01-02 15:04:05"))
 			table.SetTitle(title).SetBorder(true)
 
-			// Prepare items for filtering
-			var eventNames []string
+			// Store original rows data for filtering
+			originalRows := make([][]string, table.GetRowCount()-1)
 			for r := 1; r < table.GetRowCount(); r++ {
-				eventNames = append(eventNames, table.GetCell(r, 0).Text)
+				originalRows[r-1] = []string{
+					table.GetCell(r, 0).Text,
+					table.GetCell(r, 1).Text,
+					table.GetCell(r, 2).Text,
+					table.GetCell(r, 3).Text,
+					table.GetCell(r, 4).Text,
+				}
 			}
 
-			// Create filterable list
-			fl := a.NewFilterableList(
-				tview.NewList().SetMainTextColor(tcell.ColorWhite),
-				title,
-				eventNames,
-				"profile_events",
-			)
-
-			// Add key handler
+			// Add key handler for filtering table content
 			table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 				if event.Key() == tcell.KeyEscape {
 					a.pages.SwitchToPage("heatmap")
 					return nil
 				}
 				if event.Rune() == '/' {
-					a.showFilterInput(fl)
+					// Show filter input for table content
+					filterInput := tview.NewInputField().
+						SetLabel("/").
+						SetFieldWidth(30).
+						SetChangedFunc(func(text string) {
+							a.filterProfileEventsTable(table, originalRows, text)
+						})
+					
+					filterInput.SetDoneFunc(func(key tcell.Key) {
+						if key == tcell.KeyEscape || key == tcell.KeyEnter {
+							a.pages.RemovePage("profile_filter")
+							a.tviewApp.SetFocus(table)
+						}
+					})
+
+					filterModal := tview.NewFlex().
+						SetDirection(tview.FlexRow).
+						AddItem(filterInput, 1, 0, true).
+						AddItem(table, 0, 1, false)
+
+					a.pages.AddPage("profile_filter", filterModal, true, true)
+					a.tviewApp.SetFocus(filterInput)
 					return nil
 				}
 				if event.Key() == tcell.KeyEnter {
