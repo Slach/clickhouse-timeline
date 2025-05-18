@@ -393,9 +393,11 @@ func (a *App) ShowHeatmap() {
 			// Add mouse handler for double click
 			table.SetMouseCapture(func(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
 				if action == tview.MouseLeftDoubleClick {
-					// Simulate Enter key press
-					// Create a proper tcell.EventKey using NewEventKey
-					return action, tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)
+					// Get current selection and trigger the selected function
+					row, col := table.GetSelection()
+					table.GetSelection()
+					table.SetSelectedFunc(row, col)
+					return action, event
 				}
 				return action, event
 			})
