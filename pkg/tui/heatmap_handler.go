@@ -396,7 +396,9 @@ func (a *App) ShowHeatmap() {
 					// Get current selection and trigger the selected function
 					row, col := table.GetSelection()
 					table.GetSelection()
-					table.SetSelectedFunc(row, col)
+					if table.GetSelectedFunc() != nil {
+						table.GetSelectedFunc()(row, col)
+					}
 					return action, event
 				}
 				return action, event
