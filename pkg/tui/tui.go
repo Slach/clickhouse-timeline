@@ -19,7 +19,6 @@ type App struct {
 	tviewApp     *tview.Application
 	pages        *tview.Pages
 	connectList  *tview.List
-	filterInput  *tview.InputField
 	mainView     *tview.TextView
 	commandInput *tview.InputField
 	clickHouse   *client.Client
@@ -201,7 +200,14 @@ func (a *App) setupUI() {
 	a.connectList.ShowSecondaryText(false)
 	a.connectList.SetHighlightFullLine(true)
 
-	a.resetConnectList()
+	// Initialize connections list with empty filterable list
+	fl := a.NewFilterableList(
+		a.connectList,
+		"Connections",
+		[]string{},
+		"contexts",
+	)
+	a.resetList(fl)
 
 	a.commandInput = tview.NewInputField().
 		SetLabel(":").
@@ -248,7 +254,18 @@ func (a *App) defaultInputHandler(event *tcell.EventKey) *tcell.EventKey {
 	// Filter mode with '/' when on the connections list
 	frontPageName, _ := a.pages.GetFrontPage()
 	if event.Rune() == '/' && a.pages.HasPage("contexts") && frontPageName == "contexts" {
-		a.showFilterInput()
+		// Create filterable list for connections
+		var items []string
+		for _, ctx := range a.cfg.Contexts {
+			items = append(items, a.getContextString(ctx))
+		}
+		fl := a.NewFilterableList(
+			a.connectList,
+			"Connections",
+			items,
+			"contexts",
+		)
+		a.showFilterInput(fl)
 		return nil
 	}
 
