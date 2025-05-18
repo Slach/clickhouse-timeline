@@ -394,11 +394,8 @@ func (a *App) ShowHeatmap() {
 			table.SetMouseCapture(func(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
 				if action == tview.MouseLeftDoubleClick {
 					// Simulate Enter key press
-					return action, &tcell.EventKey{
-						Key:  tcell.KeyEnter,
-						Mod:  0,
-						When: time.Now(),
-					}
+					// Create a proper tcell.EventKey using NewEventKey
+					return action, tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)
 				}
 				return action, event
 			})
