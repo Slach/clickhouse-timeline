@@ -2,18 +2,18 @@ package tui
 
 // Available commands
 const (
-	CmdHelp         = "help"
-	CmdConnect      = "connect"
-	CmdQuit         = "quit"
-	CmdFlamegraph   = "flamegraph"
-	CmdFrom         = "from"
-	CmdTo           = "to"
-	CmdRange        = "range"
-	CmdHeatmap      = "heatmap"
-	CmdCategory     = "category"
-	CmdCluster      = "cluster"
-	CmdMetric       = "metric"
-	CmdScale        = "scale"
+	CmdHelp          = "help"
+	CmdConnect       = "connect"
+	CmdQuit          = "quit"
+	CmdFlamegraph    = "flamegraph"
+	CmdFrom          = "from"
+	CmdTo            = "to"
+	CmdRange         = "range"
+	CmdHeatmap       = "heatmap"
+	CmdCategory      = "category"
+	CmdCluster       = "cluster"
+	CmdMetric        = "metric"
+	CmdScale         = "scale"
 	CmdProfileEvents = "profile_events"
 )
 
@@ -65,27 +65,6 @@ var availableCommands = []string{
 	CmdScale,
 	CmdProfileEvents,
 }
-```
-
-2. Add the command constant:
-
-pkg\tui\commands.go
-```python
-<<<<<<< SEARCH
-const (
-	CmdHelp       = "help"
-	CmdConnect    = "connect"
-	CmdQuit       = "quit"
-	CmdFlamegraph = "flamegraph"
-	CmdFrom       = "from"
-	CmdTo         = "to"
-	CmdRange      = "range"
-	CmdHeatmap    = "heatmap"
-	CmdCategory   = "category"
-	CmdCluster    = "cluster"
-	CmdMetric     = "metric"
-	CmdScale      = "scale"
-)
 
 // Help text
 const helpText = `ClickHouse Timeline Commands:

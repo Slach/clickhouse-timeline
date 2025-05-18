@@ -106,10 +106,10 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 
 				// Determine cell colors based on percentile differences
 				color := tcell.ColorWhite
-				if p90 > 2*p50 {
+				if p90 > 2*p50 || p99 > 2*p90 {
 					color = tcell.ColorYellow
 				}
-				if p99 > 4*p50 {
+				if p90 > 4*p50 || p99 > 6*p50 {
 					color = tcell.ColorRed
 				}
 
