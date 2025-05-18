@@ -322,12 +322,14 @@ func (a *App) ShowHeatmap() {
 
 			// Add key handler for the table
 			table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-				// When Enter is pressed, open flamegraph form with selected parameters
+				// When Enter is pressed, show action menu
 				if event.Key() == tcell.KeyEnter {
 					row, col := table.GetSelection()
 
 					// Determine category type and trace type
 					var categoryType = a.category
+					var categoryValue string
+					var fromTime, toTime time.Time
 
 					// Set trace type based on metric
 					var traceType TraceType
@@ -339,30 +341,18 @@ func (a *App) ShowHeatmap() {
 
 					if row > 0 && col > 0 {
 						// Cell in data area - specific category and time
-						category := categories[row-1]
+						categoryValue = categories[row-1]
 						timestamp := timestamps[col-1]
-
-						// Create time range around selected point
-						// Use exact interval boundaries
-						fromTime := timestamp
-						toTime := timestamp.Add(time.Duration(intervalSeconds) * time.Second)
-
-						// Directly generate flamegraph
-						a.pages.SwitchToPage("main")
-						a.generateFlamegraph(categoryType, category, traceType, fromTime, toTime, a.cluster, "heatmap")
-						return nil
+						fromTime = timestamp
+						toTime = timestamp.Add(time.Duration(intervalSeconds) * time.Second)
 					} else if row > 0 && col == 0 {
 						// Category row header - use global time range
-						category := categories[row-1]
-
-						a.pages.SwitchToPage("main")
-						a.generateFlamegraph(categoryType, category, traceType, a.fromTime, a.toTime, a.cluster, "heatmap")
-						return nil
+						categoryValue = categories[row-1]
+						fromTime = a.fromTime
+						toTime = a.toTime
 					} else if row == 0 && col > 0 {
 						// Timestamp column header - use all categories
 						timestamp := timestamps[col-1]
-
-						// Create time range around selected point
 						var timeWindow time.Duration
 						if interval == "1 MINUTE" {
 							timeWindow = 5 * time.Minute
@@ -373,16 +363,44 @@ func (a *App) ShowHeatmap() {
 						} else {
 							timeWindow = 24 * time.Hour
 						}
-
-						fromTime := timestamp.Add(-timeWindow / 2)
-						toTime := timestamp.Add(timeWindow / 2)
-
-						a.pages.SwitchToPage("main")
-						a.generateFlamegraph("", "", traceType, fromTime, toTime, a.cluster, "heatmap")
-						return nil
+						fromTime = timestamp.Add(-timeWindow / 2)
+						toTime = timestamp.Add(timeWindow / 2)
+						categoryType = ""
+						categoryValue = ""
 					}
+
+					// Create action menu
+					menu := tview.NewModal().
+						SetText("Select action:\n[f] Flamegraph\n[p] Profile Events").
+						AddButtons([]string{"Flamegraph (f)", "Profile Events (p)", "Cancel"}).
+						SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+							a.pages.SwitchToPage("heatmap")
+							switch buttonLabel {
+							case "Flamegraph (f)":
+								a.generateFlamegraph(categoryType, categoryValue, traceType, fromTime, toTime, a.cluster, "heatmap")
+							case "Profile Events (p)":
+								a.ShowProfileEvents(categoryType, categoryValue, fromTime, toTime, a.cluster)
+							}
+						})
+
+					a.pages.AddPage("action_menu", menu, true, true)
+					a.pages.SwitchToPage("action_menu")
+					return nil
 				}
 				return event
+			})
+
+			// Add mouse handler for double click
+			table.SetMouseCapture(func(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
+				if action == tview.MouseLeftDoubleClick {
+					// Simulate Enter key press
+					return action, &tcell.EventKey{
+						Key:  tcell.KeyEnter,
+						Mod:  0,
+						When: time.Now(),
+					}
+				}
+				return action, event
 			})
 
 			// Store the table and display it

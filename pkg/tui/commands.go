@@ -74,6 +74,7 @@ const helpText = `ClickHouse Timeline Commands:
 :to         - Set the end time
 :range      - Set time range with predefined options
 :heatmap    - Generate a heatmap visualization
+:profile    - Show profile events
 :category   - Set category for heatmap (query_hash, tables, hosts)
 :cluster    - Select cluster for queries
 :metric     - Select metric for heatmap visualization
@@ -82,4 +83,6 @@ const helpText = `ClickHouse Timeline Commands:
 Navigation:
 - Use arrow keys to navigate
 - Press / to filter connections list
-- Press Esc to cancel current operation`
+- Press Esc to cancel current operation
+- Press Enter in heatmap to show action menu
+- Double click in heatmap to show action menu`
