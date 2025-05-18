@@ -13,7 +13,10 @@ SELECT
     count(),
     quantile(0.5)(value) AS p50,
     quantile(0.9)(value) AS p90,
-    quantile(0.99)(value) AS p99
+    quantile(0.99)(value) AS p99,
+    formatReadableQuantity(p50) AS p50_s,
+    formatReadableQuantity(p90) AS p90_s,
+    formatReadableQuantity(p99) AS p99_s
 FROM clusterAllReplicas('%s', merge(system,'^query_log'))
 ARRAY JOIN mapKeys(ProfileEvents) AS key, mapValues(ProfileEvents) AS value
 WHERE
@@ -88,9 +91,9 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 				var (
 					event string
 					count int
-					p50   float64
-					p90   float64
-					p99   float64
+					p50   string
+					p90   string
+					p99   string
 				)
 
 				if err := rows.Scan(&event, &count, &p50, &p90, &p99); err != nil {
@@ -105,13 +108,13 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 				table.SetCell(row, 1, tview.NewTableCell(fmt.Sprintf("%d", count)).
 					SetTextColor(tcell.ColorWhite).
 					SetAlign(tview.AlignRight))
-				table.SetCell(row, 2, tview.NewTableCell(fmt.Sprintf("%.2f", p50)).
+				table.SetCell(row, 2, tview.NewTableCell(p50).
 					SetTextColor(tcell.ColorWhite).
 					SetAlign(tview.AlignRight))
-				table.SetCell(row, 3, tview.NewTableCell(fmt.Sprintf("%.2f", p90)).
+				table.SetCell(row, 3, tview.NewTableCell(p90).
 					SetTextColor(tcell.ColorWhite).
 					SetAlign(tview.AlignRight))
-				table.SetCell(row, 4, tview.NewTableCell(fmt.Sprintf("%.2f", p99)).
+				table.SetCell(row, 4, tview.NewTableCell(p99).
 					SetTextColor(tcell.ColorWhite).
 					SetAlign(tview.AlignRight))
 
