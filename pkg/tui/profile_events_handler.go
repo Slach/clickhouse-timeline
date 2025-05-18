@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"strings"
 	"time"
 )
 
@@ -49,7 +50,7 @@ func (a *App) filterProfileEventsTable(table *tview.Table, originalRows [][]stri
 			r := table.GetRowCount()
 			for c, val := range row {
 				table.SetCell(r, c, tview.NewTableCell(val).
-					SetTextColor(table.GetCell(1, c).GetTextColor()).
+					SetTextColor(table.GetCell(1, c).Color).
 					SetAlign(tview.AlignLeft))
 			}
 		}
@@ -199,7 +200,7 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 						SetChangedFunc(func(text string) {
 							a.filterProfileEventsTable(table, originalRows, text)
 						})
-					
+
 					filterInput.SetDoneFunc(func(key tcell.Key) {
 						if key == tcell.KeyEscape || key == tcell.KeyEnter {
 							a.pages.RemovePage("profile_filter")
@@ -219,7 +220,7 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 				if event.Key() == tcell.KeyEnter {
 					row, _ := table.GetSelection()
 					eventName := table.GetCell(row, 0).Text
-					
+
 					// Query event description
 					go func() {
 						query := fmt.Sprintf("SELECT description FROM system.events WHERE name = '%s'", eventName)
