@@ -50,7 +50,7 @@ func (a *App) filterProfileEventsTable(table *tview.Table, originalRows [][]stri
 			for c, val := range row {
 				table.SetCell(r, c, tview.NewTableCell(val).
 					SetTextColor(table.GetCell(1, c).GetTextColor()).
-					SetAlign(tview.AlignLeft)
+					SetAlign(tview.AlignLeft))
 			}
 		}
 	}
