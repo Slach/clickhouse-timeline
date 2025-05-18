@@ -2,18 +2,19 @@ package tui
 
 // Available commands
 const (
-	CmdHelp       = "help"
-	CmdConnect    = "connect"
-	CmdQuit       = "quit"
-	CmdFlamegraph = "flamegraph"
-	CmdFrom       = "from"
-	CmdTo         = "to"
-	CmdRange      = "range"
-	CmdHeatmap    = "heatmap"
-	CmdCategory   = "category"
-	CmdCluster    = "cluster"
-	CmdMetric     = "metric"
-	CmdScale      = "scale"
+	CmdHelp         = "help"
+	CmdConnect      = "connect"
+	CmdQuit         = "quit"
+	CmdFlamegraph   = "flamegraph"
+	CmdFrom         = "from"
+	CmdTo           = "to"
+	CmdRange        = "range"
+	CmdHeatmap      = "heatmap"
+	CmdCategory     = "category"
+	CmdCluster      = "cluster"
+	CmdMetric       = "metric"
+	CmdScale        = "scale"
+	CmdProfileEvents = "profile_events"
 )
 
 type TraceType string
@@ -88,19 +89,19 @@ const (
 
 // Help text
 const helpText = `ClickHouse Timeline Commands:
-:help       - Show this help
-:connect    - Connect to a ClickHouse instance
-:quit       - Exit the application
-:flamegraph - Generate a flamegraph
-:from       - Set the start time
-:to         - Set the end time
-:range      - Set time range with predefined options
-:heatmap    - Generate a heatmap visualization
-:profile    - Show profile events
-:category   - Set category for heatmap (query_hash, tables, hosts)
-:cluster    - Select cluster for queries
-:metric     - Select metric for heatmap visualization
-:scale      - Set scale type for heatmap (linear, log2, log10)
+:help           - Show this help
+:connect        - Connect to a ClickHouse instance
+:quit           - Exit the application
+:flamegraph     - Generate a flamegraph
+:from           - Set the start time
+:to             - Set the end time
+:range          - Set time range with predefined options
+:heatmap        - Generate a heatmap visualization
+:profile_events - Show profile events
+:category       - Set category for heatmap (query_hash, tables, hosts)
+:cluster        - Select cluster for queries
+:metric         - Select metric for heatmap visualization
+:scale          - Set scale type for heatmap (linear, log2, log10)
 
 Navigation:
 - Use arrow keys to navigate
