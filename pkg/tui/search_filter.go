@@ -51,6 +51,8 @@ func (a *App) setupFilterInput(fl *FilterableList) *tview.InputField {
 			}
 		})
 
+	filterInput := filterInput
+
 	filterInput.SetMouseCapture(func(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
 		return action, event
 	})
