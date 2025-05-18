@@ -145,10 +145,28 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 				toTime.Format("2006-01-02 15:04:05"))
 			table.SetTitle(title).SetBorder(true)
 
+			// Prepare items for filtering
+			var eventNames []string
+			for r := 1; r < table.GetRowCount(); r++ {
+				eventNames = append(eventNames, table.GetCell(r, 0).Text)
+			}
+
+			// Create filterable list
+			fl := a.NewFilterableList(
+				tview.NewList().SetMainTextColor(tcell.ColorWhite),
+				title,
+				eventNames,
+				"profile_events",
+			)
+
 			// Add key handler
 			table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 				if event.Key() == tcell.KeyEscape {
 					a.pages.SwitchToPage("heatmap")
+					return nil
+				}
+				if event.Rune() == '/' {
+					a.showFilterInput(fl)
 					return nil
 				}
 				if event.Key() == tcell.KeyEnter {

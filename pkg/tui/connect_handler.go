@@ -9,6 +9,35 @@ import (
 )
 
 func (a *App) handleConnectCommand() {
+	// Prepare items for filtering
+	var items []string
+	for _, ctx := range a.cfg.Contexts {
+		items = append(items, a.getContextString(ctx))
+	}
+
+	// Create filterable list
+	fl := a.NewFilterableList(
+		a.connectList,
+		"Connections",
+		items,
+		"contexts",
+	)
+
+	// Set up list with all items
+	a.resetList(fl)
+	a.connectList.SetSelectedFunc(func(i int, _ string, _ string, _ rune) {
+		a.handleContextSelection(i)
+	})
+
+	// Add key handler for filtering
+	a.connectList.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Rune() == '/' {
+			a.showFilterInput(fl)
+			return nil
+		}
+		return event
+	})
+
 	a.pages.SwitchToPage("contexts")
 	a.tviewApp.SetFocus(a.connectList)
 }

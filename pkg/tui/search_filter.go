@@ -8,87 +8,90 @@ import (
 	"github.com/rivo/tview"
 )
 
-// setupFilterInput creates and configures the filter input field
-func (a *App) setupFilterInput() *tview.InputField {
+type FilterableList struct {
+	List      *tview.List
+	Title     string
+	Items     []string
+	FilterKey string
+}
+
+func (a *App) NewFilterableList(list *tview.List, title string, items []string, filterKey string) *FilterableList {
+	return &FilterableList{
+		List:      list,
+		Title:     title,
+		Items:     items,
+		FilterKey: filterKey,
+	}
+}
+
+func (a *App) setupFilterInput(fl *FilterableList) *tview.InputField {
 	filterInput := tview.NewInputField().
 		SetLabel("/").
 		SetFieldWidth(30).
 		SetChangedFunc(func(filterText string) {
-			a.filterConnectList(filterText)
+			a.filterList(fl, filterText)
 		}).
 		SetDoneFunc(func(key tcell.Key) {
 			if key == tcell.KeyEscape {
-				// Reset filter and return focus to the list
-				a.resetConnectList()
-				// Remove the filter input and recreate the contexts page with just the list
-				a.pages.RemovePage("contexts")
-				a.pages.AddPage("contexts", a.connectList, true, true)
-				a.tviewApp.SetFocus(a.connectList)
+				a.resetList(fl)
+				a.pages.RemovePage(fl.FilterKey)
+				a.pages.AddPage(fl.FilterKey, fl.List, true, true)
+				a.tviewApp.SetFocus(fl.List)
 			} else if key == tcell.KeyEnter {
-				// Keep the filter, hide the input field and focus on the list
-				filterText := a.filterInput.GetText()
+				filterText := filterInput.GetText()
 				if filterText != "" {
-					a.connectList.SetTitle(fmt.Sprintf("Connections [::b::cyan]/%s[-:-:-]", filterText))
+					fl.List.SetTitle(fmt.Sprintf("%s [::b::cyan]/%s[-:-:-]", fl.Title, filterText))
 				} else {
-					a.connectList.SetTitle("Connections")
+					fl.List.SetTitle(fl.Title)
 				}
-				a.filterConnectList(filterText)
-
-				// Remove the filter input and recreate the contexts page with just the list
-				a.pages.RemovePage("contexts")
-				a.pages.AddPage("contexts", a.connectList, true, true)
-				a.tviewApp.SetFocus(a.connectList)
+				a.filterList(fl, filterText)
+				a.pages.RemovePage(fl.FilterKey)
+				a.pages.AddPage(fl.FilterKey, fl.List, true, true)
+				a.tviewApp.SetFocus(fl.List)
 			}
 		})
 
 	filterInput.SetMouseCapture(func(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
-		return action, event // Pass through mouse events
+		return action, event
 	})
 
 	return filterInput
 }
 
-// showFilterInput displays the filter input field above the connection list
-func (a *App) showFilterInput() {
-	a.filterInput = a.setupFilterInput()
+func (a *App) showFilterInput(fl *FilterableList) {
+	filterInput := a.setupFilterInput(fl)
 
-	// Add the filter input to the contexts page
 	flex := tview.NewFlex().
 		SetDirection(tview.FlexRow).
-		AddItem(a.filterInput, 1, 0, true).
-		AddItem(a.connectList, 0, 1, false)
+		AddItem(filterInput, 1, 0, true).
+		AddItem(fl.List, 0, 1, false)
 
-	a.pages.RemovePage("contexts")
-	a.pages.AddPage("contexts", flex, true, true)
-	a.tviewApp.SetFocus(a.filterInput)
+	a.pages.RemovePage(fl.FilterKey)
+	a.pages.AddPage(fl.FilterKey, flex, true, true)
+	a.tviewApp.SetFocus(filterInput)
 }
 
-// filterConnectList filters the connection list based on the provided text
-func (a *App) filterConnectList(filter string) {
-	a.connectList.Clear()
+func (a *App) filterList(fl *FilterableList, filter string) {
+	fl.List.Clear()
 
 	if filter == "" {
-		a.resetConnectList()
+		a.resetList(fl)
 		return
 	}
 
-	// Set title with filter value highlighted in cyan
-	a.connectList.SetTitle(fmt.Sprintf("Connections [::b::cyan]/%s[-:-:-]", filter))
-
+	fl.List.SetTitle(fmt.Sprintf("%s [::b::cyan]/%s[-:-:-]", fl.Title, filter))
 	filter = strings.ToLower(filter)
-	for _, ctx := range a.cfg.Contexts {
-		itemText := a.getContextString(ctx)
-		if strings.Contains(strings.ToLower(itemText), filter) {
-			a.connectList.AddItem(itemText, "", 0, nil).ShowSecondaryText(false)
+	for _, item := range fl.Items {
+		if strings.Contains(strings.ToLower(item), filter) {
+			fl.List.AddItem(item, "", 0, nil).ShowSecondaryText(false)
 		}
 	}
 }
 
-// resetConnectList resets the connection list to show all connections
-func (a *App) resetConnectList() {
-	a.connectList.Clear()
-	a.connectList.SetTitle("Connections")
-	for _, ctx := range a.cfg.Contexts {
-		a.connectList.AddItem(a.getContextString(ctx), "", 0, nil).ShowSecondaryText(false)
+func (a *App) resetList(fl *FilterableList) {
+	fl.List.Clear()
+	fl.List.SetTitle(fl.Title)
+	for _, item := range fl.Items {
+		fl.List.AddItem(item, "", 0, nil).ShowSecondaryText(false)
 	}
 }
