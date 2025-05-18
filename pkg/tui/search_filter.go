@@ -30,28 +30,26 @@ func (a *App) setupFilterInput(fl *FilterableList) *tview.InputField {
 		SetFieldWidth(30).
 		SetChangedFunc(func(filterText string) {
 			a.filterList(fl, filterText)
-		}).
-		SetDoneFunc(func(key tcell.Key) {
-			if key == tcell.KeyEscape {
-				a.resetList(fl)
-				a.pages.RemovePage(fl.FilterKey)
-				a.pages.AddPage(fl.FilterKey, fl.List, true, true)
-				a.tviewApp.SetFocus(fl.List)
-			} else if key == tcell.KeyEnter {
-				filterText := filterInput.GetText()
-				if filterText != "" {
-					fl.List.SetTitle(fmt.Sprintf("%s [::b::cyan]/%s[-:-:-]", fl.Title, filterText))
-				} else {
-					fl.List.SetTitle(fl.Title)
-				}
-				a.filterList(fl, filterText)
-				a.pages.RemovePage(fl.FilterKey)
-				a.pages.AddPage(fl.FilterKey, fl.List, true, true)
-				a.tviewApp.SetFocus(fl.List)
-			}
 		})
-
-	filterInput := filterInput
+	filterInput.SetDoneFunc(func(key tcell.Key) {
+		if key == tcell.KeyEscape {
+			a.resetList(fl)
+			a.pages.RemovePage(fl.FilterKey)
+			a.pages.AddPage(fl.FilterKey, fl.List, true, true)
+			a.tviewApp.SetFocus(fl.List)
+		} else if key == tcell.KeyEnter {
+			filterText := filterInput.GetText()
+			if filterText != "" {
+				fl.List.SetTitle(fmt.Sprintf("%s [::b::cyan]/%s[-:-:-]", fl.Title, filterText))
+			} else {
+				fl.List.SetTitle(fl.Title)
+			}
+			a.filterList(fl, filterText)
+			a.pages.RemovePage(fl.FilterKey)
+			a.pages.AddPage(fl.FilterKey, fl.List, true, true)
+			a.tviewApp.SetFocus(fl.List)
+		}
+	})
 
 	filterInput.SetMouseCapture(func(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
 		return action, event
