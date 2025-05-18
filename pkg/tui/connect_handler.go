@@ -5,6 +5,7 @@ import (
 
 	"github.com/Slach/clickhouse-timeline/pkg/client"
 	"github.com/Slach/clickhouse-timeline/pkg/config"
+	"github.com/gdamore/tcell/v2"
 	"github.com/rs/zerolog/log"
 )
 
