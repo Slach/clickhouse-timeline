@@ -395,9 +395,9 @@ func (a *App) ShowHeatmap() {
 				if action == tview.MouseLeftDoubleClick {
 					// Get current selection and trigger the selected function
 					row, col := table.GetSelection()
-					table.GetSelection()
-					if table.GetSelectedFunc() != nil {
-						table.GetSelectedFunc()(row, col)
+					selectedFunc := table.GetSelectionChangedFunc()
+					if selectedFunc != nil {
+						selectedFunc(row, col)
 					}
 					return action, event
 				}
