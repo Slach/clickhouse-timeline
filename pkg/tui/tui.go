@@ -140,6 +140,10 @@ func (a *App) GetContextList() string {
 }
 
 func (a *App) SetConnectByName(contextName string) bool {
+	if len(a.cfg.Contexts) == 0 {
+		return false
+	}
+
 	found := false
 	for i, ctx := range a.cfg.Contexts {
 		if ctx.Name == contextName {

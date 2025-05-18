@@ -48,6 +48,14 @@ func (a *App) getContextString(ctx config.Context) string {
 }
 
 func (a *App) handleContextSelection(i int) {
+	// Check if list is empty
+	if a.connectList.GetItemCount() == 0 {
+		a.mainView.SetText("Error: No contexts available")
+		a.pages.SwitchToPage("main")
+		a.tviewApp.SetFocus(a.mainView)
+		return
+	}
+
 	// Get the selected item text
 	selectedText, _ := a.connectList.GetItemText(i)
 
