@@ -29,7 +29,7 @@ GROUP BY key
 ORDER BY key
 `
 
-func (a *App) filterProfileEventsTable(table *tview.Table, originalRows [][]string, filter string) {
+func (a *App) filterProfileEventsTable(table *tview.Table, originalRows [][]*tview.TableCell, filter string) {
 	// Clear existing rows (keep headers)
 	for r := table.GetRowCount() - 1; r > 0; r-- {
 		table.RemoveRow(r)
@@ -40,7 +40,7 @@ func (a *App) filterProfileEventsTable(table *tview.Table, originalRows [][]stri
 		// Check if any cell in row matches filter (case insensitive)
 		match := false
 		for _, cell := range row {
-			if strings.Contains(strings.ToLower(cell), filter) {
+			if strings.Contains(strings.ToLower(cell.Text), filter) {
 				match = true
 				break
 			}
@@ -48,10 +48,12 @@ func (a *App) filterProfileEventsTable(table *tview.Table, originalRows [][]stri
 
 		if match || filter == "" {
 			r := table.GetRowCount()
-			for c, val := range row {
-				table.SetCell(r, c, tview.NewTableCell(val).
-					SetTextColor(table.GetCell(1, c).Color).
-					SetAlign(tview.AlignLeft))
+			for c, cell := range row {
+				// Clone the original cell to preserve all attributes
+				newCell := tview.NewTableCell(cell.Text).
+					SetTextColor(cell.Color).
+					SetAlign(cell.Align)
+				table.SetCell(r, c, newCell)
 			}
 		}
 	}
@@ -174,15 +176,15 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 				toTime.Format("2006-01-02 15:04:05"))
 			table.SetTitle(title).SetBorder(true)
 
-			// Store original rows data for filtering
-			originalRows := make([][]string, table.GetRowCount()-1)
+			// Store original cells data for filtering (preserving colors and formatting)
+			originalRows := make([][]*tview.TableCell, table.GetRowCount()-1)
 			for r := 1; r < table.GetRowCount(); r++ {
-				originalRows[r-1] = []string{
-					table.GetCell(r, 0).Text,
-					table.GetCell(r, 1).Text,
-					table.GetCell(r, 2).Text,
-					table.GetCell(r, 3).Text,
-					table.GetCell(r, 4).Text,
+				originalRows[r-1] = []*tview.TableCell{
+					table.GetCell(r, 0),
+					table.GetCell(r, 1),
+					table.GetCell(r, 2),
+					table.GetCell(r, 3),
+					table.GetCell(r, 4),
 				}
 			}
 
