@@ -9,18 +9,18 @@ import (
 )
 
 type FilterableList struct {
-	List      *tview.List
-	Title     string
-	Items     []string
-	FilterKey string
+	List       *tview.List
+	Title      string
+	Items      []string
+	FilterPage string
 }
 
-func (a *App) NewFilterableList(list *tview.List, title string, items []string, filterKey string) *FilterableList {
+func (a *App) NewFilterableList(list *tview.List, title string, items []string, filterPage string) *FilterableList {
 	return &FilterableList{
-		List:      list,
-		Title:     title,
-		Items:     items,
-		FilterKey: filterKey,
+		List:       list,
+		Title:      title,
+		Items:      items,
+		FilterPage: filterPage,
 	}
 }
 
@@ -34,8 +34,8 @@ func (a *App) setupFilterInput(fl *FilterableList) *tview.InputField {
 	filterInput.SetDoneFunc(func(key tcell.Key) {
 		if key == tcell.KeyEscape {
 			a.resetList(fl)
-			a.pages.RemovePage(fl.FilterKey)
-			a.pages.AddPage(fl.FilterKey, fl.List, true, true)
+			a.pages.RemovePage(fl.FilterPage)
+			a.pages.AddPage(fl.FilterPage, fl.List, true, true)
 			a.tviewApp.SetFocus(fl.List)
 		} else if key == tcell.KeyEnter {
 			filterText := filterInput.GetText()
@@ -45,8 +45,8 @@ func (a *App) setupFilterInput(fl *FilterableList) *tview.InputField {
 				fl.List.SetTitle(fl.Title)
 			}
 			a.filterList(fl, filterText)
-			a.pages.RemovePage(fl.FilterKey)
-			a.pages.AddPage(fl.FilterKey, fl.List, true, true)
+			a.pages.RemovePage(fl.FilterPage)
+			a.pages.AddPage(fl.FilterPage, fl.List, true, true)
 			a.tviewApp.SetFocus(fl.List)
 		}
 	})
@@ -66,8 +66,8 @@ func (a *App) showFilterInput(fl *FilterableList) {
 		AddItem(filterInput, 1, 0, true).
 		AddItem(fl.List, 0, 1, false)
 
-	a.pages.RemovePage(fl.FilterKey)
-	a.pages.AddPage(fl.FilterKey, flex, true, true)
+	a.pages.RemovePage(fl.FilterPage)
+	a.pages.AddPage(fl.FilterPage, flex, true, true)
 	a.tviewApp.SetFocus(filterInput)
 }
 

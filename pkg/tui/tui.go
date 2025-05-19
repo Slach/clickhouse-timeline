@@ -204,11 +204,17 @@ func (a *App) setupUI() {
 	a.connectList.ShowSecondaryText(false)
 	a.connectList.SetHighlightFullLine(true)
 
-	// Initialize connections list with empty filterable list
+	// Initialize connections list
+	// Prepare items for filtering
+	var items []string
+	for _, ctx := range a.cfg.Contexts {
+		items = append(items, a.getContextString(ctx))
+	}
+
 	fl := a.NewFilterableList(
 		a.connectList,
 		"Connections",
-		[]string{},
+		items,
 		"contexts",
 	)
 	a.resetList(fl)
