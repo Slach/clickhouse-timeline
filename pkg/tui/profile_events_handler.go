@@ -51,7 +51,8 @@ func (a *App) filterProfileEventsTable(table *tview.Table, originalRows [][]*tvi
 			for c, cell := range row {
 				// Clone the original cell to preserve all attributes
 				newCell := tview.NewTableCell(cell.Text).
-					SetTextColor(cell.Color).
+					SetStyle(cell.Style).
+					SetSelectedStyle(cell.SelectedStyle).
 					SetAlign(cell.Align)
 				table.SetCell(r, c, newCell)
 			}
