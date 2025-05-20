@@ -2,11 +2,11 @@ package tui
 
 import (
 	"fmt"
+	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"strings"
 	"time"
-	"your-module-path/pkg/tui/widgets" // Update with your actual module path
 )
 
 const profileEventsQueryTemplate = `
