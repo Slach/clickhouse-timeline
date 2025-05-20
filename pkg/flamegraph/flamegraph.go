@@ -515,7 +515,8 @@ func (f *FlameView) handleMouse(action tview.MouseAction, event *tcell.EventMous
 				f.focused = frame
 				if isDoubleClick && f.handler != nil {
 					stack, count := f.getCurrentStack()
-					f.handler(stack, count)
+					selectedLevel := len(stack) - 1
+					f.handler(stack, count, selectedLevel)
 				}
 				return action, nil
 			}
