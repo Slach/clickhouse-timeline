@@ -273,12 +273,14 @@ func (f *FlameView) Draw(screen tcell.Screen) {
 		}
 		
 		// Show "No data" message centered
-		msg := "No data available for selected parameters"
+		msg := "No data available for selected parameters (Press ESC to return)"
 		msgX := x + (width-len(msg))/2
 		msgY := y + height/2
 		for i, ch := range msg {
 			screen.SetContent(msgX+i, msgY, ch, nil, tcell.StyleDefault.Foreground(tcell.ColorWhite).Background(tcell.ColorBlack))
 		}
+		
+		// Still allow input handling for ESC key
 		return
 	}
 
@@ -392,6 +394,21 @@ func drawFrame(screen tcell.Screen, x, y, width int, frame *Frame, maxCount int,
 // handleInput processes keyboard input for navigation
 func (f *FlameView) handleInput(event *tcell.EventKey) *tcell.EventKey {
 	if len(f.frames) == 0 {
+		// Still handle ESC key even with no frames
+		if event.Key() == tcell.KeyEscape {
+			if f.pageSwitcher != nil {
+				if strings.HasSuffix(f.sourcePage, "stacktrace") {
+					f.pageSwitcher("flamegraph")
+				} else if f.sourcePage != "" {
+					if f.sourcePage == "heatmap" {
+						f.pageSwitcher("heatmap")
+					} else {
+						f.pageSwitcher("flamegraph_form")
+					}
+				}
+				return nil
+			}
+		}
 		return event
 	}
 
