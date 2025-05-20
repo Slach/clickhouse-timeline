@@ -292,15 +292,15 @@ func (a *App) ShowHeatmap() {
 				SetDynamicColors(true).
 				SetRegions(true).
 				SetScrollable(false).
-				SetTextColor(tcell.ColorWhite).
-				SetBackgroundColor(tcell.ColorDarkSlateGray)
+				SetTextColor(tcell.ColorWhite)
+			horizontalScroll.SetBackgroundColor(tcell.ColorDarkSlateGray)
 
 			verticalScroll := tview.NewTextView().
 				SetDynamicColors(true).
 				SetRegions(true).
 				SetScrollable(false).
-				SetTextColor(tcell.ColorWhite).
-				SetBackgroundColor(tcell.ColorDarkSlateGray)
+				SetTextColor(tcell.ColorWhite)
+			horizontalScroll.SetBackgroundColor(tcell.ColorDarkSlateGray)
 
 			// Create scrollable wrapper with vertical scroll
 			scrollWrapper := tview.NewFlex().
@@ -314,9 +314,6 @@ func (a *App) ShowHeatmap() {
 				AddItem(scrollWrapper, 0, 1, true).
 				AddItem(horizontalScroll, 1, 0, false) // Fixed height
 
-			// Initial scrollbar update
-			table.SetSelectionChangedFunc(table.GetSelectionChangedFunc())
-
 			// Update scroll bars when table selection changes
 			table.SetSelectionChangedFunc(func(row, column int) {
 				rowsCount := table.GetRowCount()
@@ -324,7 +321,7 @@ func (a *App) ShowHeatmap() {
 
 				// Get available dimensions
 				_, _, width, height := mainFlex.GetRect()
-				scrollWidth := width - 10 // Account for legend width
+				scrollWidth := width - 10  // Account for legend width
 				scrollHeight := height - 1 // Account for horizontal scroll height
 
 				// Update horizontal scroll
