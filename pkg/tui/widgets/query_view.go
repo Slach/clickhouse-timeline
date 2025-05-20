@@ -25,26 +25,23 @@ func NewQueryView() *QueryView {
 }
 
 func (qv *QueryView) formatSQL(sql string) string {
-	// Convert to lowercase for case-insensitive matching
-	lowerSQL := strings.ToLower(sql)
-	
 	// Create a replacer with all our patterns
 	replacer := strings.NewReplacer(
-		"insert into ", "\nSELECT\n",
-		"select ", "\nSELECT\n",
-		"from ", "\nFROM\n", 
+		"insert into ", "INSERT INTO\n",
+		"select ", "SELECT\n",
+		"from ", "\nFROM\n",
 		"where ", "\nWHERE\n",
 		"group by ", "\nGROUP BY\n",
 		"order by ", "\nORDER BY\n",
 		"limit ", "\nLIMIT\n",
 		"having ", "\nHAVING\n",
-		"join ", "\nJOIN\n",
-		"union ", "\nUNION\n",
+		"join ", "JOIN\n",
+		"union ", "\nUNION ",
 	)
-	
+
 	// Apply the replacements to the lowercase version
-	formatted := replacer.Replace(lowerSQL)
-	
+	formatted := replacer.Replace(sql)
+
 	// Return the formatted SQL with original case preserved for keywords
 	return formatted
 }
