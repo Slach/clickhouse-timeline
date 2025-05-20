@@ -45,13 +45,44 @@ func (qv *QueryView) SetSQL(sql string) {
 func ansiToTcell(text string) string {
 	// Map of ANSI color codes to tview color names
 	colorMap := map[string]string{
-		"\x1b[38;5;249m": "[gray]",   // Comments
-		"\x1b[38;5;204m": "[red]",    // Strings
-		"\x1b[38;5;81m":  "[blue]",   // Keywords
-		"\x1b[38;5;118m": "[green]",  // Functions
-		"\x1b[38;5;208m": "[orange]", // Numbers
-		"\x1b[38;5;231m": "[white]",  // Operators
-		"\x1b[0m":        "[-]",      // Reset
+		// Basic colors
+		"\x1b[38;5;15m":  "[white]",    // Bright white
+		"\x1b[38;5;231m": "[white]",    // White
+		"\x1b[38;5;249m": "[gray]",     // Gray (comments)
+		"\x1b[38;5;244m": "[darkgray]", // Dark gray
+		
+		// Reds/Pinks
+		"\x1b[38;5;197m": "[pink]",     // Bright pink
+		"\x1b[38;5;204m": "[red]",      // Soft red (strings)
+		"\x1b[38;5;160m": "[darkred]",  // Dark red
+		"\x1b[38;5;196m": "[red]",      // Bright red
+		
+		// Blues
+		"\x1b[38;5;81m":  "[blue]",     // Light blue (keywords)
+		"\x1b[38;5;39m":  "[blue]",     // Bright blue
+		"\x1b[38;5;27m":  "[darkblue]", // Dark blue
+		
+		// Greens
+		"\x1b[38;5;118m": "[green]",    // Bright green (functions)
+		"\x1b[38;5;46m":  "[green]",    // Neon green
+		"\x1b[38;5;34m":  "[darkgreen]",// Dark green
+		
+		// Yellows/Oranges
+		"\x1b[38;5;208m": "[orange]",   // Orange (numbers)
+		"\x1b[38;5;226m": "[yellow]",   // Bright yellow
+		"\x1b[38;5;220m": "[yellow]",   // Gold
+		
+		// Purples
+		"\x1b[38;5;129m": "[purple]",   // Purple
+		"\x1b[38;5;93m":  "[purple]",   // Dark purple
+		
+		// Special
+		"\x1b[38;5;45m":  "[cyan]",     // Cyan
+		"\x1b[38;5;51m":  "[cyan]",     // Bright cyan
+		"\x1b[38;5;201m": "[magenta]",  // Magenta
+		
+		// Reset
+		"\x1b[0m":        "[-]",        // Reset
 	}
 
 	// Replace ANSI codes with tview tags
