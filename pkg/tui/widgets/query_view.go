@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/alecthomas/chroma/quick"
-	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
 
