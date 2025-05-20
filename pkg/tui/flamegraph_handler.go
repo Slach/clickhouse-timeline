@@ -153,11 +153,11 @@ func (a *App) showNativeFlamegraph(rows *sql.Rows, sourcePage string) {
 	// Handle case when no rows were returned
 	if flameView.GetTotalCount() == 0 {
 		flameView.SetDirection(flamegraph.DirectionTopDown)
-		flameView.SetFrameHandler(func(stack []string, count int) {}) // No-op handler
+		flameView.SetFrameHandler(func(stack []string, count int, selectedLevel int) {}) // No-op handler
 	}
 
 	flameView.SetDirection(flamegraph.DirectionTopDown)
-	flameView.SetFrameHandler(func(stack []string, count int) {
+	flameView.SetFrameHandler(func(stack []string, count int, selectedLevel int) {
 		// Calculate percentage of total
 		total := flameView.GetTotalCount()
 		percentage := 0.0
@@ -166,8 +166,21 @@ func (a *App) showNativeFlamegraph(rows *sql.Rows, sourcePage string) {
 		}
 
 		// Create content for the stack trace view
-		stackTraceText := fmt.Sprintf("Selected stacktrace count: %d (%.2f%% of total)\n\nFull Stack Trace:\n%s\n\n[yellow]Use arrow keys to scroll, ESC or Close button to return[-]",
-			count, percentage*100.0, flamegraph.FormatStackWithNumbers(stack))
+		// Format stack with highlighted selected line
+		var stackBuilder strings.Builder
+		stackBuilder.WriteString(fmt.Sprintf("Selected stacktrace count: %d (%.2f%% of total)\n\nFull Stack Trace:\n", 
+			count, percentage*100.0))
+		
+		for i, frame := range stack {
+			if i == selectedLevel {
+				stackBuilder.WriteString(fmt.Sprintf("[yellow]%d. %s[-]\n", i+1, frame))
+			} else {
+				stackBuilder.WriteString(fmt.Sprintf("%d. %s\n", i+1, frame))
+			}
+		}
+		
+		stackBuilder.WriteString("\n[yellow]Use arrow keys to scroll, ESC or Close button to return[-]")
+		stackTraceText := stackBuilder.String()
 
 		// Create a proper TextView for the stack trace
 		stackTraceView := tview.NewTextView()

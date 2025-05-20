@@ -73,8 +73,9 @@ type FocusedFrame struct {
 }
 
 // FrameHandler is a function that handles frame selection events.
-// It receives the full stack trace from root to the selected frame and the count.
-type FrameHandler func(stack []string, count int)
+// It receives the full stack trace from root to the selected frame, the count,
+// and the level/position of the selected frame in the stack (0-based index).
+type FrameHandler func(stack []string, count int, selectedLevel int)
 
 // PageSwitcherFunc is a function that switches to a specified page
 type PageSwitcherFunc func(targetPage string)
@@ -480,7 +481,9 @@ func (f *FlameView) handleInput(event *tcell.EventKey) *tcell.EventKey {
 	case tcell.KeyEnter:
 		if f.handler != nil {
 			stack, count := f.getCurrentStack()
-			f.handler(stack, count)
+			// Calculate selected level (0 = root, len(stack)-1 = leaf)
+			selectedLevel := len(stack) - 1
+			f.handler(stack, count, selectedLevel)
 		}
 		return nil
 	default:
