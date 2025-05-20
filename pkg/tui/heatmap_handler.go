@@ -287,21 +287,18 @@ func (a *App) ShowHeatmap() {
 				SetDirection(tview.FlexRow).
 				AddItem(table, 0, 1, true)
 
-			// Add horizontal scroll bar (full width)
+			// Create scroll bars with dynamic sizing
 			horizontalScroll := tview.NewTextView().
 				SetDynamicColors(true).
 				SetRegions(true).
-				SetScrollable(false)
-			horizontalScroll.SetText("[red]◄[white]" + strings.Repeat("─", 100) + "[red]►").
+				SetScrollable(false).
 				SetTextColor(tcell.ColorWhite).
 				SetBackgroundColor(tcell.ColorDarkSlateGray)
 
-			// Add vertical scroll bar (full height)
 			verticalScroll := tview.NewTextView().
 				SetDynamicColors(true).
 				SetRegions(true).
-				SetScrollable(false)
-			verticalScroll.SetText("[red]▲[white]\n" + strings.Repeat("│\n", 100) + "[red]▼").
+				SetScrollable(false).
 				SetTextColor(tcell.ColorWhite).
 				SetBackgroundColor(tcell.ColorDarkSlateGray)
 
@@ -317,24 +314,32 @@ func (a *App) ShowHeatmap() {
 				AddItem(scrollWrapper, 0, 1, true).
 				AddItem(horizontalScroll, 1, 0, false) // Fixed height
 
+			// Initial scrollbar update
+			table.SetSelectionChangedFunc(table.GetSelectionChangedFunc())
+
 			// Update scroll bars when table selection changes
 			table.SetSelectionChangedFunc(func(row, column int) {
 				rowsCount := table.GetRowCount()
 				colsCount := table.GetColumnCount()
 
+				// Get available dimensions
+				_, _, width, height := mainFlex.GetRect()
+				scrollWidth := width - 10 // Account for legend width
+				scrollHeight := height - 1 // Account for horizontal scroll height
+
 				// Update horizontal scroll
-				if colsCount > 0 {
-					pos := int(float64(column) / float64(colsCount-1) * 100)
-					scrollText := "[red]◄[white]" + strings.Repeat("─", pos) + "[red]●[white]" + strings.Repeat("─", 100-pos) + "[red]►"
+				if colsCount > 0 && scrollWidth > 0 {
+					pos := int(float64(column) / float64(colsCount-1) * float64(scrollWidth))
+					scrollText := "[red]◄[white]" + strings.Repeat("─", pos) + "[red]●[white]" + strings.Repeat("─", scrollWidth-pos) + "[red]►"
 					horizontalScroll.SetText(scrollText)
 				}
 
 				// Update vertical scroll
-				if rowsCount > 0 {
-					pos := int(float64(row) / float64(rowsCount-1) * 100)
+				if rowsCount > 0 && scrollHeight > 0 {
+					pos := int(float64(row) / float64(rowsCount-1) * float64(scrollHeight))
 					scrollText := "[red]▲[white]\n"
-					for i := 0; i < 100; i++ {
-						if i == pos { // Direct mapping to position
+					for i := 0; i < scrollHeight; i++ {
+						if i == pos {
 							scrollText += "[red::b]●[-:-:-]\n"
 						} else {
 							scrollText += "[white]│[-]\n"
