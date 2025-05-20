@@ -2,6 +2,7 @@ package widgets
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/alecthomas/chroma/quick"
@@ -25,24 +26,29 @@ func NewQueryView() *QueryView {
 }
 
 func (qv *QueryView) formatSQL(sql string) string {
-	// Create a replacer with all our patterns
-	replacer := strings.NewReplacer(
-		"insert into ", "INSERT INTO\n",
-		"select ", "SELECT\n",
-		"from ", "\nFROM\n",
-		"where ", "\nWHERE\n",
-		"group by ", "\nGROUP BY\n",
-		"order by ", "\nORDER BY\n",
-		"limit ", "\nLIMIT\n",
-		"having ", "\nHAVING\n",
-		"join ", "JOIN\n",
-		"union ", "\nUNION ",
-	)
+	// Define our patterns with case-insensitive regex
+	patterns := []struct {
+		regex *regexp.Regexp
+		repl  string
+	}{
+		{regexp.MustCompile(`(?i)\binsert into\b`), "INSERT INTO\n"},
+		{regexp.MustCompile(`(?i)\bselect\b`), "SELECT\n"},
+		{regexp.MustCompile(`(?i)\bfrom\b`), "\nFROM\n"},
+		{regexp.MustCompile(`(?i)\bwhere\b`), "\nWHERE\n"},
+		{regexp.MustCompile(`(?i)\bgroup by\b`), "\nGROUP BY\n"},
+		{regexp.MustCompile(`(?i)\border by\b`), "\nORDER BY\n"},
+		{regexp.MustCompile(`(?i)\blimit\b`), "\nLIMIT\n"},
+		{regexp.MustCompile(`(?i)\bhaving\b`), "\nHAVING\n"},
+		{regexp.MustCompile(`(?i)\bjoin\b`), "JOIN\n"},
+		{regexp.MustCompile(`(?i)\bunion\b`), "\nUNION "},
+	}
 
-	// Apply the replacements to the lowercase version
-	formatted := replacer.Replace(sql)
+	// Apply each replacement pattern
+	formatted := sql
+	for _, p := range patterns {
+		formatted = p.regex.ReplaceAllString(formatted, p.repl)
+	}
 
-	// Return the formatted SQL with original case preserved for keywords
 	return formatted
 }
 func (qv *QueryView) SetSQL(sql string) {
