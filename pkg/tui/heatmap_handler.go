@@ -301,21 +301,21 @@ func (a *App) ShowHeatmap() {
 				SetDynamicColors(true).
 				SetRegions(true).
 				SetScrollable(false)
-			verticalScroll.SetText("[red]▲[white]\n" + strings.Repeat("│\n", 20) + "[red]▼").
+			verticalScroll.SetText("[red]▲[white]\n" + strings.Repeat("│\n", 100) + "[red]▼").
 				SetTextColor(tcell.ColorWhite).
 				SetBackgroundColor(tcell.ColorDarkSlateGray)
 
-			// Create scrollable wrapper with full-height vertical scroll
+			// Create scrollable wrapper with vertical scroll
 			scrollWrapper := tview.NewFlex().
 				SetDirection(tview.FlexColumn).
 				AddItem(tableContainer, 0, 1, true).
-				AddItem(verticalScroll, 1, 1, false) // Take full height
+				AddItem(verticalScroll, 1, 0, false) // Fixed width
 
-			// Create main flex with full-width horizontal scroll
+			// Create main flex with horizontal scroll
 			mainFlex := tview.NewFlex().
 				SetDirection(tview.FlexRow).
 				AddItem(scrollWrapper, 0, 1, true).
-				AddItem(horizontalScroll, 1, 1, false) // Take full width
+				AddItem(horizontalScroll, 1, 0, false) // Fixed height
 
 			// Update scroll bars when table selection changes
 			table.SetSelectionChangedFunc(func(row, column int) {
@@ -333,8 +333,8 @@ func (a *App) ShowHeatmap() {
 				if rowsCount > 0 {
 					pos := int(float64(row) / float64(rowsCount-1) * 100)
 					scrollText := "[red]▲[white]\n"
-					for i := 0; i < 20; i++ {
-						if i == pos/5 { // More precise positioning
+					for i := 0; i < 100; i++ {
+						if i == pos { // Direct mapping to position
 							scrollText += "[red::b]●[-:-:-]\n"
 						} else {
 							scrollText += "[white]│[-]\n"
