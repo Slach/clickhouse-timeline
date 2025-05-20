@@ -23,13 +23,21 @@ func NewQueryView() *QueryView {
 	qv.SetBorder(true)
 	qv.SetTitle("Normalized Query")
 
-	// Enable mouse support for text selection
+	// Enable full mouse support for text selection
 	qv.SetMouseCapture(func(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
-		if action == tview.MouseLeftDown || action == tview.MouseLeftDoubleClick {
-			// Let the TextView handle text selection
+		switch action {
+		case tview.MouseLeftDown, tview.MouseLeftDoubleClick, tview.MouseMove:
+			// Let TextView handle selection and dragging
+			return action, event
+		default:
 			return action, event
 		}
-		return action, event
+	})
+	
+	// Enable mouse movement tracking for drag selection
+	qv.SetChangedFunc(func() {
+		// Force redraw when text changes to keep selection visible
+		qv.ScrollToHighlight()
 	})
 
 	return qv
