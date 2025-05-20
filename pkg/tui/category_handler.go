@@ -44,8 +44,9 @@ func (a *App) showCategorySelector() {
 		category CategoryType
 	}{
 		{"Query Hash", CategoryQueryHash},
-		{"Tables", CategoryTable},
+		{"Tables", CategoryTable}, 
 		{"Hosts", CategoryHost},
+		{"Errors", CategoryError},
 	}
 
 	for i, cat := range categories {

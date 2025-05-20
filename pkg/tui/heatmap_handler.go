@@ -31,6 +31,7 @@ WHERE
     event_date >= toDate(parseDateTimeBestEffort('%s')) AND event_date <= toDate(parseDateTimeBestEffort('%s')) AND
     event_time >= parseDateTimeBestEffort('%s') AND event_time <= parseDateTimeBestEffort('%s')
     AND type!='QueryStart'
+    %s
 GROUP BY ALL
 SETTINGS skip_unavailable_shards=1
 `
@@ -90,6 +91,12 @@ func (a *App) ShowHeatmap() {
 	}
 	tzLocation, _ := time.LoadLocation(tzName)
 
+	// Add error filter if showing errors
+	errorFilter := ""
+	if a.category == CategoryError {
+		errorFilter = "AND exception_code != 0"
+	}
+
 	query := fmt.Sprintf(heatmapQueryTemplate,
 		tzName, interval, tzName, interval,
 		tzName, interval, tzName, interval,
@@ -98,6 +105,7 @@ func (a *App) ShowHeatmap() {
 		intervalSeconds,
 		categorySQL, metricSQL, a.cluster,
 		fromStr, toStr, fromStr, toStr,
+		errorFilter,
 	)
 
 	// Execute the query
