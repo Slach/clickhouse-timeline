@@ -2,6 +2,7 @@ package widgets
 
 import (
 	"fmt"
+	"github.com/rs/zerolog/log"
 	"strings"
 
 	"github.com/alecthomas/chroma/quick"
@@ -26,22 +27,17 @@ func NewQueryView() *QueryView {
 }
 
 func (qv *QueryView) formatSQL(sql string) string {
-	lexer, err := sqlfmt.NewSqlLexer(sql)
-	if err != nil {
-		return sql
-	}
+	lexer := sqlfmt.NewSqlLexer(sql)
 
 	stmt, err := sqlfmt.Parse(lexer)
 	if err != nil {
+		log.Error().Err(err).Str("sql", sql).Msg("Error parsing SQL in query view")
 		return sql
 	}
 
 	var buf strings.Builder
 	renderer := sqlfmt.NewTextRenderer(&buf)
-	if err := sqlfmt.RenderTo(renderer, stmt); err != nil {
-		return sql
-	}
-
+	stmt.RenderTo(renderer)
 	return buf.String()
 }
 
