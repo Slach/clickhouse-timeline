@@ -27,18 +27,44 @@ func NewQueryView() *QueryView {
 func (qv *QueryView) SetSQL(sql string) {
 	qv.Clear()
 
+	// Format SQL with proper indentation and line breaks
+	formattedSQL := formatSQL(sql)
+
 	// Use chroma to highlight SQL with ANSI color codes
 	var highlighted strings.Builder
-	err := quick.Highlight(&highlighted, sql, "sql", "terminal256", "monokai")
+	err := quick.Highlight(&highlighted, formattedSQL, "sql", "terminal256", "monokai")
 	if err != nil {
 		// Fallback to plain text if highlighting fails
-		fmt.Fprint(qv, sql)
+		fmt.Fprint(qv, formattedSQL)
 		return
 	}
 
 	// Convert chroma ANSI colors to tcell colors
 	formatted := ansiToTcell(highlighted.String())
 	fmt.Fprint(qv, formatted)
+}
+
+// formatSQL adds basic formatting to SQL queries
+func formatSQL(sql string) string {
+	// Basic formatting rules
+	sql = strings.ReplaceAll(sql, "SELECT", "\nSELECT\n    ")
+	sql = strings.ReplaceAll(sql, "FROM", "\nFROM\n    ") 
+	sql = strings.ReplaceAll(sql, "WHERE", "\nWHERE\n    ")
+	sql = strings.ReplaceAll(sql, "GROUP BY", "\nGROUP BY\n    ")
+	sql = strings.ReplaceAll(sql, "ORDER BY", "\nORDER BY\n    ")
+	sql = strings.ReplaceAll(sql, "LIMIT", "\nLIMIT\n    ")
+	sql = strings.ReplaceAll(sql, "HAVING", "\nHAVING\n    ")
+	sql = strings.ReplaceAll(sql, "JOIN", "\nJOIN\n    ")
+	sql = strings.ReplaceAll(sql, "UNION", "\nUNION\n    ")
+	
+	// Handle commas in SELECT clauses
+	sql = strings.ReplaceAll(sql, ",", ",\n    ")
+	
+	// Clean up any double spaces
+	sql = strings.ReplaceAll(sql, "    \n", "\n")
+	sql = strings.ReplaceAll(sql, "\n\n", "\n")
+	
+	return strings.TrimSpace(sql)
 }
 
 // ansiToTcell converts ANSI color codes to tview color tags
