@@ -25,18 +25,28 @@ func NewQueryView() *QueryView {
 }
 
 func (qv *QueryView) formatSQL(sql string) string {
-	// Basic formatting rules
-	sql = strings.ReplaceAll(sql, "INSERT INTO ", "\nSELECT\n")
-	sql = strings.ReplaceAll(sql, "SELECT ", "\nSELECT\n")
-	sql = strings.ReplaceAll(sql, "FROM ", "\nFROM\n")
-	sql = strings.ReplaceAll(sql, "WHERE ", "\nWHERE\n")
-	sql = strings.ReplaceAll(sql, "GROUP BY ", "\nGROUP BY\n")
-	sql = strings.ReplaceAll(sql, "ORDER BY ", "\nORDER BY\n")
-	sql = strings.ReplaceAll(sql, "LIMIT ", "\nLIMIT\n")
-	sql = strings.ReplaceAll(sql, "HAVING ", "\nHAVING\n")
-	sql = strings.ReplaceAll(sql, "JOIN ", "\nJOIN\n")
-	sql = strings.ReplaceAll(sql, "UNION ", "\nUNION\n")
-	return sql
+	// Convert to lowercase for case-insensitive matching
+	lowerSQL := strings.ToLower(sql)
+	
+	// Create a replacer with all our patterns
+	replacer := strings.NewReplacer(
+		"insert into ", "\nSELECT\n",
+		"select ", "\nSELECT\n",
+		"from ", "\nFROM\n", 
+		"where ", "\nWHERE\n",
+		"group by ", "\nGROUP BY\n",
+		"order by ", "\nORDER BY\n",
+		"limit ", "\nLIMIT\n",
+		"having ", "\nHAVING\n",
+		"join ", "\nJOIN\n",
+		"union ", "\nUNION\n",
+	)
+	
+	// Apply the replacements to the lowercase version
+	formatted := replacer.Replace(lowerSQL)
+	
+	// Return the formatted SQL with original case preserved for keywords
+	return formatted
 }
 func (qv *QueryView) SetSQL(sql string) {
 	qv.Clear()
