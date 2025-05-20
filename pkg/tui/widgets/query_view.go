@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/alecthomas/chroma/quick"
-	"github.com/jackc/sqlfmt"
+	"github.com/AfterShip/clickhouse-sql-parser/parser"
 	"github.com/rivo/tview"
 )
 
@@ -27,18 +27,21 @@ func NewQueryView() *QueryView {
 }
 
 func (qv *QueryView) formatSQL(sql string) string {
-	lexer := sqlfmt.NewSqlLexer(sql)
-
-	stmt, err := sqlfmt.Parse(lexer)
+	// Parse the SQL with ClickHouse-specific parser
+	ast, err := parser.ParseAST(sql)
 	if err != nil {
-		log.Error().Err(err).Str("sql", sql).Msg("Error parsing SQL in query view")
+		log.Error().Err(err).Str("sql", sql).Msg("Error parsing ClickHouse SQL")
 		return sql
 	}
 
-	var buf strings.Builder
-	renderer := sqlfmt.NewTextRenderer(&buf)
-	stmt.RenderTo(renderer)
-	return buf.String()
+	// Format the AST back to SQL with proper indentation
+	formatted := ast.String()
+	
+	// Basic cleanup of extra whitespace
+	formatted = strings.ReplaceAll(formatted, "\n\n", "\n")
+	formatted = strings.TrimSpace(formatted)
+	
+	return formatted
 }
 
 func (qv *QueryView) SetSQL(sql string) {
