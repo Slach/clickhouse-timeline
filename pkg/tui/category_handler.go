@@ -14,6 +14,8 @@ func getCategorySQL(category CategoryType) string {
 		return "tables"
 	case CategoryHost:
 		return "hostName()"
+	case CategoryError:
+		return "concat(errorCodeToName(exception_code),':',normalized_query_hash)"
 	default:
 		return "normalized_query_hash"
 	}
@@ -28,8 +30,10 @@ func getCategoryName(category CategoryType) string {
 		return "Tables"
 	case CategoryHost:
 		return "Hosts"
+	case CategoryError:
+		return "Errors"
 	default:
-		return "Query Hash"
+		return "Unknown category"
 	}
 }
 
@@ -44,7 +48,7 @@ func (a *App) showCategorySelector() {
 		category CategoryType
 	}{
 		{"Query Hash", CategoryQueryHash},
-		{"Tables", CategoryTable}, 
+		{"Tables", CategoryTable},
 		{"Hosts", CategoryHost},
 		{"Errors", CategoryError},
 	}

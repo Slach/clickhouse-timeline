@@ -56,7 +56,7 @@ func NewRootCommand(cli *types.CLI, version string) *cobra.Command {
 	rootCmd.PersistentFlags().StringVar(&cli.ConnectTo, "connect", "", "Connection name to use from config")
 	rootCmd.PersistentFlags().StringVar(&cli.Cluster, "cluster", "", "Cluster name to analyze")
 	rootCmd.PersistentFlags().StringVar(&cli.Metric, "metric", "", "Metric to visualize (count, memoryUsage, cpuUsage, etc)")
-	rootCmd.PersistentFlags().StringVar(&cli.Category, "category", "", "Category to group by (query_hash, tables, hosts)")
+	rootCmd.PersistentFlags().StringVar(&cli.Category, "category", "", "Category to group by (query_hash, tables, hosts, errors)")
 	rootCmd.PersistentFlags().BoolVar(&cli.FlamegraphNative, "flamegraph-native", false, "Use native flamegraph viewer instead of flamelens")
 
 	// Add subcommands

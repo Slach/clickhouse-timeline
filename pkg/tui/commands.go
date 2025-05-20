@@ -47,7 +47,8 @@ type CategoryType string
 const (
 	CategoryQueryHash CategoryType = "normalized_query_hash"
 	CategoryTable     CategoryType = "tables"
-	CategoryHost      CategoryType = "hostName()"
+	CategoryHost      CategoryType = "hosts"
+	CategoryError     CategoryType = "errors"
 )
 
 var availableCommands = []string{
