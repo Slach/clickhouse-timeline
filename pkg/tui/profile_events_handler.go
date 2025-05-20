@@ -18,9 +18,9 @@ SELECT
     formatReadableQuantity(p50) AS p50_s,
     formatReadableQuantity(p90) AS p90_s,
     formatReadableQuantity(p99) AS p99_s,
-    any(normalizeQueryKeepNames(any(query))) AS normalized_query
+    any(normalizeQueryKeepNames(query)) AS normalized_query
 FROM clusterAllReplicas('%s', merge(system,'^query_log'))
-ARRAY JOIN mapKeys(ProfileEvents) AS key, mapValues(ProfileEvents) AS value
+LEFT ARRAY JOIN mapKeys(ProfileEvents) AS key, mapValues(ProfileEvents) AS value
 WHERE
     event_date >= toDate(parseDateTimeBestEffort('%s')) AND event_date <= toDate(parseDateTimeBestEffort('%s')) AND
     event_time >= parseDateTimeBestEffort('%s') AND event_time <= parseDateTimeBestEffort('%s')
@@ -30,7 +30,7 @@ GROUP BY key
 ORDER BY key
 `
 
-func (a *App) filterProfileEventsTable(table *tview.Table, originalRows [][]*tview.TableCell, filter string) {
+func (a *App) filterProfileEventsTable(headers []string, table *tview.Table, originalRows [][]*tview.TableCell, filter string) {
 	// Clear existing rows (keep headers)
 	for r := table.GetRowCount() - 1; r > 0; r-- {
 		table.RemoveRow(r)
@@ -38,7 +38,7 @@ func (a *App) filterProfileEventsTable(table *tview.Table, originalRows [][]*tvi
 
 	filter = strings.ToLower(filter)
 	for _, row := range originalRows {
-		// Check if any cell in row matches filter (case insensitive)
+		// Check if any cell in row matches filter (case-insensitive)
 		match := false
 		for _, cell := range row {
 			if strings.Contains(strings.ToLower(cell.Text), filter) {
@@ -50,12 +50,15 @@ func (a *App) filterProfileEventsTable(table *tview.Table, originalRows [][]*tvi
 		if match || filter == "" {
 			r := table.GetRowCount()
 			for c, cell := range row {
-				// Clone the original cell to preserve all attributes
-				newCell := tview.NewTableCell(cell.Text).
-					SetStyle(cell.Style).
-					SetSelectedStyle(cell.SelectedStyle).
-					SetAlign(cell.Align)
-				table.SetCell(r, c, newCell)
+				// clone only first columns which exists in headers
+				if c < len(headers) {
+					// Clone the original cell to preserve all attributes
+					newCell := tview.NewTableCell(cell.Text).
+						SetStyle(cell.Style).
+						SetSelectedStyle(cell.SelectedStyle).
+						SetAlign(cell.Align)
+					table.SetCell(r, c, newCell)
+				}
 			}
 		}
 	}
@@ -85,7 +88,8 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 			case CategoryHost:
 				categoryFilter = fmt.Sprintf("AND hostName() = '%s'", categoryValue)
 			case CategoryError:
-				categoryFilter = fmt.Sprintf("AND concat(errorCodeToName(exception_code),':',normalized_query_hash) = '%s'", categoryValue)
+				parts := strings.Split(categoryValue, ":")
+				categoryFilter = fmt.Sprintf("AND errorCodeToName(exception_code)='%s' AND normalized_query_hash = %s", parts[0], parts[1])
 			}
 		}
 
@@ -115,12 +119,6 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 			// Create flex layout with table on left and query view on right
 			flex := tview.NewFlex().
 				SetDirection(tview.FlexColumn)
-			
-			// Create table for events
-			table := tview.NewTable().
-				SetBorders(false).
-				SetSelectable(true, true).
-				SetFixed(1, 1)
 
 			// Set headers
 			headers := []string{"Event", "Count", "p50", "p90", "p99"}
@@ -129,6 +127,8 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 					tview.NewTableCell(header).SetTextColor(tcell.ColorYellow).SetAlign(tview.AlignCenter),
 				)
 			}
+			// Store original cells data for filtering (preserving colors and formatting)
+			originalRows := make([][]*tview.TableCell, 0)
 
 			// Process rows
 			row := 1
@@ -175,6 +175,15 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 				table.SetCell(row, 4, tview.NewTableCell(p99s).
 					SetTextColor(color).
 					SetAlign(tview.AlignRight))
+				//add normalizedQuery as hidden column in originalRows
+				originalRows = append(originalRows, []*tview.TableCell{
+					table.GetCell(row, 0),
+					table.GetCell(row, 1),
+					table.GetCell(row, 2),
+					table.GetCell(row, 3),
+					table.GetCell(row, 4),
+					tview.NewTableCell(normalizedQuery).SetSelectable(false),
+				})
 
 				row++
 			}
@@ -190,20 +199,6 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 				fromTime.Format("2006-01-02 15:04:05"),
 				toTime.Format("2006-01-02 15:04:05"))
 			table.SetTitle(title).SetBorder(true)
-
-			// Store original cells data for filtering (preserving colors and formatting)
-			originalRows := make([][]*tview.TableCell, table.GetRowCount()-1)
-			for r := 1; r < table.GetRowCount(); r++ {
-				// Add normalized_query as a hidden column
-				originalRows[r-1] = []*tview.TableCell{
-					table.GetCell(r, 0),
-					table.GetCell(r, 1),
-					table.GetCell(r, 2),
-					table.GetCell(r, 3),
-					table.GetCell(r, 4),
-					tview.NewTableCell(normalizedQuery).SetSelectable(false),
-				}
-			}
 
 			// Add key handler for filtering table content
 			table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -221,7 +216,7 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 						SetLabel("/").
 						SetFieldWidth(30).
 						SetChangedFunc(func(text string) {
-							a.filterProfileEventsTable(table, originalRows, text)
+							a.filterProfileEventsTable(headers, table, originalRows, text)
 						})
 
 					filterInput.SetDoneFunc(func(key tcell.Key) {
@@ -287,9 +282,9 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 			queryView := tview.NewTextView().
 				SetDynamicColors(true).
 				SetWrap(true).
-				SetWordWrap(true).
-				SetBorder(true).
-				SetTitle("Normalized Query")
+				SetWordWrap(true)
+			queryView.SetBorder(true)
+			queryView.SetTitle("Normalized Query")
 
 			// Update query view when selection changes
 			table.SetSelectionChangedFunc(func(row, column int) {
