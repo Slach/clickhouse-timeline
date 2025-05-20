@@ -84,12 +84,7 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 			case CategoryHost:
 				categoryFilter = fmt.Sprintf("AND hostName() = '%s'", categoryValue)
 			case CategoryError:
-				parts := strings.Split(categoryValue, ":")
-				if len(parts) == 2 {
-					categoryFilter = fmt.Sprintf("AND exception_code = toUInt32('%s') AND normalized_query_hash = '%s'", parts[0], parts[1])
-				} else {
-					categoryFilter = fmt.Sprintf("AND exception_code = toUInt32('%s')", categoryValue)
-				}
+				categoryFilter = fmt.Sprintf("AND concat(errorCodeToName(exception_code),':',normalized_query_hash) = '%s'", categoryValue)
 			}
 		}
 
