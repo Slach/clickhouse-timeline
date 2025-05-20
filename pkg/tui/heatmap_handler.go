@@ -6,6 +6,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -281,10 +282,69 @@ func (a *App) ShowHeatmap() {
 			// Create legend
 			legend := a.generateLegend(minValue, maxValue)
 
+			// Create scrollable table container
+			tableContainer := tview.NewFlex().
+				SetDirection(tview.FlexRow).
+				AddItem(table, 0, 1, true)
+
+			// Add horizontal scroll bar
+			horizontalScroll := tview.NewTextView().
+				SetDynamicColors(true).
+				SetRegions(true).
+				SetScrollable(false)
+			horizontalScroll.SetText("[red]◄[white]───────[red]►")
+
+			// Add vertical scroll bar
+			verticalScroll := tview.NewTextView().
+				SetDynamicColors(true).
+				SetRegions(true).
+				SetScrollable(false)
+			verticalScroll.SetText("[red]▲[white]\n│\n│\n│\n[red]▼")
+
+			// Create scrollable wrapper
+			scrollWrapper := tview.NewFlex().
+				SetDirection(tview.FlexColumn).
+				AddItem(tableContainer, 0, 1, true).
+				AddItem(verticalScroll, 1, 0, false)
+
+			// Create main flex with horizontal scroll
+			mainFlex := tview.NewFlex().
+				SetDirection(tview.FlexRow).
+				AddItem(scrollWrapper, 0, 1, true).
+				AddItem(horizontalScroll, 1, 0, false)
+
+			// Update scroll bars when table selection changes
+			table.SetChangedFunc(func(row, column int) {
+				rows := table.GetRowCount()
+				cols := table.GetColumnCount()
+
+				// Update horizontal scroll
+				if cols > 0 {
+					pos := int(float64(column) / float64(cols-1) * 100)
+					scrollText := "[red]◄[white]" + strings.Repeat("─", pos) + "[red]●[white]" + strings.Repeat("─", 100-pos) + "[red]►"
+					horizontalScroll.SetText(scrollText)
+				}
+
+				// Update vertical scroll
+				if rows > 0 {
+					pos := int(float64(row) / float64(rows-1) * 100)
+					scrollText := "[red]▲[white]\n"
+					for i := 0; i < 10; i++ {
+						if i == pos/10 {
+							scrollText += "[red]●[white]\n"
+						} else {
+							scrollText += "│\n"
+						}
+					}
+					scrollText += "[red]▼"
+					verticalScroll.SetText(scrollText)
+				}
+			})
+
 			// Create a flex container for the heatmap and legend
 			flex := tview.NewFlex().
 				SetDirection(tview.FlexColumn).
-				AddItem(table, 0, 1, true).
+				AddItem(mainFlex, 0, 1, true).
 				AddItem(legend, 10, 0, false)
 
 			selectedHandler := func(row, col int) {
