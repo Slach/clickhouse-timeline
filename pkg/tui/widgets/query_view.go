@@ -31,8 +31,8 @@ func (qv *QueryView) formatSQL(sql string) string {
 		regex *regexp.Regexp
 		repl  string
 	}{
-		{regexp.MustCompile(`(?i)\binsert into\b`), "INSERT INTO\n"},
-		{regexp.MustCompile(`(?i)\bselect\b`), "SELECT\n"},
+		{regexp.MustCompile(`(?i)\binsert into\b`), "\nINSERT INTO\n"},
+		{regexp.MustCompile(`(?i)\bselect\b`), "\nSELECT\n"},
 		{regexp.MustCompile(`(?i)\bfrom\b`), "\nFROM\n"},
 		{regexp.MustCompile(`(?i)\bwhere\b`), "\nWHERE\n"},
 		{regexp.MustCompile(`(?i)\bgroup by\b`), "\nGROUP BY\n"},

@@ -68,6 +68,7 @@ func (a *App) filterProfileEventsTable(headers []string, table *tview.Table, ori
 func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string, fromTime, toTime time.Time, cluster string) {
 	if a.clickHouse == nil {
 		a.mainView.SetText("Error: Please connect to a ClickHouse instance first")
+		a.pages.SwitchToPage("main")
 		return
 	}
 
@@ -197,8 +198,8 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 			// Set title
 			title := fmt.Sprintf("Profile Events: %s (%s to %s)",
 				categoryValue,
-				fromTime.Format("2006-01-02 15:04:05"),
-				toTime.Format("2006-01-02 15:04:05"))
+				fromStr,
+				toStr)
 			table.SetTitle(title).SetBorder(true)
 
 			// Add key handler for filtering table content
