@@ -25,30 +25,30 @@ func NewQueryView() *QueryView {
 	return qv
 }
 
+func (qv *QueryView) formatSQL(sql string) string {
+	lexer, err := sqlfmt.NewSqlLexer(sql)
+	if err != nil {
+		return sql
+	}
+
+	stmt, err := sqlfmt.Parse(lexer)
+	if err != nil {
+		return sql
+	}
+
+	var buf strings.Builder
+	renderer := sqlfmt.NewTextRenderer(&buf)
+	if err := sqlfmt.RenderTo(renderer, stmt); err != nil {
+		return sql
+	}
+
+	return buf.String()
+}
+
 func (qv *QueryView) SetSQL(sql string) {
 	qv.Clear()
 
-	// Format SQL with sqlfmt components
-	lexer, err := sqlfmt.NewSqlLexer(sql)
-	if err != nil {
-		// Fallback to original SQL if lexing fails
-		formattedSQL = sql
-	} else {
-		// Parse and render the SQL
-		stmt, err := sqlfmt.Parse(lexer)
-		if err != nil {
-			formattedSQL = sql
-		} else {
-			var buf strings.Builder
-			renderer := sqlfmt.NewTextRenderer(&buf)
-			err = sqlfmt.RenderTo(renderer, stmt)
-			if err != nil {
-				formattedSQL = sql
-			} else {
-				formattedSQL = buf.String()
-			}
-		}
-	}
+	formattedSQL := qv.formatSQL(sql)
 
 	// Use chroma to highlight SQL with ANSI color codes
 	var highlighted strings.Builder
