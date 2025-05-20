@@ -6,6 +6,7 @@ import (
 	"github.com/rivo/tview"
 	"strings"
 	"time"
+	"your-module-path/pkg/tui/widgets" // Update with your actual module path
 )
 
 const profileEventsQueryTemplate = `
@@ -278,20 +279,14 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 				return event
 			})
 
-			// Create query text view
-			queryView := tview.NewTextView().
-				SetDynamicColors(true).
-				SetWrap(true).
-				SetWordWrap(true)
-			queryView.SetBorder(true)
-			queryView.SetTitle("Normalized Query")
+			// Create query view widget
+			queryView := widgets.NewQueryView()
 
 			// Update query view when selection changes
 			table.SetSelectionChangedFunc(func(row, column int) {
 				if row > 0 && row <= len(originalRows) {
-					queryView.Clear()
 					if normalizedQuery := originalRows[row-1][5].Text; normalizedQuery != "" {
-						fmt.Fprintf(queryView, "[yellow]%s[-]", normalizedQuery)
+						queryView.SetSQL(normalizedQuery)
 					}
 				}
 			})
