@@ -11,9 +11,6 @@ import (
 
 type QueryView struct {
 	*tview.TextView
-	selectionStart int
-	selectionEnd   int
-	selecting      bool
 }
 
 func NewQueryView() *QueryView {
@@ -25,101 +22,7 @@ func NewQueryView() *QueryView {
 	}
 	qv.SetBorder(true)
 	qv.SetTitle("Normalized Query")
-	qv.SetRegions(true) // Enable text regions for selection
-
-	// Handle mouse events for text selection
-	qv.SetMouseCapture(func(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
-		switch action {
-		case tview.MouseLeftDown:
-			x, y := event.Position()
-			rectX, rectY, width, _ := qv.GetInnerRect()
-			x -= rectX
-			y -= rectY
-			if x >= 0 && x < width && y >= 0 {
-				qv.selectionStart = y * width + x
-				qv.selectionEnd = qv.selectionStart
-				qv.selecting = true
-				qv.Highlight()
-			}
-			return action, event
-			
-		case tview.MouseMove:
-			if qv.selecting {
-				x, y := event.Position()
-				rectX, rectY, width, _ := qv.GetInnerRect()
-				x -= rectX
-				y -= rectY
-				if x >= 0 && x < width && y >= 0 {
-					qv.selectionEnd = y * width + x
-					qv.Highlight()
-				}
-			}
-			return action, event
-			
-		case tview.MouseLeftUp:
-			qv.selecting = false
-			return action, event
-			
-		default:
-			return action, event
-		}
-	})
-
-	// Handle keyboard events for copying
-	qv.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Key() == tcell.KeyCtrlC {
-			if qv.selectionStart != qv.selectionEnd {
-				start, end := qv.selectionStart, qv.selectionEnd
-				if start > end {
-					start, end = end, start
-				}
-				text := qv.GetText(true)
-				if end > len(text) {
-					end = len(text)
-				}
-				selection := text[start:end]
-				// Copy to clipboard
-				qv.copyToClipboard(selection)
-			}
-			return nil
-		}
-		return event
-	})
-
 	return qv
-}
-
-func (qv *QueryView) copyToClipboard(text string) {
-	// This is a placeholder - you'll need to implement actual clipboard handling
-	// For Windows, you might use:
-	// err := clipboard.WriteAll(text)
-	// For now, we'll just print it for debugging
-	fmt.Printf("Copied to clipboard: %s\n", text)
-}
-
-func (qv *QueryView) Highlight() {
-	if qv.selectionStart == qv.selectionEnd {
-		// Clear selection
-		qv.SetText(qv.GetText(false)) // Reset text to clear any highlighting
-		return
-	}
-
-	start, end := qv.selectionStart, qv.selectionEnd
-	if start > end {
-		start, end = end, start
-	}
-
-	// Get the full text
-	fullText := qv.GetText(false)
-	if end > len(fullText) {
-		end = len(fullText)
-	}
-
-	// Highlight by setting selected text in reverse video
-	highlighted := fullText[:start] + 
-		"[::r]" + fullText[start:end] + "[::-]" + 
-		fullText[end:]
-	qv.SetText(highlighted)
 }
 
 func (qv *QueryView) SetSQL(sql string) {
