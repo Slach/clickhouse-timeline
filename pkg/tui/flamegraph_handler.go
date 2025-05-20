@@ -85,6 +85,31 @@ GROUP BY trace, trace_type
 SETTINGS allow_introspection_functions=1
 `
 
+const flamegraphQueryByError = `
+SELECT
+	count() AS samples, 
+	concat(
+		multiIf( 
+			position( toString(trace_type), 'Memory') > 0 AND sum(size) >= 0, 'allocate;',
+			position( toString(trace_type), 'Memory') > 0 AND sum(size) < 0, 'free;',
+			concat( toString(trace_type), ';')
+		),
+		arrayStringConcat(arrayReverse(arrayMap(x -> concat( demangle(addressToSymbol(x)), '#', addressToLine(x) ), trace)), ';')
+	) AS stack
+FROM clusterAllReplicas('%s', merge(system, '^trace_log'))
+WHERE query_id IN (
+    SELECT query_id 
+    FROM clusterAllReplicas('%s', merge(system, '^query_log'))
+    WHERE normalized_query_hash = '%s'
+    AND exception_code = errorCodeFromName('%s')
+    AND event_date >= toDate('%s') AND event_date <= toDate('%s')
+    AND event_time >= parseDateTimeBestEffort('%s') AND event_time <= parseDateTimeBestEffort('%s')
+)
+AND trace_type = '%s'
+GROUP BY trace, trace_type
+SETTINGS allow_introspection_functions=1
+`
+
 const flamegraphQueryByTimeRange = `
 SELECT
 	count() AS samples, 
@@ -369,6 +394,12 @@ func (a *App) getFlamegraphQuery(categoryType CategoryType, categoryValue string
 		return fmt.Sprintf(flamegraphQueryByTable, cluster, cluster, categoryValue, fromDateStr, toDateStr, fromStr, toStr, traceType)
 	case CategoryHost:
 		return fmt.Sprintf(flamegraphQueryByHost, cluster, cluster, categoryValue, fromDateStr, toDateStr, fromStr, toStr, traceType)
+	case CategoryError:
+		parts := strings.Split(categoryValue, ":")
+		if len(parts) != 2 {
+			return ""
+		}
+		return fmt.Sprintf(flamegraphQueryByError, cluster, cluster, parts[1], parts[0], fromDateStr, toDateStr, fromStr, toStr, traceType)
 	default:
 		// If category is not specified, use only time range
 		return fmt.Sprintf(flamegraphQueryByTimeRange, cluster, cluster, fromDateStr, toDateStr, fromStr, toStr, traceType)
