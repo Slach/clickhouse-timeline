@@ -28,11 +28,26 @@ func NewQueryView() *QueryView {
 func (qv *QueryView) SetSQL(sql string) {
 	qv.Clear()
 
-	// Format SQL with sqlfmt
-	formattedSQL, err := sqlfmt.NewSqlLexer(sql)
+	// Format SQL with sqlfmt components
+	lexer, err := sqlfmt.NewSqlLexer(sql)
 	if err != nil {
-		// Fallback to original SQL if formatting fails
+		// Fallback to original SQL if lexing fails
 		formattedSQL = sql
+	} else {
+		// Parse and render the SQL
+		stmt, err := sqlfmt.Parse(lexer)
+		if err != nil {
+			formattedSQL = sql
+		} else {
+			var buf strings.Builder
+			renderer := sqlfmt.NewTextRenderer(&buf)
+			err = sqlfmt.RenderTo(renderer, stmt)
+			if err != nil {
+				formattedSQL = sql
+			} else {
+				formattedSQL = buf.String()
+			}
+		}
 	}
 
 	// Use chroma to highlight SQL with ANSI color codes
