@@ -262,7 +262,23 @@ func colorForCount(count, maxCount int, relativeRatio float64) tcell.Color {
 func (f *FlameView) Draw(screen tcell.Screen) {
 	f.Box.DrawForSubclass(screen, f)
 	x, y, width, height := f.GetInnerRect()
-	if f.root == nil || f.maxDepth == 0 {
+	
+	// Handle empty data case
+	if f.root == nil || f.maxDepth == 0 || f.root.Count == 0 {
+		// Fill with black background
+		for i := 0; i < width; i++ {
+			for j := 0; j < height; j++ {
+				screen.SetContent(x+i, y+j, ' ', nil, tcell.StyleDefault.Background(tcell.ColorBlack))
+			}
+		}
+		
+		// Show "No data" message centered
+		msg := "No data available for selected parameters"
+		msgX := x + (width-len(msg))/2
+		msgY := y + height/2
+		for i, ch := range msg {
+			screen.SetContent(msgX+i, msgY, ch, nil, tcell.StyleDefault.Foreground(tcell.ColorWhite).Background(tcell.ColorBlack))
+		}
 		return
 	}
 

@@ -154,7 +154,6 @@ func (a *App) showNativeFlamegraph(rows *sql.Rows, sourcePage string) {
 	if flameView.GetTotalCount() == 0 {
 		flameView.SetDirection(flamegraph.DirectionTopDown)
 		flameView.SetFrameHandler(func(stack []string, count int) {}) // No-op handler
-		a.mainView.SetText("No data found for the selected parameters")
 	}
 
 	flameView.SetDirection(flamegraph.DirectionTopDown)
