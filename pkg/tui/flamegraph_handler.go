@@ -152,13 +152,9 @@ func (a *App) showNativeFlamegraph(rows *sql.Rows, sourcePage string) {
 
 	// Handle case when no rows were returned
 	if flameView.GetTotalCount() == 0 {
+		flameView.SetDirection(flamegraph.DirectionTopDown)
+		flameView.SetFrameHandler(func(stack []string, count int) {}) // No-op handler
 		a.mainView.SetText("No data found for the selected parameters")
-		if sourcePage != "" {
-			a.pages.SwitchToPage(sourcePage)
-		} else {
-			a.pages.SwitchToPage("main")
-		}
-		return
 	}
 
 	flameView.SetDirection(flamegraph.DirectionTopDown)
