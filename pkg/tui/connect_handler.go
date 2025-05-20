@@ -16,8 +16,8 @@ func (a *App) handleConnectCommand() {
 		items = append(items, a.getContextString(ctx))
 	}
 
-	// Create filterable list
-	fl := a.NewFilterableList(
+	// Create filtered list widget
+	fl := widgets.NewFilteredList(
 		a.connectList,
 		"Connections",
 		items,
@@ -25,7 +25,7 @@ func (a *App) handleConnectCommand() {
 	)
 
 	// Set up list with all items
-	a.resetList(fl)
+	fl.ResetList()
 	a.connectList.SetSelectedFunc(func(i int, _ string, _ string, _ rune) {
 		a.handleContextSelection(i)
 	})

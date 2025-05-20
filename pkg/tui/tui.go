@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"github.com/Slach/clickhouse-timeline/pkg/types"
+	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
 	"github.com/araddon/dateparse"
 	"strings"
 	"time"
@@ -227,13 +228,13 @@ func (a *App) setupUI() {
 		items = append(items, a.getContextString(ctx))
 	}
 
-	fl := a.NewFilterableList(
+	fl := widgets.NewFilteredList(
 		a.connectList,
 		"Connections",
 		items,
 		"contexts",
 	)
-	a.resetList(fl)
+	fl.ResetList()
 
 	a.commandInput = tview.NewInputField().
 		SetLabel(":").
@@ -285,13 +286,13 @@ func (a *App) defaultInputHandler(event *tcell.EventKey) *tcell.EventKey {
 		for _, ctx := range a.cfg.Contexts {
 			items = append(items, a.getContextString(ctx))
 		}
-		fl := a.NewFilterableList(
+		fl := widgets.NewFilteredList(
 			a.connectList,
 			"Connections",
 			items,
 			"contexts",
 		)
-		a.showFilterInput(fl)
+		fl.ShowFilterInput(a.tviewApp, a.pages)
 		return nil
 	}
 
