@@ -278,23 +278,6 @@ func (a *App) defaultInputHandler(event *tcell.EventKey) *tcell.EventKey {
 		}
 	}
 
-	// Filter mode with '/' when on the connections list
-	frontPageName, _ := a.pages.GetFrontPage()
-	if event.Rune() == '/' && a.pages.HasPage("contexts") && frontPageName == "contexts" {
-		// Create filterable list for connections
-		var items []string
-		for _, ctx := range a.cfg.Contexts {
-			items = append(items, a.getContextString(ctx))
-		}
-		fl := widgets.NewFilteredList(
-			a.connectList,
-			"Connections",
-			items,
-			"contexts",
-		)
-		fl.ShowFilterInput(a.tviewApp, a.pages)
-		return nil
-	}
 
 	return event
 }

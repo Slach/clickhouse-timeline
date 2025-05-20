@@ -5,6 +5,7 @@ import (
 
 	"github.com/Slach/clickhouse-timeline/pkg/client"
 	"github.com/Slach/clickhouse-timeline/pkg/config"
+	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rs/zerolog/log"
 )
@@ -33,7 +34,7 @@ func (a *App) handleConnectCommand() {
 	// Add key handler for filtering
 	a.connectList.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Rune() == '/' {
-			a.showFilterInput(fl)
+			fl.ShowFilterInput(a.tviewApp, a.pages)
 			return nil
 		}
 		return event
