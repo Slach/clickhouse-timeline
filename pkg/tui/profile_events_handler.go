@@ -192,7 +192,11 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 			// Add key handler for filtering table content
 			table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 				if event.Key() == tcell.KeyEscape {
-					a.pages.SwitchToPage("heatmap")
+					if a.pages.HasPage("heatmap") {
+						a.pages.SwitchToPage("heatmap")
+					} else {
+						a.pages.SwitchToPage("main")
+					}
 					return nil
 				}
 				if event.Rune() == '/' {

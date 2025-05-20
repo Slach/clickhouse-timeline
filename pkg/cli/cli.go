@@ -39,6 +39,14 @@ func NewRootCommand(cli *types.CLI, version string) *cobra.Command {
 		},
 	}
 
+	profileEventsCmd := &cobra.Command{
+		Use:   "profile_events",
+		Short: "Start in profile events mode",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return RunSubCommand(cli, cmd, args)
+		},
+	}
+
 	// Add global flags
 	rootCmd.PersistentFlags().StringVar(&cli.ConfigPath, "config", "", "Path to config file (default: ~/.clickhouse-timeline/clickhouse-timeline.yml)")
 	rootCmd.PersistentFlags().StringVar(&cli.LogPath, "log", "", "Path to log file (default: ~/.clickhouse-timeline/clickhouse-timeline.log)")
@@ -54,6 +62,7 @@ func NewRootCommand(cli *types.CLI, version string) *cobra.Command {
 	// Add subcommands
 	rootCmd.AddCommand(heatmapCmd)
 	rootCmd.AddCommand(flamegraphCmd)
+	rootCmd.AddCommand(profileEventsCmd)
 
 	return rootCmd
 }

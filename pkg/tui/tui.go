@@ -108,6 +108,22 @@ func (a *App) ApplyCLIParameters(c *types.CLI, commandName string) {
 		a.ShowHeatmap()
 	case "flamegraph":
 		a.ShowFlamegraphForm()
+	case "profile_events":
+		if a.clickHouse == nil {
+			a.mainView.SetText("Error: Please connect to a ClickHouse instance first")
+			break
+		}
+		if a.cluster == "" {
+			a.mainView.SetText("Error: Please select a cluster first using :cluster command")
+			break
+		}
+		a.ShowProfileEvents(
+			a.category,
+			a.selectedCategory,
+			a.fromTime,
+			a.toTime,
+			a.cluster,
+		)
 	}
 }
 
