@@ -5,8 +5,8 @@ import (
 	"github.com/rs/zerolog/log"
 	"strings"
 
-	"github.com/alecthomas/chroma/quick"
 	"github.com/AfterShip/clickhouse-sql-parser/parser"
+	"github.com/alecthomas/chroma/quick"
 	"github.com/rivo/tview"
 )
 
@@ -28,19 +28,22 @@ func NewQueryView() *QueryView {
 
 func (qv *QueryView) formatSQL(sql string) string {
 	// Parse the SQL with ClickHouse-specific parser
-	ast, err := parser.ParseAST(sql)
+	p := parser.NewParser(sql)
+	parsedStmts, err := p.ParseStmts()
 	if err != nil {
 		log.Error().Err(err).Str("sql", sql).Msg("Error parsing ClickHouse SQL")
 		return sql
 	}
 
 	// Format the AST back to SQL with proper indentation
-	formatted := ast.String()
-	
+	formatted := ""
+	for _, stmt := range parsedStmts {
+		formatted += stmt.String() + "\n"
+	}
+
 	// Basic cleanup of extra whitespace
-	formatted = strings.ReplaceAll(formatted, "\n\n", "\n")
 	formatted = strings.TrimSpace(formatted)
-	
+
 	return formatted
 }
 
