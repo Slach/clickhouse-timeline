@@ -17,7 +17,8 @@ SELECT
     quantile(0.99)(value) AS p99,
     formatReadableQuantity(p50) AS p50_s,
     formatReadableQuantity(p90) AS p90_s,
-    formatReadableQuantity(p99) AS p99_s
+    formatReadableQuantity(p99) AS p99_s,
+    any(normalizeQueryKeepNames(any(query))) AS normalized_query
 FROM clusterAllReplicas('%s', merge(system,'^query_log'))
 ARRAY JOIN mapKeys(ProfileEvents) AS key, mapValues(ProfileEvents) AS value
 WHERE
@@ -111,6 +112,16 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 				SetSelectable(true, true).
 				SetFixed(1, 1)
 
+			// Create flex layout with table on left and query view on right
+			flex := tview.NewFlex().
+				SetDirection(tview.FlexColumn)
+			
+			// Create table for events
+			table := tview.NewTable().
+				SetBorders(false).
+				SetSelectable(true, true).
+				SetFixed(1, 1)
+
 			// Set headers
 			headers := []string{"Event", "Count", "p50", "p90", "p99"}
 			for col, header := range headers {
@@ -123,17 +134,18 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 			row := 1
 			for rows.Next() {
 				var (
-					event string
-					count int
-					p50   float64
-					p90   float64
-					p99   float64
-					p50s  string
-					p90s  string
-					p99s  string
+					event           string
+					count           int
+					p50             float64
+					p90             float64
+					p99             float64
+					p50s            string
+					p90s            string
+					p99s            string
+					normalizedQuery string
 				)
 
-				if err := rows.Scan(&event, &count, &p50, &p90, &p99, &p50s, &p90s, &p99s); err != nil {
+				if err := rows.Scan(&event, &count, &p50, &p90, &p99, &p50s, &p90s, &p99s, &normalizedQuery); err != nil {
 					a.mainView.SetText(fmt.Sprintf("Error scanning row: %v", err))
 					return
 				}
@@ -182,12 +194,14 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 			// Store original cells data for filtering (preserving colors and formatting)
 			originalRows := make([][]*tview.TableCell, table.GetRowCount()-1)
 			for r := 1; r < table.GetRowCount(); r++ {
+				// Add normalized_query as a hidden column
 				originalRows[r-1] = []*tview.TableCell{
 					table.GetCell(r, 0),
 					table.GetCell(r, 1),
 					table.GetCell(r, 2),
 					table.GetCell(r, 3),
 					table.GetCell(r, 4),
+					tview.NewTableCell(normalizedQuery).SetSelectable(false),
 				}
 			}
 
@@ -269,7 +283,29 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 				return event
 			})
 
-			a.pages.AddPage("profile_events", table, true, true)
+			// Create query text view
+			queryView := tview.NewTextView().
+				SetDynamicColors(true).
+				SetWrap(true).
+				SetWordWrap(true).
+				SetBorder(true).
+				SetTitle("Normalized Query")
+
+			// Update query view when selection changes
+			table.SetSelectionChangedFunc(func(row, column int) {
+				if row > 0 && row <= len(originalRows) {
+					queryView.Clear()
+					if normalizedQuery := originalRows[row-1][5].Text; normalizedQuery != "" {
+						fmt.Fprintf(queryView, "[yellow]%s[-]", normalizedQuery)
+					}
+				}
+			})
+
+			// Add components to flex
+			flex.AddItem(table, 0, 2, true).
+				AddItem(queryView, 0, 1, false)
+
+			a.pages.AddPage("profile_events", flex, true, true)
 			a.pages.SwitchToPage("profile_events")
 		})
 	}()
