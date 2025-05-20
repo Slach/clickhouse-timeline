@@ -4,6 +4,7 @@ go 1.24.0
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.34.0
+	github.com/alecthomas/chroma v0.10.0
 	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de
 	github.com/gdamore/tcell/v2 v2.8.1
 	github.com/pkg/errors v0.9.1
@@ -15,18 +16,14 @@ require (
 )
 
 require (
-	github.com/AfterShip/clickhouse-sql-parser v0.4.9 // indirect
 	github.com/ClickHouse/ch-go v0.65.1 // indirect
-	github.com/alecthomas/chroma v0.10.0 // indirect
 	github.com/andybalholm/brotli v1.1.1 // indirect
-	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/dlclark/regexp2 v1.4.0 // indirect
 	github.com/gdamore/encoding v1.0.1 // indirect
 	github.com/go-faster/city v1.0.1 // indirect
 	github.com/go-faster/errors v0.7.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/jackc/sqlfmt v0.1.0 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
