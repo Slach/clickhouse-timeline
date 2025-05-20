@@ -11,6 +11,9 @@ import (
 
 type QueryView struct {
 	*tview.TextView
+	selectionStart int
+	selectionEnd   int
+	selecting      bool
 }
 
 func NewQueryView() *QueryView {
@@ -22,25 +25,88 @@ func NewQueryView() *QueryView {
 	}
 	qv.SetBorder(true)
 	qv.SetTitle("Normalized Query")
+	qv.SetRegions(true) // Enable text regions for selection
 
-	// Enable full mouse support for text selection
+	// Handle mouse events for text selection
 	qv.SetMouseCapture(func(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
 		switch action {
-		case tview.MouseLeftDown, tview.MouseLeftDoubleClick, tview.MouseMove:
-			// Let TextView handle selection and dragging
+		case tview.MouseLeftDown:
+			x, y := event.Position()
+			_, _, _, _, offset := qv.GetInnerRect()
+			x -= offset
+			y -= offset
+			qv.selectionStart = qv.GetIndexFromPoint(x, y)
+			qv.selectionEnd = qv.selectionStart
+			qv.selecting = true
+			qv.Highlight()
 			return action, event
+			
+		case tview.MouseMove:
+			if qv.selecting {
+				x, y := event.Position()
+				_, _, _, _, offset := qv.GetInnerRect()
+				x -= offset
+				y -= offset
+				qv.selectionEnd = qv.GetIndexFromPoint(x, y)
+				qv.Highlight()
+			}
+			return action, event
+			
+		case tview.MouseLeftUp:
+			qv.selecting = false
+			return action, event
+			
 		default:
 			return action, event
 		}
 	})
-	
-	// Enable mouse movement tracking for drag selection
-	qv.SetChangedFunc(func() {
-		// Force redraw when text changes to keep selection visible
-		qv.ScrollToHighlight()
+
+	// Handle keyboard events for copying
+	qv.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyCtrlC || event.Key() == tcell.KeyCtrlInsert {
+			if qv.selectionStart != qv.selectionEnd {
+				start, end := qv.selectionStart, qv.selectionEnd
+				if start > end {
+					start, end = end, start
+				}
+				text := qv.GetText(true)
+				if end > len(text) {
+					end = len(text)
+				}
+				selection := text[start:end]
+				// Copy to clipboard
+				qv.copyToClipboard(selection)
+			}
+			return nil
+		}
+		return event
 	})
 
 	return qv
+}
+
+func (qv *QueryView) copyToClipboard(text string) {
+	// This is a placeholder - you'll need to implement actual clipboard handling
+	// For Windows, you might use:
+	// err := clipboard.WriteAll(text)
+	// For now, we'll just print it for debugging
+	fmt.Printf("Copied to clipboard: %s\n", text)
+}
+
+func (qv *QueryView) Highlight() {
+	if qv.selectionStart == qv.selectionEnd {
+		qv.HighlightRegions(nil)
+		return
+	}
+
+	start, end := qv.selectionStart, qv.selectionEnd
+	if start > end {
+		start, end = end, start
+	}
+	
+	qv.HighlightRegions([]string{
+		fmt.Sprintf("%d,%d", start, end),
+	})
 }
 
 func (qv *QueryView) SetSQL(sql string) {
