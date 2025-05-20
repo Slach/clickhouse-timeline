@@ -26,15 +26,16 @@ func NewQueryView() *QueryView {
 
 func (qv *QueryView) formatSQL(sql string) string {
 	// Basic formatting rules
-	sql = strings.ReplaceAll(sql, "SELECT", "\nSELECT\n")
-	sql = strings.ReplaceAll(sql, "FROM", "\nFROM\n")
-	sql = strings.ReplaceAll(sql, "WHERE", "\nWHERE\n")
-	sql = strings.ReplaceAll(sql, "GROUP BY", "\nGROUP BY\n")
-	sql = strings.ReplaceAll(sql, "ORDER BY", "\nORDER BY\n")
-	sql = strings.ReplaceAll(sql, "LIMIT", "\nLIMIT\n")
-	sql = strings.ReplaceAll(sql, "HAVING", "\nHAVING\n")
-	sql = strings.ReplaceAll(sql, "JOIN", "\nJOIN\n")
-	sql = strings.ReplaceAll(sql, "UNION", "\nUNION\n")
+	sql = strings.ReplaceAll(sql, "INSERT INTO ", "\nSELECT\n")
+	sql = strings.ReplaceAll(sql, "SELECT ", "\nSELECT\n")
+	sql = strings.ReplaceAll(sql, "FROM ", "\nFROM\n")
+	sql = strings.ReplaceAll(sql, "WHERE ", "\nWHERE\n")
+	sql = strings.ReplaceAll(sql, "GROUP BY ", "\nGROUP BY\n")
+	sql = strings.ReplaceAll(sql, "ORDER BY ", "\nORDER BY\n")
+	sql = strings.ReplaceAll(sql, "LIMIT ", "\nLIMIT\n")
+	sql = strings.ReplaceAll(sql, "HAVING ", "\nHAVING\n")
+	sql = strings.ReplaceAll(sql, "JOIN ", "\nJOIN\n")
+	sql = strings.ReplaceAll(sql, "UNION ", "\nUNION\n")
 	return sql
 }
 func (qv *QueryView) SetSQL(sql string) {
