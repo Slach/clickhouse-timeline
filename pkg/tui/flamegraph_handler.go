@@ -150,6 +150,17 @@ func (a *App) showNativeFlamegraph(rows *sql.Rows, sourcePage string) {
 		return
 	}
 
+	// Handle case when no rows were returned
+	if flameView.GetTotalCount() == 0 {
+		a.mainView.SetText("No data found for the selected parameters")
+		if sourcePage != "" {
+			a.pages.SwitchToPage(sourcePage)
+		} else {
+			a.pages.SwitchToPage("main")
+		}
+		return
+	}
+
 	flameView.SetDirection(flamegraph.DirectionTopDown)
 	flameView.SetFrameHandler(func(stack []string, count int) {
 		// Calculate percentage of total
@@ -208,8 +219,10 @@ func (a *App) showNativeFlamegraph(rows *sql.Rows, sourcePage string) {
 	// Set source page with stacktrace suffix if we're coming from stacktrace
 	if strings.HasSuffix(sourcePage, "stacktrace") {
 		flameView.SetSourcePage("stacktrace")
-	} else {
+	} else if sourcePage != "" {
 		flameView.SetSourcePage(sourcePage)
+	} else {
+		flameView.SetSourcePage("main")
 	}
 
 	// Set the page switcher function
