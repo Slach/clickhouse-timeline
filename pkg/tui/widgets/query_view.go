@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/alecthomas/chroma/quick"
-	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
 
@@ -46,13 +45,13 @@ func (qv *QueryView) SetSQL(sql string) {
 func ansiToTcell(text string) string {
 	// Map of ANSI color codes to tview color names
 	colorMap := map[string]string{
-		"\x1b[38;5;249m": "[gray]",    // Comments
-		"\x1b[38;5;204m": "[red]",     // Strings
-		"\x1b[38;5;81m":  "[blue]",    // Keywords
-		"\x1b[38;5;118m": "[green]",   // Functions
-		"\x1b[38;5;208m": "[orange]",  // Numbers
-		"\x1b[38;5;231m": "[white]",   // Operators
-		"\x1b[0m":       "[-]",        // Reset
+		"\x1b[38;5;249m": "[gray]",   // Comments
+		"\x1b[38;5;204m": "[red]",    // Strings
+		"\x1b[38;5;81m":  "[blue]",   // Keywords
+		"\x1b[38;5;118m": "[green]",  // Functions
+		"\x1b[38;5;208m": "[orange]", // Numbers
+		"\x1b[38;5;231m": "[white]",  // Operators
+		"\x1b[0m":        "[-]",      // Reset
 	}
 
 	// Replace ANSI codes with tview tags
