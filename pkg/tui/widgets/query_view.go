@@ -32,23 +32,27 @@ func NewQueryView() *QueryView {
 		switch action {
 		case tview.MouseLeftDown:
 			x, y := event.Position()
-			_, _, _, _, offset := qv.GetInnerRect()
-			x -= offset
-			y -= offset
-			qv.selectionStart = qv.GetIndexFromPoint(x, y)
-			qv.selectionEnd = qv.selectionStart
-			qv.selecting = true
-			qv.Highlight()
+			rectX, rectY, width, _ := qv.GetInnerRect()
+			x -= rectX
+			y -= rectY
+			if x >= 0 && x < width && y >= 0 {
+				qv.selectionStart = y * width + x
+				qv.selectionEnd = qv.selectionStart
+				qv.selecting = true
+				qv.Highlight()
+			}
 			return action, event
 			
 		case tview.MouseMove:
 			if qv.selecting {
 				x, y := event.Position()
-				_, _, _, _, offset := qv.GetInnerRect()
-				x -= offset
-				y -= offset
-				qv.selectionEnd = qv.GetIndexFromPoint(x, y)
-				qv.Highlight()
+				rectX, rectY, width, _ := qv.GetInnerRect()
+				x -= rectX
+				y -= rectY
+				if x >= 0 && x < width && y >= 0 {
+					qv.selectionEnd = y * width + x
+					qv.Highlight()
+				}
 			}
 			return action, event
 			
@@ -63,7 +67,7 @@ func NewQueryView() *QueryView {
 
 	// Handle keyboard events for copying
 	qv.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Key() == tcell.KeyCtrlC || event.Key() == tcell.KeyCtrlInsert {
+		if event.Key() == tcell.KeyCtrlC {
 			if qv.selectionStart != qv.selectionEnd {
 				start, end := qv.selectionStart, qv.selectionEnd
 				if start > end {
@@ -95,7 +99,8 @@ func (qv *QueryView) copyToClipboard(text string) {
 
 func (qv *QueryView) Highlight() {
 	if qv.selectionStart == qv.selectionEnd {
-		qv.HighlightRegions(nil)
+		// Clear selection
+		qv.SetText(qv.GetText(false)) // Reset text to clear any highlighting
 		return
 	}
 
@@ -103,10 +108,18 @@ func (qv *QueryView) Highlight() {
 	if start > end {
 		start, end = end, start
 	}
-	
-	qv.HighlightRegions([]string{
-		fmt.Sprintf("%d,%d", start, end),
-	})
+
+	// Get the full text
+	fullText := qv.GetText(false)
+	if end > len(fullText) {
+		end = len(fullText)
+	}
+
+	// Highlight by setting selected text in reverse video
+	highlighted := fullText[:start] + 
+		"[::r]" + fullText[start:end] + "[::-]" + 
+		fullText[end:]
+	qv.SetText(highlighted)
 }
 
 func (qv *QueryView) SetSQL(sql string) {
