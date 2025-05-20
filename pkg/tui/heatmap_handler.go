@@ -314,20 +314,20 @@ func (a *App) ShowHeatmap() {
 				AddItem(horizontalScroll, 1, 0, false)
 
 			// Update scroll bars when table selection changes
-			table.SetChangedFunc(func(row, column int) {
-				rows := table.GetRowCount()
-				cols := table.GetColumnCount()
+			table.SetSelectionChangedFunc(func(row, column int) {
+				rowsCount := table.GetRowCount()
+				colsCount := table.GetColumnCount()
 
 				// Update horizontal scroll
-				if cols > 0 {
-					pos := int(float64(column) / float64(cols-1) * 100)
+				if colsCount > 0 {
+					pos := int(float64(column) / float64(colsCount-1) * 100)
 					scrollText := "[red]◄[white]" + strings.Repeat("─", pos) + "[red]●[white]" + strings.Repeat("─", 100-pos) + "[red]►"
 					horizontalScroll.SetText(scrollText)
 				}
 
 				// Update vertical scroll
-				if rows > 0 {
-					pos := int(float64(row) / float64(rows-1) * 100)
+				if rowsCount > 0 {
+					pos := int(float64(row) / float64(rowsCount-1) * 100)
 					scrollText := "[red]▲[white]\n"
 					for i := 0; i < 10; i++ {
 						if i == pos/10 {
