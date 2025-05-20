@@ -2,10 +2,8 @@ package widgets
 
 import (
 	"fmt"
-	"github.com/rs/zerolog/log"
 	"strings"
 
-	"github.com/AfterShip/clickhouse-sql-parser/parser"
 	"github.com/alecthomas/chroma/quick"
 	"github.com/rivo/tview"
 )
@@ -27,26 +25,18 @@ func NewQueryView() *QueryView {
 }
 
 func (qv *QueryView) formatSQL(sql string) string {
-	// Parse the SQL with ClickHouse-specific parser
-	p := parser.NewParser(sql)
-	parsedStmts, err := p.ParseStmts()
-	if err != nil {
-		log.Error().Err(err).Str("sql", sql).Msg("Error parsing ClickHouse SQL")
-		return sql
-	}
-
-	// Format the AST back to SQL with proper indentation
-	formatted := ""
-	for _, stmt := range parsedStmts {
-		formatted += stmt.String() + "\n"
-	}
-
-	// Basic cleanup of extra whitespace
-	formatted = strings.TrimSpace(formatted)
-
-	return formatted
+	// Basic formatting rules
+	sql = strings.ReplaceAll(sql, "SELECT", "\nSELECT\n")
+	sql = strings.ReplaceAll(sql, "FROM", "\nFROM\n")
+	sql = strings.ReplaceAll(sql, "WHERE", "\nWHERE\n")
+	sql = strings.ReplaceAll(sql, "GROUP BY", "\nGROUP BY\n")
+	sql = strings.ReplaceAll(sql, "ORDER BY", "\nORDER BY\n")
+	sql = strings.ReplaceAll(sql, "LIMIT", "\nLIMIT\n")
+	sql = strings.ReplaceAll(sql, "HAVING", "\nHAVING\n")
+	sql = strings.ReplaceAll(sql, "JOIN", "\nJOIN\n")
+	sql = strings.ReplaceAll(sql, "UNION", "\nUNION\n")
+	return sql
 }
-
 func (qv *QueryView) SetSQL(sql string) {
 	qv.Clear()
 
