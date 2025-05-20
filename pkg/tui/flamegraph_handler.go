@@ -101,7 +101,6 @@ WHERE query_id IN (
     SELECT query_id 
     FROM clusterAllReplicas('%s', merge(system, '^query_log'))
     WHERE normalized_query_hash = '%s'
-    AND exception_code = errorCodeFromName('%s')
     AND event_date >= toDate('%s') AND event_date <= toDate('%s')
     AND event_time >= parseDateTimeBestEffort('%s') AND event_time <= parseDateTimeBestEffort('%s')
 )
@@ -399,7 +398,7 @@ func (a *App) getFlamegraphQuery(categoryType CategoryType, categoryValue string
 		if len(parts) != 2 {
 			return ""
 		}
-		return fmt.Sprintf(flamegraphQueryByError, cluster, cluster, parts[1], parts[0], fromDateStr, toDateStr, fromStr, toStr, traceType)
+		return fmt.Sprintf(flamegraphQueryByError, cluster, cluster, parts[1], fromDateStr, toDateStr, fromStr, toStr, traceType)
 	default:
 		// If category is not specified, use only time range
 		return fmt.Sprintf(flamegraphQueryByTimeRange, cluster, cluster, fromDateStr, toDateStr, fromStr, toStr, traceType)
