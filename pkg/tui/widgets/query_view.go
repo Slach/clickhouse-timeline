@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/alecthomas/chroma/quick"
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
 
@@ -21,7 +22,7 @@ func NewQueryView() *QueryView {
 	}
 	qv.SetBorder(true)
 	qv.SetTitle("Normalized Query")
-	
+
 	// Enable mouse support for text selection
 	qv.SetMouseCapture(func(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
 		if action == tview.MouseLeftDown || action == tview.MouseLeftDoubleClick {
@@ -30,7 +31,7 @@ func NewQueryView() *QueryView {
 		}
 		return action, event
 	})
-	
+
 	return qv
 }
 
