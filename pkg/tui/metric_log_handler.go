@@ -19,6 +19,80 @@ WHERE database='system'
   AND (name LIKE 'Current%%' OR name LIKE 'Profile%%')`
 )
 
+func (a *App) executeAndProcessQuery(query string, fields []string, prefix string, buckets int, table *tview.Table, row *int) error {
+	rows, err := a.clickHouse.Query(query)
+	if err != nil {
+		return fmt.Errorf("error executing %s query: %v", prefix, err)
+	}
+	defer rows.Close()
+
+	// Store results for display
+	results := make(map[string][]float64)
+	for rows.Next() {
+		values := make([]float64, len(fields))
+		valuePtrs := make([]interface{}, len(fields))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+
+		if err := rows.Scan(valuePtrs...); err != nil {
+			return fmt.Errorf("error scanning %s row: %v", prefix, err)
+		}
+
+		for i, field := range fields {
+			alias := strings.TrimPrefix(field, prefix+"_")
+			results[alias] = append(results[alias], values[i])
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error reading %s rows: %v", prefix, err)
+	}
+
+	// Add results to display table
+	for field, values := range results {
+		if len(values) == 0 {
+			continue
+		}
+
+		minVal := values[0]
+		maxVal := values[0]
+		for _, v := range values {
+			if v < minVal {
+				minVal = v
+			}
+			if v > maxVal {
+				maxVal = v
+			}
+		}
+
+		sparkline := generateSparkline(values, buckets)
+		color := tcell.ColorWhite
+		if maxVal > 2*minVal {
+			color = tcell.ColorYellow
+		}
+		if maxVal > 4*minVal {
+			color = tcell.ColorRed
+		}
+
+		table.SetCell(*row, 0, tview.NewTableCell(field).
+			SetTextColor(color).
+			SetAlign(tview.AlignLeft))
+		table.SetCell(*row, 1, tview.NewTableCell(fmt.Sprintf("%.1f", minVal)).
+			SetTextColor(color).
+			SetAlign(tview.AlignRight))
+		table.SetCell(*row, 2, tview.NewTableCell(sparkline).
+			SetTextColor(color).
+			SetAlign(tview.AlignLeft))
+		table.SetCell(*row, 3, tview.NewTableCell(fmt.Sprintf("%.1f", maxVal)).
+			SetTextColor(color).
+			SetAlign(tview.AlignRight))
+
+		*row++
+	}
+	return nil
+}
+
 func (a *App) ShowMetricLog(fromTime, toTime time.Time, cluster string) {
 	if a.clickHouse == nil {
 		a.mainView.SetText("Error: Please connect to a ClickHouse instance first")
@@ -111,7 +185,86 @@ WHERE event_date >= toDate(parseDateTimeBestEffort('%s'))
 				cluster,
 				fromStr, toStr, fromStr, toStr)
 
-			// Execute query and process results...
+			// Execute query and process results
+			rows, err := a.clickHouse.Query(query)
+			if err != nil {
+				a.tviewApp.QueueUpdateDraw(func() {
+					a.mainView.SetText(fmt.Sprintf("Error executing CurrentMetrics query: %v", err))
+				})
+				return
+			}
+			defer rows.Close()
+
+			// Store results for display
+			currentResults := make(map[string][]float64)
+			for rows.Next() {
+				values := make([]float64, len(currentFields))
+				valuePtrs := make([]interface{}, len(currentFields))
+				for i := range values {
+					valuePtrs[i] = &values[i]
+				}
+
+				if err := rows.Scan(valuePtrs...); err != nil {
+					a.tviewApp.QueueUpdateDraw(func() {
+						a.mainView.SetText(fmt.Sprintf("Error scanning CurrentMetrics row: %v", err))
+					})
+					return
+				}
+
+				for i, field := range currentFields {
+					alias := strings.TrimPrefix(field, "CurrentMetrics_")
+					currentResults[alias] = append(currentResults[alias], values[i])
+				}
+			}
+
+			if err := rows.Err(); err != nil {
+				a.tviewApp.QueueUpdateDraw(func() {
+					a.mainView.SetText(fmt.Sprintf("Error reading CurrentMetrics rows: %v", err))
+				})
+				return
+			}
+
+			// Add CurrentMetrics to display table
+			for field, values := range currentResults {
+				if len(values) == 0 {
+					continue
+				}
+
+				minVal := values[0]
+				maxVal := values[0]
+				for _, v := range values {
+					if v < minVal {
+						minVal = v
+					}
+					if v > maxVal {
+						maxVal = v
+					}
+				}
+
+				sparkline := generateSparkline(values, buckets)
+				color := tcell.ColorWhite
+				if maxVal > 2*minVal {
+					color = tcell.ColorYellow
+				}
+				if maxVal > 4*minVal {
+					color = tcell.ColorRed
+				}
+
+				table.SetCell(row, 0, tview.NewTableCell(field).
+					SetTextColor(color).
+					SetAlign(tview.AlignLeft))
+				table.SetCell(row, 1, tview.NewTableCell(fmt.Sprintf("%.1f", minVal)).
+					SetTextColor(color).
+					SetAlign(tview.AlignRight))
+				table.SetCell(row, 2, tview.NewTableCell(sparkline).
+					SetTextColor(color).
+					SetAlign(tview.AlignLeft))
+				table.SetCell(row, 3, tview.NewTableCell(fmt.Sprintf("%.1f", maxVal)).
+					SetTextColor(color).
+					SetAlign(tview.AlignRight))
+
+				row++
+			}
 		}
 
 		// Execute ProfileEvents query
