@@ -36,10 +36,12 @@ func (a *App) executeAndProcessQuery(query string, fields []string, prefix strin
 		if prefix == "CurrentMetrics" {
 			// Handle CurrentMetrics which returns array(tuple(time,value))
 			valuePtrs := make([]interface{}, len(fields))
-			values := make([]*[]interface{}, len(fields))
+			values := make([][]struct {
+				Time  time.Time
+				Value float64
+			}, len(fields))
 			for i := range values {
-				values[i] = new([]interface{})
-				valuePtrs[i] = values[i]
+				valuePtrs[i] = &values[i]
 			}
 
 			if err := rows.Scan(valuePtrs...); err != nil {
@@ -48,14 +50,8 @@ func (a *App) executeAndProcessQuery(query string, fields []string, prefix strin
 
 			for i, field := range fields {
 				alias := strings.TrimPrefix(field, prefix+"_")
-				if values[i] != nil {
-					for _, tuple := range *values[i] {
-						if tupleSlice, ok := tuple.([]interface{}); ok && len(tupleSlice) >= 2 {
-							if val, ok := tupleSlice[1].(float64); ok {
-								results[alias] = append(results[alias], val)
-							}
-						}
-					}
+				for _, point := range values[i] {
+					results[alias] = append(results[alias], point.Value)
 				}
 			}
 		} else {
