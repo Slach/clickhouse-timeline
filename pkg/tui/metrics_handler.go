@@ -132,7 +132,49 @@ WHERE event_date >= toDate(parseDateTimeBestEffort('%s'))
 			}
 
 			// Add data rows with sparklines
-			// ...
+			row := 1
+			for _, field := range currentFields {
+				// Get min/max values and generate sparkline
+				values := []float64{1, 2, 3, 4, 5} // TODO: Replace with actual query results
+				minVal := values[0]
+				maxVal := values[0]
+				for _, v := range values {
+					if v < minVal {
+						minVal = v
+					}
+					if v > maxVal {
+						maxVal = v
+					}
+				}
+
+				sparkline := generateSparkline(values, buckets)
+				alias := strings.TrimPrefix(field, "CurrentMetrics_")
+
+				// Set cell colors based on value ranges
+				color := tcell.ColorWhite
+				if maxVal > 2*minVal {
+					color = tcell.ColorYellow
+				}
+				if maxVal > 4*minVal {
+					color = tcell.ColorRed
+				}
+
+				// Add row to table
+				table.SetCell(row, 0, tview.NewTableCell(alias).
+					SetTextColor(color).
+					SetAlign(tview.AlignLeft))
+				table.SetCell(row, 1, tview.NewTableCell(fmt.Sprintf("%.1f", minVal)).
+					SetTextColor(color).
+					SetAlign(tview.AlignRight))
+				table.SetCell(row, 2, tview.NewTableCell(sparkline).
+					SetTextColor(color).
+					SetAlign(tview.AlignLeft))
+				table.SetCell(row, 3, tview.NewTableCell(fmt.Sprintf("%.1f", maxVal)).
+					SetTextColor(color).
+					SetAlign(tview.AlignRight))
+
+				row++
+			}
 
 			table.SetTitle(fmt.Sprintf("Metric Log: %s to %s", fromStr, toStr)).
 				SetBorder(true)
