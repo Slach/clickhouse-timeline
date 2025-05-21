@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"github.com/rs/zerolog/log"
 	"math"
 	"strings"
 	"time"
@@ -15,8 +16,8 @@ const (
 SELECT DISTINCT name 
 FROM system.columns 
 WHERE database='system' 
-  AND table LIKE 'metric_log%%' 
-  AND (name LIKE 'Current%%' OR name LIKE 'Profile%%')`
+  AND table LIKE 'metric_log%' 
+  AND type NOT LIKE 'Date%'`
 )
 
 func (a *App) executeAndProcessMetricLogQuery(query string, fields []string, prefix string, buckets int, table *tview.Table, row *int) error {
@@ -33,8 +34,8 @@ func (a *App) executeAndProcessMetricLogQuery(query string, fields []string, pre
 	// Store results for display
 	results := make(map[string][]float64)
 	for rows.Next() {
-		if prefix == "CurrentMetrics" {
-			// Handle CurrentMetrics which returns array(tuple(time,value))
+		if prefix == "CurrentMetric" {
+			// Handle CurrentMetric which returns array(tuple(time,value))
 			valuePtrs := make([]interface{}, len(fields))
 			values := make([]*[][]interface{}, len(fields))
 			for i := range values {
@@ -109,15 +110,15 @@ func (a *App) executeAndProcessMetricLogQuery(query string, fields []string, pre
 		table.SetCell(*row, 0, tview.NewTableCell(field).
 			SetTextColor(color).
 			SetAlign(tview.AlignLeft))
-		table.SetCell(*row, 1, tview.NewTableCell(fmt.Sprintf("%.1f", minVal)).
+		table.SetCell(*row, 1, tview.NewTableCell(fmt.Sprintf("%.2f", minVal)).
 			SetTextColor(color).
 			SetAlign(tview.AlignRight))
 		table.SetCell(*row, 2, tview.NewTableCell(sparkline).
 			SetTextColor(color).
 			SetAlign(tview.AlignLeft))
-		table.SetCell(*row, 3, tview.NewTableCell(fmt.Sprintf("%.1f", maxVal)).
+		table.SetCell(*row, 3, tview.NewTableCell(fmt.Sprintf("%.2f", maxVal)).
 			SetTextColor(color).
-			SetAlign(tview.AlignRight))
+			SetAlign(tview.AlignLeft))
 
 		*row++
 	}
@@ -165,8 +166,11 @@ func (a *App) ShowMetricLog(fromTime, toTime time.Time, cluster string) {
 			})
 			return
 		}
-		defer columnNameRows.Close()
-
+		defer func() {
+			if closeErr := columnNameRows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close columnNameRows")
+			}
+		}()
 		var columns []string
 		maxNameLen := 0
 		for columnNameRows.Next() {
@@ -178,6 +182,7 @@ func (a *App) ShowMetricLog(fromTime, toTime time.Time, cluster string) {
 				return
 			}
 			columns = append(columns, name)
+			name = strings.TrimPrefix(strings.TrimPrefix(name, "CurrentMetric_"), "ProfileEvent_")
 			if len(name) > maxNameLen {
 				maxNameLen = len(name)
 			}
@@ -211,11 +216,11 @@ func (a *App) ShowMetricLog(fromTime, toTime time.Time, cluster string) {
 			}
 		}
 		row := 1
-		// Execute CurrentMetrics query
+		// Execute CurrentMetric query
 		if len(currentFields) > 0 {
 			var selectParts []string
 			for _, field := range currentFields {
-				alias := strings.TrimPrefix(field, "CurrentMetrics_")
+				alias := strings.TrimPrefix(field, "CurrentMetric_")
 				selectParts = append(selectParts,
 					fmt.Sprintf("lttb(%d)(event_time, %s) AS %s", buckets, field, alias))
 			}
@@ -231,7 +236,7 @@ WHERE event_date >= toDate(parseDateTimeBestEffort('%s'))
 				cluster,
 				fromStr, toStr, fromStr, toStr)
 
-			err := a.executeAndProcessMetricLogQuery(query, currentFields, "CurrentMetrics", buckets, table, &row)
+			err := a.executeAndProcessMetricLogQuery(query, currentFields, "CurrentMetric", buckets, table, &row)
 			if err != nil {
 				a.tviewApp.QueueUpdateDraw(func() {
 					a.mainView.SetText(err.Error())
@@ -292,7 +297,7 @@ ORDER BY bucket_time`,
 				}
 
 				sparkline := generateSparkline(values)
-				alias := strings.TrimPrefix(field, "CurrentMetrics_")
+				alias := strings.TrimPrefix(field, "CurrentMetric_")
 
 				// Set cell colors based on value ranges
 				color := tcell.ColorWhite
