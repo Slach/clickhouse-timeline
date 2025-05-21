@@ -20,7 +20,7 @@ WHERE database='system'
   AND type NOT LIKE 'Date%'`
 )
 
-func (a *App) executeAndProcessMetricLogQuery(query string, fields []string, prefix string, buckets int, table *tview.Table, row *int) error {
+func (a *App) executeAndProcessMetricLogQuery(query string, fields []string, prefix string, table *tview.Table, row *int) error {
 	rows, err := a.clickHouse.Query(query)
 	if err != nil {
 		return fmt.Errorf("error executing %s query: %v", prefix, err)
@@ -196,11 +196,8 @@ func (a *App) ShowMetricLog(fromTime, toTime time.Time, cluster string) {
 		}
 
 		// Calculate buckets based on full screen width
-		_, _, width, _ := a.tviewApp.GetRoot().GetRect()
+		_, _, width, _ := a.mainFlex.GetRect()
 		buckets := width - 15 - maxNameLen
-		if buckets < 10 {
-			buckets = 10
-		}
 		if buckets < 10 {
 			buckets = 10
 		}
@@ -239,7 +236,7 @@ WHERE event_date >= toDate(parseDateTimeBestEffort('%s'))
 				cluster,
 				fromStr, toStr, fromStr, toStr)
 
-			err := a.executeAndProcessMetricLogQuery(query, currentFields, "CurrentMetric", buckets, table, &row)
+			err := a.executeAndProcessMetricLogQuery(query, currentFields, "CurrentMetric", table, &row)
 			if err != nil {
 				a.tviewApp.QueueUpdateDraw(func() {
 					a.mainView.SetText(err.Error())
@@ -272,7 +269,7 @@ ORDER BY bucket_time`,
 				cluster,
 				fromStr, toStr, fromStr, toStr)
 
-			err := a.executeAndProcessMetricLogQuery(query, profileFields, "ProfileEvents", buckets, table, &row)
+			err := a.executeAndProcessMetricLogQuery(query, profileFields, "ProfileEvents", table, &row)
 			if err != nil {
 				a.tviewApp.QueueUpdateDraw(func() {
 					a.mainView.SetText(err.Error())
@@ -283,51 +280,6 @@ ORDER BY bucket_time`,
 
 		// Create table to display results
 		a.tviewApp.QueueUpdateDraw(func() {
-			// Add data columnNameRows with sparklines
-			row := 1
-			for _, field := range currentFields {
-				// Get min/max values and generate sparkline
-				values := []float64{1, 2, 3, 4, 5} // TODO: Replace with actual query results
-				minVal := values[0]
-				maxVal := values[0]
-				for _, v := range values {
-					if v < minVal {
-						minVal = v
-					}
-					if v > maxVal {
-						maxVal = v
-					}
-				}
-
-				sparkline := generateSparkline(values)
-				alias := strings.TrimPrefix(field, "CurrentMetric_")
-
-				// Set cell colors based on value ranges
-				color := tcell.ColorWhite
-				if maxVal > 2*minVal {
-					color = tcell.ColorYellow
-				}
-				if maxVal > 4*minVal {
-					color = tcell.ColorRed
-				}
-
-				// Add row to table
-				table.SetCell(row, 0, tview.NewTableCell(alias).
-					SetTextColor(color).
-					SetAlign(tview.AlignLeft))
-				table.SetCell(row, 1, tview.NewTableCell(fmt.Sprintf("%.1f", minVal)).
-					SetTextColor(color).
-					SetAlign(tview.AlignRight))
-				table.SetCell(row, 2, tview.NewTableCell(sparkline).
-					SetTextColor(color).
-					SetAlign(tview.AlignLeft))
-				table.SetCell(row, 3, tview.NewTableCell(fmt.Sprintf("%.1f", maxVal)).
-					SetTextColor(color).
-					SetAlign(tview.AlignRight))
-
-				row++
-			}
-
 			table.SetTitle(fmt.Sprintf("Metric Log: %s to %s", fromStr, toStr)).
 				SetBorder(true)
 
