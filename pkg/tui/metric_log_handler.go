@@ -59,13 +59,14 @@ func (a *App) executeAndProcessMetricLogQuery(query string, fields []string, pre
 		} else {
 			// Handle ProfileEvents which returns direct values
 			values := make([]float64, len(fields))
-			valuePtrs := make([]interface{}, len(fields))
+			valuePtrs := make([]interface{}, len(fields)+1)
 			for i := range values {
-				valuePtrs[i] = &values[i]
+				valuePtrs[i+1] = &values[i]
 			}
-
-			if err := rows.Scan(valuePtrs...); err != nil {
-				return fmt.Errorf("error scanning %s row: %v", prefix, err)
+			var bucketTime time.Time
+			valuePtrs[0] = &bucketTime
+			if scanErr := rows.Scan(valuePtrs...); scanErr != nil {
+				return fmt.Errorf("error scanning %s row: %v", prefix, scanErr)
 			}
 
 			for i, field := range fields {
