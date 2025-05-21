@@ -128,6 +128,55 @@ func (a *App) executeAndProcessMetricLogQuery(query string, fields []string, pre
 	return nil
 }
 
+func (a *App) showMetricDescription(metricName string) {
+	var query string
+	var source string
+	
+	if strings.HasPrefix(metricName, "M_") {
+		// Metric from system.metrics
+		cleanName := strings.TrimPrefix(metricName, "M_")
+		query = fmt.Sprintf("SELECT description FROM system.metrics WHERE name = '%s'", cleanName)
+		source = "metric"
+	} else if strings.HasPrefix(metricName, "P_") {
+		// Event from system.events
+		cleanName := strings.TrimPrefix(metricName, "P_")
+		query = fmt.Sprintf("SELECT description FROM system.events WHERE name = '%s'", cleanName)
+		source = "event"
+	} else {
+		return
+	}
+
+	rows, err := a.clickHouse.Query(query)
+	if err != nil {
+		a.tviewApp.QueueUpdateDraw(func() {
+			a.mainView.SetText(fmt.Sprintf("Error getting %s description: %v", source, err))
+		})
+		return
+	}
+	defer rows.Close()
+
+	var description string
+	if rows.Next() {
+		if err := rows.Scan(&description); err != nil {
+			a.tviewApp.QueueUpdateDraw(func() {
+				a.mainView.SetText(fmt.Sprintf("Error scanning %s description: %v", source, err))
+			})
+			return
+		}
+	}
+
+	a.tviewApp.QueueUpdateDraw(func() {
+		modal := tview.NewModal().
+			SetText(fmt.Sprintf("[yellow]%s[-]\n\n%s", metricName, description)).
+			AddButtons([]string{"OK"}).
+			SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+				a.pages.HidePage("metric_desc")
+			})
+
+		a.pages.AddPage("metric_desc", modal, true, true)
+	})
+}
+
 func (a *App) ShowMetricLog(fromTime, toTime time.Time, cluster string) {
 	if a.clickHouse == nil {
 		a.mainView.SetText("Error: Please connect to a ClickHouse instance first using :connect command")
@@ -282,6 +331,14 @@ ORDER BY bucket_time`,
 					return nil
 				}
 				if filterHandler := filteredTable.GetInputCapture(a.tviewApp, a.pages); filterHandler(event) == nil {
+					return nil
+				}
+				if event.Key() == tcell.KeyEnter {
+					row, _ := filteredTable.Table.GetSelection()
+					if row > 0 { // Skip header row
+						metricName := filteredTable.Table.GetCell(row, 0).Text
+						go a.showMetricDescription(metricName)
+					}
 					return nil
 				}
 				return event
