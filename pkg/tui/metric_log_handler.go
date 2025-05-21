@@ -66,7 +66,7 @@ func (a *App) executeAndProcessQuery(query string, fields []string, prefix strin
 			}
 		}
 
-		sparkline := generateSparkline(values, buckets)
+		sparkline := generateSparkline(values)
 		color := tcell.ColorWhite
 		if maxVal > 2*minVal {
 			color = tcell.ColorYellow
@@ -106,22 +106,40 @@ func (a *App) ShowMetricLog(fromTime, toTime time.Time, cluster string) {
 
 	a.mainView.SetText("Loading metric_log data, please wait...")
 
+	// Format time strings for queries
+	fromStr := fromTime.Format("2006-01-02 15:04:05 -07:00")
+	toStr := toTime.Format("2006-01-02 15:04:05 -07:00")
+
+	table := tview.NewTable().
+		SetBorders(false).
+		SetSelectable(true, true)
+
+	// Set headers
+	headers := []string{"Metric", "Min", "Trend", "Max"}
+	for col, header := range headers {
+		table.SetCell(0, col,
+			tview.NewTableCell(header).
+				SetTextColor(tcell.ColorYellow).
+				SetAlign(tview.AlignCenter),
+		)
+	}
+
 	go func() {
 		// Get available metric columns
-		rows, err := a.clickHouse.Query(metricLogColumnsQuery)
-		if err != nil {
+		columnNameRows, columnNameErr := a.clickHouse.Query(metricLogColumnsQuery)
+		if columnNameErr != nil {
 			a.tviewApp.QueueUpdateDraw(func() {
-				a.mainView.SetText(fmt.Sprintf("Error getting metric columns: %v", err))
+				a.mainView.SetText(fmt.Sprintf("Error getting metric columns: %v", columnNameErr))
 			})
 			return
 		}
-		defer rows.Close()
+		defer columnNameRows.Close()
 
 		var columns []string
 		maxNameLen := 0
-		for rows.Next() {
+		for columnNameRows.Next() {
 			var name string
-			if err := rows.Scan(&name); err != nil {
+			if err := columnNameRows.Scan(&name); err != nil {
 				a.tviewApp.QueueUpdateDraw(func() {
 					a.mainView.SetText(fmt.Sprintf("Error scanning column name: %v", err))
 				})
@@ -133,9 +151,9 @@ func (a *App) ShowMetricLog(fromTime, toTime time.Time, cluster string) {
 			}
 		}
 
-		if err := rows.Err(); err != nil {
+		if rowErr := columnNameRows.Err(); rowErr != nil {
 			a.tviewApp.QueueUpdateDraw(func() {
-				a.mainView.SetText(fmt.Sprintf("Error reading columns: %v", err))
+				a.mainView.SetText(fmt.Sprintf("Error reading columns: %v", rowErr))
 			})
 			return
 		}
@@ -150,11 +168,7 @@ func (a *App) ShowMetricLog(fromTime, toTime time.Time, cluster string) {
 		// Calculate time interval in seconds
 		interval := int(math.Ceil(float64(toTime.Sub(fromTime).Seconds()) / float64(buckets)))
 
-		// Format time strings for queries
-		fromStr := fromTime.Format("2006-01-02 15:04:05 -07:00")
-		toStr := toTime.Format("2006-01-02 15:04:05 -07:00")
-
-		// Build and execute queries
+		// Build field lists
 		var currentFields []string
 		var profileFields []string
 		for _, col := range columns {
@@ -164,13 +178,13 @@ func (a *App) ShowMetricLog(fromTime, toTime time.Time, cluster string) {
 				profileFields = append(profileFields, col)
 			}
 		}
-
+		row := 1
 		// Execute CurrentMetrics query
 		if len(currentFields) > 0 {
 			var selectParts []string
 			for _, field := range currentFields {
 				alias := strings.TrimPrefix(field, "CurrentMetrics_")
-				selectParts = append(selectParts, 
+				selectParts = append(selectParts,
 					fmt.Sprintf("lttb(%d)(event_time, %s) AS %s", buckets, field, alias))
 			}
 
@@ -219,7 +233,7 @@ WHERE event_date >= toDate(parseDateTimeBestEffort('%s'))
 
 			if err := rows.Err(); err != nil {
 				a.tviewApp.QueueUpdateDraw(func() {
-					a.mainView.SetText(fmt.Sprintf("Error reading CurrentMetrics rows: %v", err))
+					a.mainView.SetText(fmt.Sprintf("Error reading CurrentMetrics columnNameRows: %v", err))
 				})
 				return
 			}
@@ -241,7 +255,7 @@ WHERE event_date >= toDate(parseDateTimeBestEffort('%s'))
 					}
 				}
 
-				sparkline := generateSparkline(values, buckets)
+				sparkline := generateSparkline(values)
 				color := tcell.ColorWhite
 				if maxVal > 2*minVal {
 					color = tcell.ColorYellow
@@ -327,7 +341,7 @@ ORDER BY bucket_time`,
 
 			if err := rows.Err(); err != nil {
 				a.tviewApp.QueueUpdateDraw(func() {
-					a.mainView.SetText(fmt.Sprintf("Error reading ProfileEvents rows: %v", err))
+					a.mainView.SetText(fmt.Sprintf("Error reading ProfileEvents columnNameRows: %v", err))
 				})
 				return
 			}
@@ -349,7 +363,7 @@ ORDER BY bucket_time`,
 					}
 				}
 
-				sparkline := generateSparkline(values, buckets)
+				sparkline := generateSparkline(values)
 				color := tcell.ColorWhite
 				if maxVal > 2*minVal {
 					color = tcell.ColorYellow
@@ -377,21 +391,7 @@ ORDER BY bucket_time`,
 
 		// Create table to display results
 		a.tviewApp.QueueUpdateDraw(func() {
-			table := tview.NewTable().
-				SetBorders(false).
-				SetSelectable(true, true)
-
-			// Set headers
-			headers := []string{"Metric", "Min", "Trend", "Max"}
-			for col, header := range headers {
-				table.SetCell(0, col,
-					tview.NewTableCell(header).
-						SetTextColor(tcell.ColorYellow).
-						SetAlign(tview.AlignCenter),
-				)
-			}
-
-			// Add data rows with sparklines
+			// Add data columnNameRows with sparklines
 			row := 1
 			for _, field := range currentFields {
 				// Get min/max values and generate sparkline
@@ -407,7 +407,7 @@ ORDER BY bucket_time`,
 					}
 				}
 
-				sparkline := generateSparkline(values, buckets)
+				sparkline := generateSparkline(values)
 				alias := strings.TrimPrefix(field, "CurrentMetrics_")
 
 				// Set cell colors based on value ranges
@@ -454,7 +454,7 @@ ORDER BY bucket_time`,
 }
 
 // Helper function to generate ASCII sparkline
-func generateSparkline(values []float64, width int) string {
+func generateSparkline(values []float64) string {
 	if len(values) == 0 {
 		return ""
 	}
