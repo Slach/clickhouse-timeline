@@ -48,7 +48,7 @@ func (a *App) executeAndProcessMetricLogQuery(query string, fields []string, pre
 			}
 
 			for i, field := range fields {
-				alias := strings.TrimPrefix(field, prefix+"_")
+				alias := "M_" + strings.TrimPrefix(field, prefix+"_")
 				for _, tuple := range *values[i] {
 					if len(tuple) >= 2 {
 						if val, ok := tuple[1].(float64); ok {
@@ -58,7 +58,7 @@ func (a *App) executeAndProcessMetricLogQuery(query string, fields []string, pre
 				}
 			}
 		} else {
-			// Handle ProfileEvents which returns direct values
+			// Handle ProfileEvent which returns direct values
 			values := make([]float64, len(fields))
 			valuePtrs := make([]interface{}, len(fields)+1)
 			for i := range values {
@@ -71,7 +71,7 @@ func (a *App) executeAndProcessMetricLogQuery(query string, fields []string, pre
 			}
 
 			for i, field := range fields {
-				alias := strings.TrimPrefix(field, prefix+"_")
+				alias := "P_" + strings.TrimPrefix(field, prefix+"_")
 				results[alias] = append(results[alias], values[i])
 			}
 		}
@@ -82,7 +82,7 @@ func (a *App) executeAndProcessMetricLogQuery(query string, fields []string, pre
 	}
 
 	// Add results to display table
-	for field, values := range results {
+	for alias, values := range results {
 		if len(values) == 0 {
 			continue
 		}
@@ -107,7 +107,7 @@ func (a *App) executeAndProcessMetricLogQuery(query string, fields []string, pre
 			color = tcell.ColorRed
 		}
 
-		table.SetCell(*row, 0, tview.NewTableCell(field).
+		table.SetCell(*row, 0, tview.NewTableCell(alias).
 			SetTextColor(color).
 			SetAlign(tview.AlignLeft))
 		table.SetCell(*row, 1, tview.NewTableCell(fmt.Sprintf("%.2f", minVal)).
@@ -245,11 +245,11 @@ WHERE event_date >= toDate(parseDateTimeBestEffort('%s'))
 			}
 		}
 
-		// Execute ProfileEvents query
+		// Execute ProfileEvent query
 		if len(profileFields) > 0 {
 			var selectParts []string
 			for _, field := range profileFields {
-				alias := strings.TrimPrefix(field, "ProfileEvents_")
+				alias := strings.TrimPrefix(field, "ProfileEvent_")
 				selectParts = append(selectParts, fmt.Sprintf("sum(%s) AS %s", field, strings.ToLower(alias)))
 			}
 
@@ -269,7 +269,7 @@ ORDER BY bucket_time`,
 				cluster,
 				fromStr, toStr, fromStr, toStr)
 
-			err := a.executeAndProcessMetricLogQuery(query, profileFields, "ProfileEvents", table, &row)
+			err := a.executeAndProcessMetricLogQuery(query, profileFields, "ProfileEvent", table, &row)
 			if err != nil {
 				a.tviewApp.QueueUpdateDraw(func() {
 					a.mainView.SetText(err.Error())
