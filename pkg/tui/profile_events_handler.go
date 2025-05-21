@@ -5,6 +5,7 @@ import (
 	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/rs/zerolog/log"
 	"strings"
 	"time"
 )
@@ -30,7 +31,6 @@ WHERE
 GROUP BY key
 ORDER BY key
 `
-
 
 func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string, fromTime, toTime time.Time, cluster string) {
 	if a.clickHouse == nil {
@@ -81,7 +81,11 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 			})
 			return
 		}
-		defer rows.Close()
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close ProfileEvents rows")
+			}
+		}()
 
 		// Create table to display results
 		a.tviewApp.QueueUpdateDraw(func() {
@@ -155,7 +159,7 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 				categoryValue,
 				fromStr,
 				toStr)
-			table.SetTitle(title).SetBorder(true)
+			filteredTable.Table.SetTitle(title).SetBorder(true)
 
 			// Add key handler for filtering table content
 			filteredTable.Table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -171,26 +175,31 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 					return nil
 				}
 				if event.Key() == tcell.KeyEnter {
-					row, _ := table.GetSelection()
-					eventName := table.GetCell(row, 0).Text
+					row, _ := filteredTable.Table.GetSelection()
+					eventName := filteredTable.Table.GetCell(row, 0).Text
 
 					// Query event description
 					go func() {
-						query := fmt.Sprintf("SELECT description FROM system.events WHERE name = '%s'", eventName)
-						rows, err := a.clickHouse.Query(query)
-						if err != nil {
+						descrQuery := fmt.Sprintf("SELECT description FROM system.events WHERE name = '%s'", eventName)
+						descrRows, descrErr := a.clickHouse.Query(descrQuery)
+						if descrErr != nil {
 							a.tviewApp.QueueUpdateDraw(func() {
-								a.mainView.SetText(fmt.Sprintf("Error getting event description: %v", err))
+								a.mainView.SetText(fmt.Sprintf("Error getting event description: %v", descrErr))
+								a.pages.SwitchToPage("main")
 							})
 							return
 						}
-						defer rows.Close()
+						defer func() {
+							if closeErr := descrRows.Close(); closeErr != nil {
+								log.Error().Err(closeErr).Msg("can't close ProfileEvents descrRows")
+							}
+						}()
 
 						var description string
-						if rows.Next() {
-							if err := rows.Scan(&description); err != nil {
+						if descrRows.Next() {
+							if scanErr := rows.Scan(&description); scanErr != nil {
 								a.tviewApp.QueueUpdateDraw(func() {
-									a.mainView.SetText(fmt.Sprintf("Error scanning description: %v", err))
+									a.mainView.SetText(fmt.Sprintf("Error scanning description: %v", scanErr))
 								})
 								return
 							}
@@ -217,16 +226,16 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 			queryView := widgets.NewQueryView()
 
 			// Update query view when selection changes
-			table.SetSelectionChangedFunc(func(row, column int) {
-				if row > 0 && row <= len(originalRows) {
-					if normalizedQuery := originalRows[row-1][5].Text; normalizedQuery != "" {
+			filteredTable.Table.SetSelectionChangedFunc(func(row, column int) {
+				if row > 0 && row <= len(filteredTable.OriginalRows) {
+					if normalizedQuery := filteredTable.OriginalRows[row-1][5].Text; normalizedQuery != "" {
 						queryView.SetSQL(normalizedQuery)
 					}
 				}
 			})
 
 			// Add components to flex
-			flex.AddItem(table, 0, 2, true).
+			flex.AddItem(filteredTable.Table, 0, 2, true).
 				AddItem(queryView, 0, 1, false)
 
 			a.pages.AddPage("profile_events", flex, true, true)
