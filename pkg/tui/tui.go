@@ -333,6 +333,8 @@ func (a *App) setupKeybindings() {
 						a.toTime,
 						a.cluster,
 					)
+				case CmdMetricLog:
+					a.ShowMetricLog(a.fromTime, a.toTime, a.cluster)
 				}
 			}
 		})
