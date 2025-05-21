@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
 	"github.com/rs/zerolog/log"
 	"math"
 	"strings"
@@ -107,18 +108,20 @@ func (a *App) executeAndProcessMetricLogQuery(query string, fields []string, pre
 			color = tcell.ColorRed
 		}
 
-		table.SetCell(*row, 0, tview.NewTableCell(alias).
-			SetTextColor(color).
-			SetAlign(tview.AlignLeft))
-		table.SetCell(*row, 1, tview.NewTableCell(fmt.Sprintf("%.2f", minVal)).
-			SetTextColor(color).
-			SetAlign(tview.AlignRight))
-		table.SetCell(*row, 2, tview.NewTableCell(sparkline).
-			SetTextColor(color).
-			SetAlign(tview.AlignLeft))
-		table.SetCell(*row, 3, tview.NewTableCell(fmt.Sprintf("%.2f", maxVal)).
-			SetTextColor(color).
-			SetAlign(tview.AlignLeft))
+		filteredTable.AddRow([]*tview.TableCell{
+			tview.NewTableCell(alias).
+				SetTextColor(color).
+				SetAlign(tview.AlignLeft),
+			tview.NewTableCell(fmt.Sprintf("%.2f", minVal)).
+				SetTextColor(color).
+				SetAlign(tview.AlignRight),
+			tview.NewTableCell(sparkline).
+				SetTextColor(color).
+				SetAlign(tview.AlignLeft),
+			tview.NewTableCell(fmt.Sprintf("%.2f", maxVal)).
+				SetTextColor(color).
+				SetAlign(tview.AlignLeft),
+		})
 
 		*row++
 	}
@@ -143,19 +146,9 @@ func (a *App) ShowMetricLog(fromTime, toTime time.Time, cluster string) {
 	fromStr := fromTime.Format("2006-01-02 15:04:05 -07:00")
 	toStr := toTime.Format("2006-01-02 15:04:05 -07:00")
 
-	table := tview.NewTable().
-		SetBorders(false).
-		SetSelectable(true, true)
-
-	// Set headers
-	headers := []string{"Metric", "Min", "Spark line", "Max"}
-	for col, header := range headers {
-		table.SetCell(0, col,
-			tview.NewTableCell(header).
-				SetTextColor(tcell.ColorYellow).
-				SetAlign(tview.AlignCenter),
-		)
-	}
+	// Create filtered table widget
+	filteredTable := widgets.NewFilteredTable()
+	filteredTable.SetupHeaders([]string{"Metric", "Min", "Spark line", "Max"})
 
 	go func() {
 		// Get available metric columns
@@ -280,18 +273,21 @@ ORDER BY bucket_time`,
 
 		// Create table to display results
 		a.tviewApp.QueueUpdateDraw(func() {
-			table.SetTitle(fmt.Sprintf("Metric Log: %s to %s", fromStr, toStr)).
+			filteredTable.Table.SetTitle(fmt.Sprintf("Metric Log: %s to %s", fromStr, toStr)).
 				SetBorder(true)
 
-			table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+			filteredTable.Table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 				if event.Key() == tcell.KeyEscape {
 					a.pages.SwitchToPage("main")
+					return nil
+				}
+				if filterHandler := filteredTable.GetInputCapture(a.tviewApp, a.pages); filterHandler(event) == nil {
 					return nil
 				}
 				return event
 			})
 
-			a.pages.AddPage("metric_log", table, true, true)
+			a.pages.AddPage("metric_log", filteredTable.Table, true, true)
 			a.pages.SwitchToPage("metric_log")
 		})
 	}()

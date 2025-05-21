@@ -31,39 +31,6 @@ GROUP BY key
 ORDER BY key
 `
 
-func (a *App) filterProfileEventsTable(headers []string, table *tview.Table, originalRows [][]*tview.TableCell, filter string) {
-	// Clear existing rows (keep headers)
-	for r := table.GetRowCount() - 1; r > 0; r-- {
-		table.RemoveRow(r)
-	}
-
-	filter = strings.ToLower(filter)
-	for _, row := range originalRows {
-		// Check if any cell in row matches filter (case-insensitive)
-		match := false
-		for _, cell := range row {
-			if strings.Contains(strings.ToLower(cell.Text), filter) {
-				match = true
-				break
-			}
-		}
-
-		if match || filter == "" {
-			r := table.GetRowCount()
-			for c, cell := range row {
-				// clone only first columns which exists in headers
-				if c < len(headers) {
-					// Clone the original cell to preserve all attributes
-					newCell := tview.NewTableCell(cell.Text).
-						SetStyle(cell.Style).
-						SetSelectedStyle(cell.SelectedStyle).
-						SetAlign(cell.Align)
-					table.SetCell(r, c, newCell)
-				}
-			}
-		}
-	}
-}
 
 func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string, fromTime, toTime time.Time, cluster string) {
 	if a.clickHouse == nil {
@@ -118,24 +85,13 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 
 		// Create table to display results
 		a.tviewApp.QueueUpdateDraw(func() {
-			table := tview.NewTable().
-				SetBorders(false).
-				SetSelectable(true, true).
-				SetFixed(1, 1)
+			// Create filtered table widget
+			filteredTable := widgets.NewFilteredTable()
+			filteredTable.SetupHeaders([]string{"Event", "Count", "p50", "p90", "p99"})
 
 			// Create flex layout with table on left and query view on right
 			flex := tview.NewFlex().
 				SetDirection(tview.FlexColumn)
-
-			// Set headers
-			headers := []string{"Event", "Count", "p50", "p90", "p99"}
-			for col, header := range headers {
-				table.SetCell(0, col,
-					tview.NewTableCell(header).SetTextColor(tcell.ColorYellow).SetAlign(tview.AlignCenter),
-				)
-			}
-			// Store original cells data for filtering (preserving colors and formatting)
-			originalRows := make([][]*tview.TableCell, 0)
 
 			// Process rows
 			row := 1
@@ -167,28 +123,22 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 				}
 
 				// Add row to table
-				table.SetCell(row, 0, tview.NewTableCell(event).
-					SetTextColor(color).
-					SetAlign(tview.AlignLeft))
-				table.SetCell(row, 1, tview.NewTableCell(fmt.Sprintf("%d", count)).
-					SetTextColor(color).
-					SetAlign(tview.AlignRight))
-				table.SetCell(row, 2, tview.NewTableCell(p50s).
-					SetTextColor(color).
-					SetAlign(tview.AlignRight))
-				table.SetCell(row, 3, tview.NewTableCell(p90s).
-					SetTextColor(color).
-					SetAlign(tview.AlignRight))
-				table.SetCell(row, 4, tview.NewTableCell(p99s).
-					SetTextColor(color).
-					SetAlign(tview.AlignRight))
-				//add normalizedQuery as hidden column in originalRows
-				originalRows = append(originalRows, []*tview.TableCell{
-					table.GetCell(row, 0),
-					table.GetCell(row, 1),
-					table.GetCell(row, 2),
-					table.GetCell(row, 3),
-					table.GetCell(row, 4),
+				filteredTable.AddRow([]*tview.TableCell{
+					tview.NewTableCell(event).
+						SetTextColor(color).
+						SetAlign(tview.AlignLeft),
+					tview.NewTableCell(fmt.Sprintf("%d", count)).
+						SetTextColor(color).
+						SetAlign(tview.AlignRight),
+					tview.NewTableCell(p50s).
+						SetTextColor(color).
+						SetAlign(tview.AlignRight),
+					tview.NewTableCell(p90s).
+						SetTextColor(color).
+						SetAlign(tview.AlignRight),
+					tview.NewTableCell(p99s).
+						SetTextColor(color).
+						SetAlign(tview.AlignRight),
 					tview.NewTableCell(normalizedQuery).SetSelectable(false),
 				})
 
@@ -208,7 +158,7 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 			table.SetTitle(title).SetBorder(true)
 
 			// Add key handler for filtering table content
-			table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+			filteredTable.Table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 				if event.Key() == tcell.KeyEscape {
 					if a.pages.HasPage("heatmap") {
 						a.pages.SwitchToPage("heatmap")
@@ -217,29 +167,7 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 					}
 					return nil
 				}
-				if event.Rune() == '/' {
-					// Show filter input for table content
-					filterInput := tview.NewInputField().
-						SetLabel("/").
-						SetFieldWidth(30).
-						SetChangedFunc(func(text string) {
-							a.filterProfileEventsTable(headers, table, originalRows, text)
-						})
-
-					filterInput.SetDoneFunc(func(key tcell.Key) {
-						if key == tcell.KeyEscape || key == tcell.KeyEnter {
-							a.pages.RemovePage("profile_filter")
-							a.tviewApp.SetFocus(table)
-						}
-					})
-
-					filterModal := tview.NewFlex().
-						SetDirection(tview.FlexRow).
-						AddItem(filterInput, 1, 0, true).
-						AddItem(table, 0, 1, false)
-
-					a.pages.AddPage("profile_filter", filterModal, true, true)
-					a.tviewApp.SetFocus(filterInput)
+				if filterHandler := filteredTable.GetInputCapture(a.tviewApp, a.pages); filterHandler(event) == nil {
 					return nil
 				}
 				if event.Key() == tcell.KeyEnter {
