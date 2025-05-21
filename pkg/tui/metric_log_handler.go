@@ -21,7 +21,7 @@ WHERE database='system'
   AND type NOT LIKE 'Date%'`
 )
 
-func (a *App) executeAndProcessMetricLogQuery(query string, fields []string, prefix string, table *tview.Table, row *int) error {
+func (a *App) executeAndProcessMetricLogQuery(query string, fields []string, prefix string, filteredTable *widgets.FilteredTable, row *int) error {
 	rows, err := a.clickHouse.Query(query)
 	if err != nil {
 		return fmt.Errorf("error executing %s query: %v", prefix, err)
@@ -196,7 +196,7 @@ func (a *App) ShowMetricLog(fromTime, toTime time.Time, cluster string) {
 		}
 
 		// Calculate time interval in seconds
-		interval := int(math.Ceil(float64(toTime.Sub(fromTime).Seconds()) / float64(buckets)))
+		interval := int(math.Ceil(toTime.Sub(fromTime).Seconds() / float64(buckets)))
 
 		// Build field lists
 		var currentFields []string
@@ -229,7 +229,7 @@ WHERE event_date >= toDate(parseDateTimeBestEffort('%s'))
 				cluster,
 				fromStr, toStr, fromStr, toStr)
 
-			err := a.executeAndProcessMetricLogQuery(query, currentFields, "CurrentMetric", table, &row)
+			err := a.executeAndProcessMetricLogQuery(query, currentFields, "CurrentMetric", filteredTable, &row)
 			if err != nil {
 				a.tviewApp.QueueUpdateDraw(func() {
 					a.mainView.SetText(err.Error())
@@ -262,7 +262,7 @@ ORDER BY bucket_time`,
 				cluster,
 				fromStr, toStr, fromStr, toStr)
 
-			err := a.executeAndProcessMetricLogQuery(query, profileFields, "ProfileEvent", table, &row)
+			err := a.executeAndProcessMetricLogQuery(query, profileFields, "ProfileEvent", filteredTable, &row)
 			if err != nil {
 				a.tviewApp.QueueUpdateDraw(func() {
 					a.mainView.SetText(err.Error())
