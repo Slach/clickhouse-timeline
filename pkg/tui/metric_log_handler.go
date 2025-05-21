@@ -253,8 +253,8 @@ SELECT
 FROM clusterAllReplicas('%s', merge(system,'^metric_log'))
 WHERE event_date >= toDate(parseDateTimeBestEffort('%s')) 
   AND event_date <= toDate(parseDateTimeBestEffort('%s'))
-  AND event_time >= parseDateTimeBestEffort('%s')) 
-  AND event_time <= parseDateTimeBestEffort('%s'))
+  AND event_time >= parseDateTimeBestEffort('%s') 
+  AND event_time <= parseDateTimeBestEffort('%s')
 GROUP BY bucket_time
 ORDER BY bucket_time`,
 				interval,
