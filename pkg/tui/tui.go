@@ -2,8 +2,8 @@ package tui
 
 import (
 	"fmt"
-	"github.com/Slach/clickhouse-timeline/pkg/types"
 	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
+	"github.com/Slach/clickhouse-timeline/pkg/types"
 	"github.com/araddon/dateparse"
 	"strings"
 	"time"
@@ -96,7 +96,7 @@ func (a *App) ApplyCLIParameters(c *types.CLI, commandName string) {
 
 	if c.Category != "" {
 		a.SetCategory(c.Category)
-		mainMsg += fmt.Sprintf("Set category '%s'\n", c.Metric)
+		mainMsg += fmt.Sprintf("Set category '%s'\n", c.Category)
 	}
 	if mainMsg != "" {
 		mainMsg += "Press ':' to continue"
@@ -277,7 +277,6 @@ func (a *App) defaultInputHandler(event *tcell.EventKey) *tcell.EventKey {
 			return nil
 		}
 	}
-
 
 	return event
 }
