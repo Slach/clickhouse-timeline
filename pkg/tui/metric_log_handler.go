@@ -296,7 +296,7 @@ SELECT
 FROM clusterAllReplicas('%s', merge(system,'^metric_log'))
 WHERE event_date >= toDate(parseDateTimeBestEffort('%s')) 
   AND event_date <= toDate(parseDateTimeBestEffort('%s'))
-  AND event_time >= parseDateTimeBestEffort('%s') 
+  AND event_time >= parseDateTimeBestEffort('%s')) 
   AND event_time <= parseDateTimeBestEffort('%s'))
 GROUP BY bucket_time
 ORDER BY bucket_time`,
@@ -305,87 +305,12 @@ ORDER BY bucket_time`,
 				cluster,
 				fromStr, toStr, fromStr, toStr)
 
-			// Execute query and process results...
-			rows, err := a.clickHouse.Query(query)
+			err := a.executeAndProcessQuery(query, profileFields, "ProfileEvents", buckets, table, &row)
 			if err != nil {
 				a.tviewApp.QueueUpdateDraw(func() {
-					a.mainView.SetText(fmt.Sprintf("Error executing ProfileEvents query: %v", err))
+					a.mainView.SetText(err.Error())
 				})
 				return
-			}
-			defer rows.Close()
-
-			// Store results for display
-			profileResults := make(map[string][]float64)
-			for rows.Next() {
-				var bucketTime time.Time
-				values := make([]float64, len(profileFields))
-				valuePtrs := make([]interface{}, len(profileFields)+1)
-				valuePtrs[0] = &bucketTime
-				for i := range values {
-					valuePtrs[i+1] = &values[i]
-				}
-
-				if err := rows.Scan(valuePtrs...); err != nil {
-					a.tviewApp.QueueUpdateDraw(func() {
-						a.mainView.SetText(fmt.Sprintf("Error scanning ProfileEvents row: %v", err))
-					})
-					return
-				}
-
-				for i, field := range profileFields {
-					alias := strings.TrimPrefix(field, "ProfileEvents_")
-					profileResults[alias] = append(profileResults[alias], values[i])
-				}
-			}
-
-			if err := rows.Err(); err != nil {
-				a.tviewApp.QueueUpdateDraw(func() {
-					a.mainView.SetText(fmt.Sprintf("Error reading ProfileEvents columnNameRows: %v", err))
-				})
-				return
-			}
-
-			// Add ProfileEvents to display table
-			for field, values := range profileResults {
-				if len(values) == 0 {
-					continue
-				}
-
-				minVal := values[0]
-				maxVal := values[0]
-				for _, v := range values {
-					if v < minVal {
-						minVal = v
-					}
-					if v > maxVal {
-						maxVal = v
-					}
-				}
-
-				sparkline := generateSparkline(values)
-				color := tcell.ColorWhite
-				if maxVal > 2*minVal {
-					color = tcell.ColorYellow
-				}
-				if maxVal > 4*minVal {
-					color = tcell.ColorRed
-				}
-
-				table.SetCell(row, 0, tview.NewTableCell(field).
-					SetTextColor(color).
-					SetAlign(tview.AlignLeft))
-				table.SetCell(row, 1, tview.NewTableCell(fmt.Sprintf("%.1f", minVal)).
-					SetTextColor(color).
-					SetAlign(tview.AlignRight))
-				table.SetCell(row, 2, tview.NewTableCell(sparkline).
-					SetTextColor(color).
-					SetAlign(tview.AlignLeft))
-				table.SetCell(row, 3, tview.NewTableCell(fmt.Sprintf("%.1f", maxVal)).
-					SetTextColor(color).
-					SetAlign(tview.AlignRight))
-
-				row++
 			}
 		}
 
