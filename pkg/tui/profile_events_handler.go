@@ -67,7 +67,12 @@ func (a *App) filterProfileEventsTable(headers []string, table *tview.Table, ori
 
 func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string, fromTime, toTime time.Time, cluster string) {
 	if a.clickHouse == nil {
-		a.mainView.SetText("Error: Please connect to a ClickHouse instance first")
+		a.mainView.SetText("Error: Please connect to a ClickHouse instance first using :connect command")
+		a.pages.SwitchToPage("main")
+		return
+	}
+	if cluster == "" {
+		a.mainView.SetText("Error: Please select a cluster first using :cluster command")
 		a.pages.SwitchToPage("main")
 		return
 	}

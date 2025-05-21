@@ -126,12 +126,13 @@ func (a *App) executeAndProcessMetricLogQuery(query string, fields []string, pre
 
 func (a *App) ShowMetricLog(fromTime, toTime time.Time, cluster string) {
 	if a.clickHouse == nil {
-		a.mainView.SetText("Error: Please connect to a ClickHouse instance first")
+		a.mainView.SetText("Error: Please connect to a ClickHouse instance first using :connect command")
+		a.pages.SwitchToPage("main")
 		return
 	}
-
 	if cluster == "" {
 		a.mainView.SetText("Error: Please select a cluster first using :cluster command")
+		a.pages.SwitchToPage("main")
 		return
 	}
 

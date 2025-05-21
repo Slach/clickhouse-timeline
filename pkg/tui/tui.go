@@ -98,33 +98,43 @@ func (a *App) ApplyCLIParameters(c *types.CLI, commandName string) {
 		a.SetCategory(c.Category)
 		mainMsg += fmt.Sprintf("Set category '%s'\n", c.Category)
 	}
-	if mainMsg != "" {
-		mainMsg += "Press ':' to continue"
-		a.mainView.SetText(mainMsg)
-	}
 
 	// Switch to appropriate mode based on command
-	switch commandName {
-	case "heatmap":
-		a.ShowHeatmap()
-	case "flamegraph":
-		a.ShowFlamegraphForm()
-	case "profile_events":
+	doCmdExecute := false
+	if commandName != "" {
+		doCmdExecute = true
 		if a.clickHouse == nil {
-			a.mainView.SetText("Error: Please connect to a ClickHouse instance first")
-			break
+			mainMsg += "Error: Please connect to a ClickHouse instance first using :connect command\n"
+			doCmdExecute = false
 		}
 		if a.cluster == "" {
-			a.mainView.SetText("Error: Please select a cluster first using :cluster command")
-			break
+			mainMsg += "Error: Please select a cluster first using :cluster command\n"
+			doCmdExecute = false
 		}
-		a.ShowProfileEvents(
-			a.category,
-			a.selectedCategory,
-			a.fromTime,
-			a.toTime,
-			a.cluster,
-		)
+
+	}
+	if mainMsg != "" {
+		mainMsg += "Press ':' to continue"
+	}
+	a.mainView.SetText(mainMsg)
+
+	if doCmdExecute {
+		switch commandName {
+		case "heatmap":
+			a.ShowHeatmap()
+		case "flamegraph":
+			a.ShowFlamegraphForm()
+		case "profile_events":
+			a.ShowProfileEvents(
+				a.category,
+				a.selectedCategory,
+				a.fromTime,
+				a.toTime,
+				a.cluster,
+			)
+		case "metric_log":
+			a.ShowMetricLog(a.fromTime, a.toTime, a.cluster)
+		}
 	}
 }
 
