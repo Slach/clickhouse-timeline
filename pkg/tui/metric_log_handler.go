@@ -33,19 +33,44 @@ func (a *App) executeAndProcessQuery(query string, fields []string, prefix strin
 	// Store results for display
 	results := make(map[string][]float64)
 	for rows.Next() {
-		values := make([]float64, len(fields))
-		valuePtrs := make([]interface{}, len(fields))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
+		if prefix == "CurrentMetrics" {
+			// Handle CurrentMetrics which returns array(tuple(time,value))
+			values := make([][]interface{}, len(fields))
+			valuePtrs := make([]interface{}, len(fields))
+			for i := range values {
+				valuePtrs[i] = &values[i]
+			}
 
-		if err := rows.Scan(valuePtrs...); err != nil {
-			return fmt.Errorf("error scanning %s row: %v", prefix, err)
-		}
+			if err := rows.Scan(valuePtrs...); err != nil {
+				return fmt.Errorf("error scanning %s row: %v", prefix, err)
+			}
 
-		for i, field := range fields {
-			alias := strings.TrimPrefix(field, prefix+"_")
-			results[alias] = append(results[alias], values[i])
+			for i, field := range fields {
+				alias := strings.TrimPrefix(field, prefix+"_")
+				for _, tuple := range values[i] {
+					if tupleSlice, ok := tuple.([]interface{}); ok && len(tupleSlice) >= 2 {
+						if val, ok := tupleSlice[1].(float64); ok {
+							results[alias] = append(results[alias], val)
+						}
+					}
+				}
+			}
+		} else {
+			// Handle ProfileEvents which returns direct values
+			values := make([]float64, len(fields))
+			valuePtrs := make([]interface{}, len(fields))
+			for i := range values {
+				valuePtrs[i] = &values[i]
+			}
+
+			if err := rows.Scan(valuePtrs...); err != nil {
+				return fmt.Errorf("error scanning %s row: %v", prefix, err)
+			}
+
+			for i, field := range fields {
+				alias := strings.TrimPrefix(field, prefix+"_")
+				results[alias] = append(results[alias], values[i])
+			}
 		}
 	}
 
