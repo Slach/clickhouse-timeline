@@ -19,7 +19,7 @@ WHERE database='system'
   AND (name LIKE 'Current%%' OR name LIKE 'Profile%%')`
 )
 
-func (a *App) executeAndProcessQuery(query string, fields []string, prefix string, buckets int, table *tview.Table, row *int) error {
+func (a *App) executeAndProcessMetricLogQuery(query string, fields []string, prefix string, buckets int, table *tview.Table, row *int) error {
 	rows, err := a.clickHouse.Query(query)
 	if err != nil {
 		return fmt.Errorf("error executing %s query: %v", prefix, err)
@@ -36,7 +36,7 @@ func (a *App) executeAndProcessQuery(query string, fields []string, prefix strin
 		if prefix == "CurrentMetrics" {
 			// Handle CurrentMetrics which returns array(tuple(time,value))
 			valuePtrs := make([]interface{}, len(fields))
-			values := make([][]struct {
+			values := make([][][]struct {
 				Time  time.Time
 				Value float64
 			}, len(fields))
@@ -50,8 +50,10 @@ func (a *App) executeAndProcessQuery(query string, fields []string, prefix strin
 
 			for i, field := range fields {
 				alias := strings.TrimPrefix(field, prefix+"_")
-				for _, point := range values[i] {
-					results[alias] = append(results[alias], point.Value)
+				for _, lttbArr := range values[i] {
+					for _, point := range lttbArr {
+						results[alias] = append(results[alias], point.Value)
+					}
 				}
 			}
 		} else {
@@ -227,7 +229,7 @@ WHERE event_date >= toDate(parseDateTimeBestEffort('%s'))
 				cluster,
 				fromStr, toStr, fromStr, toStr)
 
-			err := a.executeAndProcessQuery(query, currentFields, "CurrentMetrics", buckets, table, &row)
+			err := a.executeAndProcessMetricLogQuery(query, currentFields, "CurrentMetrics", buckets, table, &row)
 			if err != nil {
 				a.tviewApp.QueueUpdateDraw(func() {
 					a.mainView.SetText(err.Error())
@@ -260,7 +262,7 @@ ORDER BY bucket_time`,
 				cluster,
 				fromStr, toStr, fromStr, toStr)
 
-			err := a.executeAndProcessQuery(query, profileFields, "ProfileEvents", buckets, table, &row)
+			err := a.executeAndProcessMetricLogQuery(query, profileFields, "ProfileEvents", buckets, table, &row)
 			if err != nil {
 				a.tviewApp.QueueUpdateDraw(func() {
 					a.mainView.SetText(err.Error())
