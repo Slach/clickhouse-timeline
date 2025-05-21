@@ -195,9 +195,12 @@ func (a *App) ShowMetricLog(fromTime, toTime time.Time, cluster string) {
 			return
 		}
 
-		// Calculate buckets based on screen width
-		_, _, width, _ := a.mainView.GetRect()
+		// Calculate buckets based on full screen width
+		_, _, width, _ := a.tviewApp.GetRoot().GetRect()
 		buckets := width - 15 - maxNameLen
+		if buckets < 10 {
+			buckets = 10
+		}
 		if buckets < 10 {
 			buckets = 10
 		}
