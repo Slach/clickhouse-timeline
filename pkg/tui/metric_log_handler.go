@@ -146,7 +146,7 @@ func (a *App) ShowMetricLog(fromTime, toTime time.Time, cluster string) {
 		SetSelectable(true, true)
 
 	// Set headers
-	headers := []string{"Metric", "Min", "Trend", "Max"}
+	headers := []string{"Metric", "Min", "Spark line", "Max"}
 	for col, header := range headers {
 		table.SetCell(0, col,
 			tview.NewTableCell(header).
