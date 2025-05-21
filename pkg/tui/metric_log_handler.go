@@ -26,7 +26,7 @@ func (a *App) executeAndProcessQuery(query string, fields []string, prefix strin
 	}
 	defer func() {
 		if closeErr := rows.Close(); closeErr != nil {
-			a.mainView.SetText("can't close metric_log rows")
+			a.mainView.SetText(fmt.Sprintf("can't close metric_log.%s rows", prefix))
 		}
 	}()
 
