@@ -24,7 +24,11 @@ func (a *App) executeAndProcessQuery(query string, fields []string, prefix strin
 	if err != nil {
 		return fmt.Errorf("error executing %s query: %v", prefix, err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			a.mainView.SetText("can't close metric_log rows")
+		}
+	}()
 
 	// Store results for display
 	results := make(map[string][]float64)
@@ -213,7 +217,7 @@ WHERE event_date >= toDate(parseDateTimeBestEffort('%s'))
 			var selectParts []string
 			for _, field := range profileFields {
 				alias := strings.TrimPrefix(field, "ProfileEvents_")
-				selectParts = append(selectParts, fmt.Sprintf("sum(%s) AS sum_%s", field, strings.ToLower(alias)))
+				selectParts = append(selectParts, fmt.Sprintf("sum(%s) AS %s", field, strings.ToLower(alias)))
 			}
 
 			query := fmt.Sprintf(`
