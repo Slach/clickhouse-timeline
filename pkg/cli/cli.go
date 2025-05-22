@@ -3,11 +3,12 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+
 	"github.com/Slach/clickhouse-timeline/pkg/config"
 	"github.com/Slach/clickhouse-timeline/pkg/logging"
 	"github.com/rs/zerolog/log"
-	"os"
-	"path/filepath"
 
 	"github.com/Slach/clickhouse-timeline/pkg/tui"
 	"github.com/Slach/clickhouse-timeline/pkg/types"
@@ -81,6 +82,19 @@ func NewRootCommand(cli *types.CLI, version string) *cobra.Command {
 	rootCmd.AddCommand(profileEventsCmd)
 	rootCmd.AddCommand(metricLogCmd)
 	rootCmd.AddCommand(asyncMetricLogCmd)
+
+	// Add logs command
+	logsCmd := &cobra.Command{
+		Use:   "logs [table]",
+		Short: "Start in logs mode (query_log, query_thread_log)",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return RunSubCommand(cli, cmd, args)
+		},
+	}
+	logsCmd.Flags().String("fields", "", "Comma-separated list of fields to include")
+	logsCmd.Flags().Int("window", 1000, "Sliding window size in milliseconds")
+	rootCmd.AddCommand(logsCmd)
 
 	return rootCmd
 }
