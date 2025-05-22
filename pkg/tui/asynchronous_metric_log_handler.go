@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
 	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
 	"github.com/rs/zerolog/log"
 	"time"
 )
@@ -40,11 +39,11 @@ func (a *App) ShowAsynchronousMetricLog(fromTime, toTime time.Time, cluster stri
 	filteredTable.SetupHeaders([]string{"Metric", "Min", "Spark line", "Max"})
 
 	go func() {
-		// Get available metric columns
+		// Get available metric asyncMetricFields
 		columnNameRows, columnNameErr := a.clickHouse.Query(asyncMetricLogColumnsQuery)
 		if columnNameErr != nil {
 			a.tviewApp.QueueUpdateDraw(func() {
-				a.mainView.SetText(fmt.Sprintf("Error getting async metric columns: %v", columnNameErr))
+				a.mainView.SetText(fmt.Sprintf("Error getting async metric asyncMetricFields: %v", columnNameErr))
 			})
 			return
 		}
@@ -54,7 +53,7 @@ func (a *App) ShowAsynchronousMetricLog(fromTime, toTime time.Time, cluster stri
 			}
 		}()
 
-		var columns []string
+		var asyncMetricFields []string
 		maxNameLen := 0
 		for columnNameRows.Next() {
 			var name string
@@ -64,7 +63,7 @@ func (a *App) ShowAsynchronousMetricLog(fromTime, toTime time.Time, cluster stri
 				})
 				return
 			}
-			columns = append(columns, name)
+			asyncMetricFields = append(asyncMetricFields, name)
 			if len(name) > maxNameLen {
 				maxNameLen = len(name)
 			}
@@ -72,7 +71,7 @@ func (a *App) ShowAsynchronousMetricLog(fromTime, toTime time.Time, cluster stri
 
 		if rowErr := columnNameRows.Err(); rowErr != nil {
 			a.tviewApp.QueueUpdateDraw(func() {
-				a.mainView.SetText(fmt.Sprintf("Error reading columns: %v", rowErr))
+				a.mainView.SetText(fmt.Sprintf("Error reading asyncMetricFields: %v", rowErr))
 			})
 			return
 		}
@@ -96,7 +95,7 @@ GROUP BY name`,
 			buckets, cluster, fromStr, toStr, fromStr, toStr)
 
 		row := 1
-		if err := widgets.ExecuteAndProcessQuery(query, "AsynchronousMetric", filteredTable, &row); err != nil {
+		if err := a.ExecuteAndProcessSparklineQuery(query, "AsynchronousMetric", asyncMetricFields, filteredTable, &row); err != nil {
 			a.tviewApp.QueueUpdateDraw(func() {
 				a.mainView.SetText(err.Error())
 			})
@@ -120,7 +119,7 @@ GROUP BY name`,
 					row, _ := filteredTable.Table.GetSelection()
 					if row > 0 { // Skip header row
 						metricName := filteredTable.Table.GetCell(row, 0).Text
-						go a.showAsyncMetricDescription(metricName)
+						go a.showMetricDescription(metricName)
 					}
 					return nil
 				}
@@ -131,29 +130,4 @@ GROUP BY name`,
 			a.pages.SwitchToPage("async_metric_log")
 		})
 	}()
-}
-
-func (a *App) showAsyncMetricDescription(metricName string) {
-	query := fmt.Sprintf("SELECT description FROM system.asynchronous_metrics WHERE name='%s'", metricName)
-
-	rows, err := a.clickHouse.Query(query)
-	if err != nil {
-		a.tviewApp.QueueUpdateDraw(func() {
-			a.mainView.SetText(fmt.Sprintf("Error getting metric description: %v", err))
-		})
-		return
-	}
-	defer rows.Close()
-
-	var description string
-	if rows.Next() {
-		if err := rows.Scan(&description); err != nil {
-			a.tviewApp.QueueUpdateDraw(func() {
-				a.mainView.SetText(fmt.Sprintf("Error scanning description: %v", err))
-			})
-			return
-		}
-	}
-
-	widgets.ShowDescription(a.tviewApp, a.pages, metricName, description)
 }

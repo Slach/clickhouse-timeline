@@ -2,20 +2,21 @@ package tui
 
 // Available commands
 const (
-	CmdHelp          = "help"
-	CmdConnect       = "connect"
-	CmdQuit          = "quit"
-	CmdFlamegraph    = "flamegraph"
-	CmdFrom          = "from"
-	CmdTo            = "to"
-	CmdRange         = "range"
-	CmdHeatmap       = "heatmap"
-	CmdCategory      = "category"
-	CmdCluster       = "cluster"
-	CmdMetric        = "metric"
-	CmdScale         = "scale"
-	CmdProfileEvents = "profile_events"
-	CmdMetricLog     = "metric_log"
+	CmdHelp           = "help"
+	CmdConnect        = "connect"
+	CmdQuit           = "quit"
+	CmdFlamegraph     = "flamegraph"
+	CmdFrom           = "from"
+	CmdTo             = "to"
+	CmdRange          = "range"
+	CmdHeatmap        = "heatmap"
+	CmdCategory       = "category"
+	CmdCluster        = "cluster"
+	CmdMetric         = "metric"
+	CmdScale          = "scale"
+	CmdProfileEvents  = "profile_events"
+	CmdMetricLog      = "metric_log"
+	CmdAsyncMetricLog = "asynchronous_metric_log"
 )
 
 type TraceType string
@@ -27,7 +28,7 @@ const (
 	TraceMemorySample TraceType = "MemorySample"
 )
 
-// Heatmap metric types
+// HeatmapMetric Heatmap metric types
 type HeatmapMetric string
 
 const (
@@ -42,7 +43,7 @@ const (
 	MetricWrittenBytes   HeatmapMetric = "writtenBytes"
 )
 
-// Category types for heatmap
+// CategoryType Category types for heatmap
 type CategoryType string
 
 const (
