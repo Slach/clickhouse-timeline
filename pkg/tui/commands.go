@@ -17,6 +17,7 @@ const (
 	CmdProfileEvents  = "profile_events"
 	CmdMetricLog      = "metric_log"
 	CmdAsyncMetricLog = "asynchronous_metric_log"
+	CmdLogs           = "logs"
 )
 
 type TraceType string
@@ -69,6 +70,7 @@ var availableCommands = []string{
 	CmdProfileEvents,
 	CmdMetricLog,
 	CmdAsyncMetricLog,
+	CmdLogs,
 }
 
 // Help text
@@ -87,6 +89,7 @@ const helpText = `ClickHouse Timeline Commands:
 :metric         - Select metric for heatmap visualization
 :scale          - Set scale type for heatmap (linear, log2, log10)
 :metric_log     - Show system.metric_log metrics
+:logs           - Show system logs (query_log, query_thread_log)
 
 Navigation:
 - Use arrow keys to navigate

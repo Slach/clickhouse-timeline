@@ -169,6 +169,8 @@ func (a *App) ApplyCLIParameters(c *types.CLI, commandName string) {
 			a.ShowMetricLog(a.fromTime, a.toTime, a.cluster)
 		case CmdAsyncMetricLog:
 			a.ShowAsynchronousMetricLog(a.fromTime, a.toTime, a.cluster)
+		case CmdLogs:
+			a.ShowLogsPanel()
 		}
 	}
 }
