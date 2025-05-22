@@ -24,6 +24,8 @@ type LogPanel struct {
 	windowSize     int
 	filters        []LogFilter
 	currentResults []LogEntry
+	logDetails     *tview.Table
+	overview       *tview.TextView
 }
 
 type LogFilter struct {
@@ -210,23 +212,23 @@ func (lp *LogPanel) showLogExplorer() {
 	mainFlex.AddItem(filterPanel, 3, 1, false)
 
 	// 2. Overview Panel (20% height)
-	overviewPanel := tview.NewTextView().SetDynamicColors(true)
-	overviewPanel.SetBorder(true).SetTitle("Overview")
-	mainFlex.AddItem(overviewPanel, 3, 1, false)
+	lp.overview = tview.NewTextView().SetDynamicColors(true)
+	lp.overview.SetBorder(true).SetTitle("Overview")
+	mainFlex.AddItem(lp.overview, 3, 1, false)
 
 	// 3. Log Details Panel (60% height)
-	logDetails := tview.NewTable().
+	lp.logDetails = tview.NewTable().
 		SetBorders(false).
 		SetSelectable(true, false).
 		SetFixed(1, 0)
 	logDetails.SetBorder(true).SetTitle("Log Entries")
 
 	// Add column headers
-	logDetails.SetCell(0, 0, tview.NewTableCell("Time").SetTextColor(tcell.ColorYellow))
-	logDetails.SetCell(0, 1, tview.NewTableCell("Message").SetTextColor(tcell.ColorYellow))
+	lp.logDetails.SetCell(0, 0, tview.NewTableCell("Time").SetTextColor(tcell.ColorYellow))
+	lp.logDetails.SetCell(0, 1, tview.NewTableCell("Message").SetTextColor(tcell.ColorYellow))
 
 	// Handle keyboard navigation
-	logDetails.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+	lp.logDetails.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		rowNumber, _ := logDetails.GetSelection()
 		if event.Key() == tcell.KeyEnter {
 			// TODO: Show log details modal
@@ -238,7 +240,7 @@ func (lp *LogPanel) showLogExplorer() {
 		return event
 	})
 
-	mainFlex.AddItem(logDetails, 0, 1, true)
+	mainFlex.AddItem(lp.logDetails, 0, 1, true)
 
 	// Execute initial query
 	go lp.loadLogs()
@@ -329,12 +331,11 @@ func (lp *LogPanel) loadLogs() {
 	lp.currentResults = entries
 	lp.app.tviewApp.QueueUpdateDraw(func() {
 		// Update log details table
-		logDetails := lp.app.pages.GetFrontPage().GetItem(2).(*tview.Table)
-		logDetails.Clear()
+		lp.logDetails.Clear()
 
 		// Re-add headers
-		logDetails.SetCell(0, 0, tview.NewTableCell("Time").SetTextColor(tcell.ColorYellow))
-		logDetails.SetCell(0, 1, tview.NewTableCell("Message").SetTextColor(tcell.ColorYellow))
+		lp.logDetails.SetCell(0, 0, tview.NewTableCell("Time").SetTextColor(tcell.ColorYellow))
+		lp.logDetails.SetCell(0, 1, tview.NewTableCell("Message").SetTextColor(tcell.ColorYellow))
 
 		// Add log entries
 		for i, entry := range entries {
@@ -347,8 +348,8 @@ func (lp *LogPanel) loadLogs() {
 				timeStr = entry.Date
 			}
 
-			logDetails.SetCell(i+1, 0, tview.NewTableCell(timeStr))
-			logDetails.SetCell(i+1, 1, tview.NewTableCell(entry.Message))
+			lp.logDetails.SetCell(i+1, 0, tview.NewTableCell(timeStr))
+			lp.logDetails.SetCell(i+1, 1, tview.NewTableCell(entry.Message))
 
 			// Color by level if available
 			if entry.Level != "" {
@@ -361,13 +362,12 @@ func (lp *LogPanel) loadLogs() {
 				case "info":
 					color = tcell.ColorGreen
 				}
-				logDetails.GetCell(i+1, 1).SetTextColor(color)
+				lp.logDetails.GetCell(i+1, 1).SetTextColor(color)
 			}
 		}
 
 		// Update overview panel
-		overview := lp.app.pages.GetFrontPage().GetItem(1).(*tview.TextView)
-		lp.updateOverview(overview)
+		lp.updateOverview(lp.overview)
 	})
 }
 
@@ -523,12 +523,11 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 
 	lp.app.tviewApp.QueueUpdateDraw(func() {
 		// Update log details table
-		logDetails := lp.app.pages.GetFrontPage().GetItem(2).(*tview.Table)
-		logDetails.Clear()
+		lp.logDetails.Clear()
 
 		// Re-add headers
-		logDetails.SetCell(0, 0, tview.NewTableCell("Time").SetTextColor(tcell.ColorYellow))
-		logDetails.SetCell(0, 1, tview.NewTableCell("Message").SetTextColor(tcell.ColorYellow))
+		lp.logDetails.SetCell(0, 0, tview.NewTableCell("Time").SetTextColor(tcell.ColorYellow))
+		lp.logDetails.SetCell(0, 1, tview.NewTableCell("Message").SetTextColor(tcell.ColorYellow))
 
 		// Add log entries
 		for i, entry := range lp.currentResults {
@@ -541,8 +540,8 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 				timeStr = entry.Date
 			}
 
-			logDetails.SetCell(i+1, 0, tview.NewTableCell(timeStr))
-			logDetails.SetCell(i+1, 1, tview.NewTableCell(entry.Message))
+			lp.logDetails.SetCell(i+1, 0, tview.NewTableCell(timeStr))
+			lp.logDetails.SetCell(i+1, 1, tview.NewTableCell(entry.Message))
 
 			// Color by level if available
 			if entry.Level != "" {
@@ -555,13 +554,12 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 				case "info":
 					color = tcell.ColorGreen
 				}
-				logDetails.GetCell(i+1, 1).SetTextColor(color)
+				lp.logDetails.GetCell(i+1, 1).SetTextColor(color)
 			}
 		}
 
 		// Update overview panel
-		overview := lp.app.pages.GetFrontPage().GetItem(1).(*tview.TextView)
-		lp.updateOverview(overview)
+		lp.updateOverview(lp.overview)
 	})
 }
 
