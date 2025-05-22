@@ -132,47 +132,15 @@ func (a *App) ApplyCLIParameters(c *types.CLI, commandName string) {
 		mainMsg += fmt.Sprintf("Set category '%s'\n", c.Category)
 	}
 
-	// Switch to appropriate mode based on command
-	doCmdExecute := false
+	// Handle command execution if specified
 	if commandName != "" {
-		doCmdExecute = true
-		if a.clickHouse == nil {
-			mainMsg += "Error: Please connect to a ClickHouse instance first using :connect command\n"
-			doCmdExecute = false
-		}
-		if a.cluster == "" {
-			mainMsg += "Error: Please select a cluster first using :cluster command\n"
-			doCmdExecute = false
-		}
-
+		mainMsg += a.executeCommand(commandName)
 	}
+
 	if mainMsg != "" {
 		mainMsg += "Press ':' to continue"
 	}
 	a.mainView.SetText(mainMsg)
-
-	if doCmdExecute {
-		switch commandName {
-		case CmdHeatmap:
-			a.ShowHeatmap()
-		case CmdFlamegraph:
-			a.ShowFlamegraphForm()
-		case CmdProfileEvents:
-			a.ShowProfileEvents(
-				a.category,
-				a.selectedCategory,
-				a.fromTime,
-				a.toTime,
-				a.cluster,
-			)
-		case CmdMetricLog:
-			a.ShowMetricLog(a.fromTime, a.toTime, a.cluster)
-		case CmdAsyncMetricLog:
-			a.ShowAsynchronousMetricLog(a.fromTime, a.toTime, a.cluster)
-		case CmdLogs:
-			a.ShowLogsPanel()
-		}
-	}
 }
 
 func (a *App) SetFromTime(t time.Time) {
@@ -217,6 +185,42 @@ func (a *App) SetConnectByName(contextName string) bool {
 		}
 	}
 	return found
+}
+
+func (a *App) executeCommand(commandName string) string {
+	// Check prerequisites for commands that need them
+	if commandName == CmdHeatmap || commandName == CmdFlamegraph || 
+	   commandName == CmdProfileEvents || commandName == CmdMetricLog || 
+	   commandName == CmdAsyncMetricLog || commandName == CmdLogs {
+		if a.clickHouse == nil {
+			return "Error: Please connect to a ClickHouse instance first using :connect command\n"
+		}
+		if a.cluster == "" {
+			return "Error: Please select a cluster first using :cluster command\n"
+		}
+	}
+
+	switch commandName {
+	case CmdHeatmap:
+		a.ShowHeatmap()
+	case CmdFlamegraph:
+		a.ShowFlamegraphForm()
+	case CmdProfileEvents:
+		a.ShowProfileEvents(
+			a.category,
+			a.selectedCategory,
+			a.fromTime,
+			a.toTime,
+			a.cluster,
+		)
+	case CmdMetricLog:
+		a.ShowMetricLog(a.fromTime, a.toTime, a.cluster)
+	case CmdAsyncMetricLog:
+		a.ShowAsynchronousMetricLog(a.fromTime, a.toTime, a.cluster)
+	case CmdLogs:
+		a.ShowLogsPanel()
+	}
+	return ""
 }
 
 func (a *App) ApplyPredefinedRange(rangeOption string) {
@@ -334,16 +338,12 @@ func (a *App) setupKeybindings() {
 					a.handleConnectCommand()
 				case CmdQuit:
 					a.handleQuitCommand()
-				case CmdFlamegraph:
-					a.ShowFlamegraphForm()
 				case CmdFrom:
 					a.showFromDatePicker()
 				case CmdTo:
 					a.showToDatePicker()
 				case CmdRange:
 					a.showRangePicker()
-				case CmdHeatmap:
-					a.ShowHeatmap()
 				case CmdCategory:
 					a.showCategorySelector()
 				case CmdCluster:
@@ -352,20 +352,8 @@ func (a *App) setupKeybindings() {
 					a.showMetricSelector()
 				case CmdScale:
 					a.showScaleSelector()
-				case CmdProfileEvents:
-					a.ShowProfileEvents(
-						a.category,
-						a.selectedCategory,
-						a.fromTime,
-						a.toTime,
-						a.cluster,
-					)
-				case CmdMetricLog:
-					a.ShowMetricLog(a.fromTime, a.toTime, a.cluster)
-				case CmdAsyncMetricLog:
-					a.ShowAsynchronousMetricLog(a.fromTime, a.toTime, a.cluster)
-				case CmdLogs:
-					a.ShowLogsPanel()
+				default:
+					a.executeCommand(cmd)
 				}
 			}
 		})
