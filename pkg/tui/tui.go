@@ -284,12 +284,9 @@ func (a *App) setupUI() {
 }
 
 func (a *App) defaultInputHandler(event *tcell.EventKey) *tcell.EventKey {
-	// Check if we're currently in a time field by examining the focused primitive
-	currentFocus := a.tviewApp.GetFocus()
-
-	// Don't trigger command mode when editing time fields
 	if event.Rune() == ':' {
-		// Check if we're on the datepicker page and focused on a time input
+		currentFocus := a.tviewApp.GetFocus()
+		// Don't trigger command mode when editing time fields
 		if frontPage, _ := a.pages.GetFrontPage(); frontPage == "datepicker" {
 			// If we're editing a time field, don't trigger command mode
 			if _, ok := currentFocus.(*tview.InputField); ok {
@@ -317,7 +314,7 @@ func (a *App) setupKeybindings() {
 		SetAutocompleteFunc(func(currentText string) []string {
 			var matches []string
 			for _, cmd := range availableCommands {
-				if strings.HasPrefix(cmd, currentText) {
+				if strings.Contains(cmd, currentText) {
 					matches = append(matches, cmd)
 				}
 			}
