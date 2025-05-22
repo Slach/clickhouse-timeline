@@ -221,7 +221,7 @@ func (lp *LogPanel) showLogExplorer() {
 		SetBorders(false).
 		SetSelectable(true, false).
 		SetFixed(1, 0)
-	logDetails.SetBorder(true).SetTitle("Log Entries")
+	lp.logDetails.SetBorder(true).SetTitle("Log Entries")
 
 	// Add column headers
 	lp.logDetails.SetCell(0, 0, tview.NewTableCell("Time").SetTextColor(tcell.ColorYellow))
@@ -229,7 +229,7 @@ func (lp *LogPanel) showLogExplorer() {
 
 	// Handle keyboard navigation
 	lp.logDetails.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		rowNumber, _ := logDetails.GetSelection()
+		rowNumber, _ := lp.logDetails.GetSelection()
 		if event.Key() == tcell.KeyEnter {
 			// TODO: Show log details modal
 		} else if event.Key() == tcell.KeyPgDn {
