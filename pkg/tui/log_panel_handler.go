@@ -329,7 +329,7 @@ func (lp *LogPanel) loadLogs() {
 	lp.currentResults = entries
 	lp.app.tviewApp.QueueUpdateDraw(func() {
 		// Update log details table
-		logDetails := lp.app.pages.GetPage("logExplorer").GetItem(2).(*tview.Table)
+		logDetails := lp.app.pages.GetFrontPage().GetItem(2).(*tview.Table)
 		logDetails.Clear()
 
 		// Re-add headers
@@ -366,7 +366,7 @@ func (lp *LogPanel) loadLogs() {
 		}
 
 		// Update overview panel
-		overview := lp.app.pages.GetPage("logExplorer").GetItem(1).(*tview.TextView)
+		overview := lp.app.pages.GetFrontPage().GetItem(1).(*tview.TextView)
 		lp.updateOverview(overview)
 	})
 }
@@ -523,7 +523,7 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 
 	lp.app.tviewApp.QueueUpdateDraw(func() {
 		// Update log details table
-		logDetails := lp.app.pages.GetPage("logExplorer").GetItem(2).(*tview.Table)
+		logDetails := lp.app.pages.GetFrontPage().GetItem(2).(*tview.Table)
 		logDetails.Clear()
 
 		// Re-add headers
@@ -560,7 +560,7 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 		}
 
 		// Update overview panel
-		overview := lp.app.pages.GetPage("logExplorer").GetItem(1).(*tview.TextView)
+		overview := lp.app.pages.GetFrontPage().GetItem(1).(*tview.TextView)
 		lp.updateOverview(overview)
 	})
 }
