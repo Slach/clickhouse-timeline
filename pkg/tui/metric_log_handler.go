@@ -278,7 +278,7 @@ WHERE event_date >= toDate(parseDateTimeBestEffort('%s'))
 				cluster,
 				fromStr, toStr, fromStr, toStr)
 
-			err := a.executeAndProcessMetricLogQuery(query, currentFields, "CurrentMetric", filteredTable, &row)
+			err := widgets.ExecuteAndProcessQuery(query, "CurrentMetric", filteredTable, &row)
 			if err != nil {
 				a.tviewApp.QueueUpdateDraw(func() {
 					a.mainView.SetText(err.Error())
@@ -311,7 +311,7 @@ ORDER BY bucket_time`,
 				cluster,
 				fromStr, toStr, fromStr, toStr)
 
-			err := a.executeAndProcessMetricLogQuery(query, profileFields, "ProfileEvent", filteredTable, &row)
+			err := widgets.ExecuteAndProcessQuery(query, "ProfileEvent", filteredTable, &row)
 			if err != nil {
 				a.tviewApp.QueueUpdateDraw(func() {
 					a.mainView.SetText(err.Error())

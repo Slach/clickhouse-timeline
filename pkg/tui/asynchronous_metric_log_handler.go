@@ -84,9 +84,8 @@ func (a *App) ShowAsynchronousMetricLog(fromTime, toTime time.Time, cluster stri
 			buckets = 10
 		}
 
-		// Execute query for each metric
-		for _, metric := range columns {
-			query := fmt.Sprintf(`
+		// Execute single query for all metrics
+		query := fmt.Sprintf(`
 SELECT name, lttb(%d)(event_time,value) 
 FROM cluster('%s', merge(system,'asynchronous_metric_log'))
 WHERE event_date >= toDate(parseDateTimeBestEffort('%s')) 
@@ -94,75 +93,14 @@ WHERE event_date >= toDate(parseDateTimeBestEffort('%s'))
   AND event_time >= parseDateTimeBestEffort('%s') 
   AND event_time <= parseDateTimeBestEffort('%s')
 GROUP BY name`,
-				buckets, cluster, fromStr, toStr, fromStr, toStr)
+			buckets, cluster, fromStr, toStr, fromStr, toStr)
 
-			rows, err := a.clickHouse.Query(query)
-			if err != nil {
-				a.tviewApp.QueueUpdateDraw(func() {
-					a.mainView.SetText(fmt.Sprintf("Error executing query for %s: %v", metric, err))
-				})
-				continue
-			}
-
-			// Process results
-			var (
-				name      string
-				timeValue [][]interface{}
-			)
-			if rows.Next() {
-				if err := rows.Scan(&name, &timeValue); err != nil {
-					rows.Close()
-					continue
-				}
-
-				// Extract values
-				var values []float64
-				for _, tv := range timeValue {
-					if len(tv) >= 2 {
-						if val, ok := tv[1].(float64); ok {
-							values = append(values, val)
-						}
-					}
-				}
-
-				if len(values) > 0 {
-					minVal := values[0]
-					maxVal := values[0]
-					for _, v := range values {
-						if v < minVal {
-							minVal = v
-						}
-						if v > maxVal {
-							maxVal = v
-						}
-					}
-
-					sparkline := widgets.GenerateSparkline(values)
-					color := tcell.ColorWhite
-					if maxVal > 2*minVal {
-						color = tcell.ColorYellow
-					}
-					if maxVal > 4*minVal {
-						color = tcell.ColorRed
-					}
-
-					filteredTable.AddRow([]*tview.TableCell{
-						tview.NewTableCell(name).
-							SetTextColor(color).
-							SetAlign(tview.AlignLeft),
-						tview.NewTableCell(fmt.Sprintf("%.1f", minVal)).
-							SetTextColor(color).
-							SetAlign(tview.AlignRight),
-						tview.NewTableCell(sparkline).
-							SetTextColor(color).
-							SetAlign(tview.AlignLeft),
-						tview.NewTableCell(fmt.Sprintf("%.1f", maxVal)).
-							SetTextColor(color).
-							SetAlign(tview.AlignLeft),
-					})
-				}
-			}
-			rows.Close()
+		row := 1
+		if err := widgets.ExecuteAndProcessQuery(query, "AsynchronousMetric", filteredTable, &row); err != nil {
+			a.tviewApp.QueueUpdateDraw(func() {
+				a.mainView.SetText(err.Error())
+			})
+			return
 		}
 
 		// Create table to display results
