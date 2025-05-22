@@ -60,19 +60,19 @@ func (a *App) ShowLogsPanel() {
 	form := tview.NewForm()
 	form.SetBorder(true).SetTitle("Log Explorer")
 
-	// Create both dropdowns first
-	dbDropdown := form.AddDropDown("Database", []string{"system", "default"}, 0, nil)
-	tableDropdown := form.AddDropDown("Table", []string{}, 0, nil)
+	// Database dropdown
+	form.AddDropDown("Database", []string{"system", "default"}, 0,
+		func(db string, index int) {
+			lp.database = db
+			lp.updateTableDropdown(form)
+		})
 
-	// Set up handlers after creation
-	dbDropdown.SetSelectedFunc(func(db string, index int) {
-		lp.database = db
-		lp.updateTableDropdown(form)
-	})
-	tableDropdown.SetSelectedFunc(func(table string, index int) {
-		lp.table = table
-		lp.updateFieldDropdowns(form)
-	})
+	// Table dropdown (will be populated after database selection)
+	form.AddDropDown("Table", []string{}, 0,
+		func(table string, index int) {
+			lp.table = table
+			lp.updateFieldDropdowns(form)
+		})
 
 	// Add buttons
 	form.AddButton("Explore Logs", func() {
