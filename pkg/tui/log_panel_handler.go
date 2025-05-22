@@ -563,6 +563,74 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 	})
 }
 
+func (lp *LogPanel) showLogDetailsModal(entry LogEntry) {
+	// Create modal dialog
+	modal := tview.NewModal().
+		SetText(lp.formatLogDetails(entry)).
+		AddButtons([]string{"OK"}).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			lp.app.pages.RemovePage("logDetails")
+		})
+
+	modal.SetTitle("Log Entry Details").
+		SetBorder(true).
+		SetBackgroundColor(tcell.ColorDefault)
+
+	lp.app.pages.AddPage("logDetails", modal, true, true)
+	lp.app.pages.SwitchToPage("logDetails")
+}
+
+func (lp *LogPanel) formatLogDetails(entry LogEntry) string {
+	var builder strings.Builder
+
+	// Always show time fields if available
+	if !entry.Time.IsZero() {
+		builder.WriteString(fmt.Sprintf("[yellow]%s[-]: %s\n", lp.timeField, entry.Time.Format(time.RFC3339)))
+	}
+	if entry.TimeMs > 0 {
+		builder.WriteString(fmt.Sprintf("[yellow]%s[-]: %d\n", lp.timeMsField, entry.TimeMs))
+	}
+	if entry.Date != "" {
+		builder.WriteString(fmt.Sprintf("[yellow]%s[-]: %s\n", lp.dateField, entry.Date))
+	}
+
+	// Show level if available
+	if entry.Level != "" {
+		builder.WriteString(fmt.Sprintf("[yellow]%s[-]: %s\n", lp.levelField, entry.Level))
+	}
+
+	// Show message
+	builder.WriteString(fmt.Sprintf("[yellow]%s[-]:\n", lp.messageField))
+	messageLines := wordWrap(entry.Message, 80) // Wrap at 80 chars
+	for _, line := range messageLines {
+		builder.WriteString(fmt.Sprintf("  %s\n", line))
+	}
+
+	return builder.String()
+}
+
+func wordWrap(text string, lineWidth int) []string {
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return []string{""}
+	}
+
+	var lines []string
+	currentLine := words[0]
+
+	for _, word := range words[1:] {
+		if len(currentLine)+1+len(word) <= lineWidth {
+			currentLine += " " + word
+		} else {
+			lines = append(lines, currentLine)
+			currentLine = word
+		}
+	}
+	lines = append(lines, currentLine)
+
+	return lines
+}
+
 func (lp *LogPanel) getSelectedFields() []string {
 	fields := []string{lp.messageField, lp.timeField}
 	if lp.timeMsField != "" {
