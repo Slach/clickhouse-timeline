@@ -6,8 +6,6 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/rs/zerolog/log"
-	"math"
-	"strings"
 	"time"
 )
 
@@ -95,7 +93,7 @@ WHERE event_date >= toDate(parseDateTimeBestEffort('%s'))
   AND event_date <= toDate(parseDateTimeBestEffort('%s'))
   AND event_time >= parseDateTimeBestEffort('%s') 
   AND event_time <= parseDateTimeBestEffort('%s')
-GROUP BY name`, 
+GROUP BY name`,
 				buckets, cluster, fromStr, toStr, fromStr, toStr)
 
 			rows, err := a.clickHouse.Query(query)

@@ -112,13 +112,13 @@ func (a *App) executeAndProcessMetricLogQuery(query string, fields []string, pre
 			tview.NewTableCell(alias).
 				SetTextColor(color).
 				SetAlign(tview.AlignLeft),
-			tview.NewTableCell(fmt.Sprintf("%.2f", minVal)).
+			tview.NewTableCell(fmt.Sprintf("%.1f", minVal)).
 				SetTextColor(color).
 				SetAlign(tview.AlignRight),
 			tview.NewTableCell(sparkline).
 				SetTextColor(color).
 				SetAlign(tview.AlignLeft),
-			tview.NewTableCell(fmt.Sprintf("%.2f", maxVal)).
+			tview.NewTableCell(fmt.Sprintf("%.1f", maxVal)).
 				SetTextColor(color).
 				SetAlign(tview.AlignLeft),
 		})
@@ -131,7 +131,7 @@ func (a *App) executeAndProcessMetricLogQuery(query string, fields []string, pre
 func (a *App) showMetricDescription(metricName string) {
 	var query string
 	var source string
-	
+
 	if strings.HasPrefix(metricName, "M_") {
 		// Metric from system.metrics
 		cleanName := strings.TrimPrefix(metricName, "M_")

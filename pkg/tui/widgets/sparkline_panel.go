@@ -2,11 +2,8 @@ package widgets
 
 import (
 	"fmt"
-	"math"
-	"strings"
-
-	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"strings"
 )
 
 func ExecuteAndProcessQuery(query string, fields []string, prefix string, filteredTable *FilteredTable, row *int) error {
