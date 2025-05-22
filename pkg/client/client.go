@@ -103,9 +103,12 @@ func (c *Client) connect() error {
 	return nil
 }
 
-func (c *Client) Query(query string) (*sql.Rows, error) {
+func (c *Client) Query(query string, args ...interface{}) (*sql.Rows, error) {
 	log.Info().Msg(query)
-	return c.db.QueryContext(context.Background(), query)
+	if len(args) > 0 {
+		log.Info().Msgf("args=%#v", args)
+	}
+	return c.db.QueryContext(context.Background(), query, args...)
 }
 
 func (c *Client) Close() error {

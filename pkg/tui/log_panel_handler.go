@@ -1,12 +1,14 @@
 package tui
 
 import (
-	"context"
 	"fmt"
+	"github.com/gdamore/tcell/v2"
+	"github.com/rs/zerolog/log"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
-	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/rivo/tview"
 )
 
@@ -86,12 +88,16 @@ func (a *App) ShowLogsPanel() {
 func (lp *LogPanel) updateTableDropdown(form *tview.Form) {
 	// Query ClickHouse for tables in selected database
 	query := fmt.Sprintf("SHOW TABLES FROM %s", lp.database)
-	rows, err := lp.app.clickHouse.Query(context.Background(), query)
+	rows, err := lp.app.clickHouse.Query(query)
 	if err != nil {
 		lp.app.mainView.SetText(fmt.Sprintf("Error getting tables: %v", err))
 		return
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Error().Err(closeErr).Msgf("can't close updateTableDropdown rows")
+		}
+	}()
 
 	var tables []string
 	for rows.Next() {
@@ -114,12 +120,16 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 
 	// Query ClickHouse for columns in selected table
 	query := fmt.Sprintf("DESCRIBE %s.%s", lp.database, lp.table)
-	rows, err := lp.app.clickHouse.Query(context.Background(), query)
+	rows, err := lp.app.clickHouse.Query(query)
 	if err != nil {
 		lp.app.mainView.SetText(fmt.Sprintf("Error getting columns: %v", err))
 		return
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Error().Err(closeErr).Msgf("can't close updateFieldDropdown rows")
+		}
+	}()
 
 	var columns []string
 	for rows.Next() {
@@ -147,6 +157,7 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 	form.AddDropDown("Level Field (optional)", append([]string{""}, columns...), 0,
 		func(field string, index int) { lp.levelField = field })
 	form.AddInputField("Window Size (ms)", "1000", 10,
+		func(text string, lastRune rune) bool { return unicode.IsDigit(lastRune) },
 		func(text string) { lp.windowSize, _ = strconv.Atoi(text) })
 
 	form.AddButton("Explore Logs", func() { lp.showLogExplorer() })
@@ -160,7 +171,7 @@ func (lp *LogPanel) showLogExplorer() {
 	// 1. AdHoc Filter Panel (20% height)
 	filterPanel := tview.NewFlex().SetDirection(tview.FlexRow)
 	filterPanel.SetBorder(true).SetTitle("Filters")
-	
+
 	// Filter input components
 	filterField := tview.NewDropDown().
 		SetLabel("Field: ").
@@ -170,13 +181,13 @@ func (lp *LogPanel) showLogExplorer() {
 		SetOptions([]string{"=", "!=", ">", "<", ">=", "<=", "LIKE", "NOT LIKE"}, nil)
 	filterValue := tview.NewInputField().
 		SetLabel("Value: ")
-	
+
 	addFilterBtn := tview.NewButton("Add Filter").
 		SetSelectedFunc(func() {
-			field, _ := filterField.GetCurrentOption()
-			op, _ := filterOp.GetCurrentOption()
+			_, field := filterField.GetCurrentOption()
+			_, op := filterOp.GetCurrentOption()
 			value := filterValue.GetText()
-			
+
 			if field != "" && op != "" && value != "" {
 				lp.filters = append(lp.filters, LogFilter{
 					Field:    field,
@@ -187,13 +198,13 @@ func (lp *LogPanel) showLogExplorer() {
 				go lp.loadLogs()
 			}
 		})
-	
+
 	filterFlex := tview.NewFlex().
 		AddItem(filterField, 0, 1, false).
 		AddItem(filterOp, 0, 1, false).
 		AddItem(filterValue, 0, 1, false).
 		AddItem(addFilterBtn, 10, 1, false)
-	
+
 	filterPanel.AddItem(filterFlex, 1, 1, false)
 	lp.updateFilterDisplay(filterPanel)
 	mainFlex.AddItem(filterPanel, 3, 1, false)
@@ -209,14 +220,14 @@ func (lp *LogPanel) showLogExplorer() {
 		SetSelectable(true, false).
 		SetFixed(1, 0)
 	logDetails.SetBorder(true).SetTitle("Log Entries")
-	
+
 	// Add column headers
 	logDetails.SetCell(0, 0, tview.NewTableCell("Time").SetTextColor(tcell.ColorYellow))
 	logDetails.SetCell(0, 1, tview.NewTableCell("Message").SetTextColor(tcell.ColorYellow))
-	
+
 	// Handle keyboard navigation
 	logDetails.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		row, _ := logDetails.GetSelection()
+		rowNumber, _ := logDetails.GetSelection()
 		if event.Key() == tcell.KeyEnter {
 			// TODO: Show log details modal
 		} else if event.Key() == tcell.KeyPgDn {
@@ -226,7 +237,7 @@ func (lp *LogPanel) showLogExplorer() {
 		}
 		return event
 	})
-	
+
 	mainFlex.AddItem(logDetails, 0, 1, true)
 
 	// Execute initial query
@@ -266,18 +277,22 @@ func (lp *LogPanel) loadLogs() {
 		lp.timeField)
 
 	windowStart := time.Now().Add(-time.Duration(lp.windowSize) * time.Millisecond)
-	rows, err := lp.app.clickHouse.Query(context.Background(), query, windowStart, lp.windowSize)
+	rows, err := lp.app.clickHouse.Query(query, windowStart, lp.windowSize)
 	if err != nil {
 		lp.app.mainView.SetText(fmt.Sprintf("Query failed: %v", err))
 		return
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Error().Err(closeErr).Msgf("can't close loadLogs rows")
+		}
+	}()
 
 	// Process results
 	var entries []LogEntry
 	colTypes, _ := rows.ColumnTypes()
 	scanArgs := make([]interface{}, len(colTypes))
-	
+
 	for rows.Next() {
 		var entry LogEntry
 		// Initialize scan args based on column types
@@ -304,7 +319,7 @@ func (lp *LogPanel) loadLogs() {
 				scanArgs[i] = &dummy
 			}
 		}
-		
+
 		if err := rows.Scan(scanArgs...); err != nil {
 			continue
 		}
@@ -316,11 +331,11 @@ func (lp *LogPanel) loadLogs() {
 		// Update log details table
 		logDetails := lp.app.pages.GetPage("logExplorer").GetItem(2).(*tview.Table)
 		logDetails.Clear()
-		
+
 		// Re-add headers
 		logDetails.SetCell(0, 0, tview.NewTableCell("Time").SetTextColor(tcell.ColorYellow))
 		logDetails.SetCell(0, 1, tview.NewTableCell("Message").SetTextColor(tcell.ColorYellow))
-		
+
 		// Add log entries
 		for i, entry := range entries {
 			timeStr := ""
@@ -331,10 +346,10 @@ func (lp *LogPanel) loadLogs() {
 			} else if entry.Date != "" {
 				timeStr = entry.Date
 			}
-			
+
 			logDetails.SetCell(i+1, 0, tview.NewTableCell(timeStr))
 			logDetails.SetCell(i+1, 1, tview.NewTableCell(entry.Message))
-			
+
 			// Color by level if available
 			if entry.Level != "" {
 				color := tcell.ColorWhite
@@ -349,7 +364,7 @@ func (lp *LogPanel) loadLogs() {
 				logDetails.GetCell(i+1, 1).SetTextColor(color)
 			}
 		}
-		
+
 		// Update overview panel
 		overview := lp.app.pages.GetPage("logExplorer").GetItem(1).(*tview.TextView)
 		lp.updateOverview(overview)
@@ -375,7 +390,7 @@ func (lp *LogPanel) updateFilterDisplay(panel *tview.Flex) {
 	for i := 1; i < panel.GetItemCount(); i++ {
 		panel.RemoveItem(panel.GetItem(i))
 	}
-	
+
 	// Add current filters
 	for _, filter := range lp.filters {
 		filterText := fmt.Sprintf("%s %s %s", filter.Field, filter.Operator, filter.Value)
@@ -400,14 +415,14 @@ func (lp *LogPanel) updateOverview(view *tview.TextView) {
 		view.SetText("No level field selected for overview")
 		return
 	}
-	
+
 	levelCounts := make(map[string]int)
 	for _, entry := range lp.currentResults {
 		if entry.Level != "" {
 			levelCounts[entry.Level]++
 		}
 	}
-	
+
 	var builder strings.Builder
 	for level, count := range levelCounts {
 		bar := strings.Repeat("█", int(float64(count)/float64(len(lp.currentResults))*50))
@@ -422,7 +437,7 @@ func (lp *LogPanel) updateOverview(view *tview.TextView) {
 		}
 		builder.WriteString(fmt.Sprintf("%s%-10s %s %d\n", color, level, bar, count))
 	}
-	
+
 	view.SetText(builder.String())
 }
 
@@ -430,14 +445,14 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 	if len(lp.currentResults) == 0 {
 		return
 	}
-	
+
 	var timeCondition time.Time
 	if newer {
 		timeCondition = lp.currentResults[0].Time
 	} else {
 		timeCondition = lp.currentResults[len(lp.currentResults)-1].Time
 	}
-	
+
 	query := fmt.Sprintf(`
 		SELECT %s
 		FROM %s.%s
@@ -452,17 +467,21 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 		lp.timeField,
 		ternary(newer, "ASC", "DESC"),
 	)
-	
-	rows, err := lp.app.clickHouse.Query(context.Background(), query, timeCondition, lp.windowSize)
+
+	rows, err := lp.app.clickHouse.Query(query, timeCondition, lp.windowSize)
 	if err != nil {
 		return
 	}
-	defer rows.Close()
-	
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Error().Err(closeErr).Msgf("can't close loadMoreLogs rows")
+		}
+	}()
+
 	var newEntries []LogEntry
 	colTypes, _ := rows.ColumnTypes()
 	scanArgs := make([]interface{}, len(colTypes))
-	
+
 	for rows.Next() {
 		var entry LogEntry
 		// Initialize scan args based on column types
@@ -489,28 +508,28 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 				scanArgs[i] = &dummy
 			}
 		}
-		
+
 		if err := rows.Scan(scanArgs...); err != nil {
 			continue
 		}
 		newEntries = append(newEntries, entry)
 	}
-	
+
 	if newer {
 		lp.currentResults = append(newEntries, lp.currentResults...)
 	} else {
 		lp.currentResults = append(lp.currentResults, newEntries...)
 	}
-	
+
 	lp.app.tviewApp.QueueUpdateDraw(func() {
 		// Update log details table
 		logDetails := lp.app.pages.GetPage("logExplorer").GetItem(2).(*tview.Table)
 		logDetails.Clear()
-		
+
 		// Re-add headers
 		logDetails.SetCell(0, 0, tview.NewTableCell("Time").SetTextColor(tcell.ColorYellow))
 		logDetails.SetCell(0, 1, tview.NewTableCell("Message").SetTextColor(tcell.ColorYellow))
-		
+
 		// Add log entries
 		for i, entry := range lp.currentResults {
 			timeStr := ""
@@ -521,10 +540,10 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 			} else if entry.Date != "" {
 				timeStr = entry.Date
 			}
-			
+
 			logDetails.SetCell(i+1, 0, tview.NewTableCell(timeStr))
 			logDetails.SetCell(i+1, 1, tview.NewTableCell(entry.Message))
-			
+
 			// Color by level if available
 			if entry.Level != "" {
 				color := tcell.ColorWhite
@@ -539,7 +558,7 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 				logDetails.GetCell(i+1, 1).SetTextColor(color)
 			}
 		}
-		
+
 		// Update overview panel
 		overview := lp.app.pages.GetPage("logExplorer").GetItem(1).(*tview.TextView)
 		lp.updateOverview(overview)
