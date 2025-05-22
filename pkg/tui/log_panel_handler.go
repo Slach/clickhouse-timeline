@@ -410,7 +410,7 @@ func (lp *LogPanel) updateOverview(view *tview.TextView) {
 	
 	var builder strings.Builder
 	for level, count := range levelCounts {
-		bar := strings.Repeat("█", int(float64(count)/float64(len(lp.currentResults))*50)
+		bar := strings.Repeat("█", int(float64(count)/float64(len(lp.currentResults))*50))
 		color := "[white]"
 		switch strings.ToLower(level) {
 		case "error", "exception":
@@ -460,7 +460,41 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 	defer rows.Close()
 	
 	var newEntries []LogEntry
-	// ... same scanning logic as loadLogs ...
+	colTypes, _ := rows.ColumnTypes()
+	scanArgs := make([]interface{}, len(colTypes))
+	
+	for rows.Next() {
+		var entry LogEntry
+		// Initialize scan args based on column types
+		for i, col := range colTypes {
+			switch col.DatabaseTypeName() {
+			case "DateTime", "DateTime64":
+				scanArgs[i] = &entry.Time
+			case "UInt64", "Int64":
+				scanArgs[i] = &entry.TimeMs
+			case "String":
+				switch col.Name() {
+				case lp.messageField:
+					scanArgs[i] = &entry.Message
+				case lp.levelField:
+					scanArgs[i] = &entry.Level
+				case lp.dateField:
+					scanArgs[i] = &entry.Date
+				default:
+					var dummy string
+					scanArgs[i] = &dummy
+				}
+			default:
+				var dummy interface{}
+				scanArgs[i] = &dummy
+			}
+		}
+		
+		if err := rows.Scan(scanArgs...); err != nil {
+			continue
+		}
+		newEntries = append(newEntries, entry)
+	}
 	
 	if newer {
 		lp.currentResults = append(newEntries, lp.currentResults...)
@@ -469,7 +503,46 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 	}
 	
 	lp.app.tviewApp.QueueUpdateDraw(func() {
-		// Update UI with new entries
+		// Update log details table
+		logDetails := lp.app.pages.GetPage("logExplorer").GetItem(2).(*tview.Table)
+		logDetails.Clear()
+		
+		// Re-add headers
+		logDetails.SetCell(0, 0, tview.NewTableCell("Time").SetTextColor(tcell.ColorYellow))
+		logDetails.SetCell(0, 1, tview.NewTableCell("Message").SetTextColor(tcell.ColorYellow))
+		
+		// Add log entries
+		for i, entry := range lp.currentResults {
+			timeStr := ""
+			if !entry.Time.IsZero() {
+				timeStr = entry.Time.Format("2006-01-02 15:04:05")
+			} else if entry.TimeMs > 0 {
+				timeStr = time.Unix(0, entry.TimeMs*int64(time.Millisecond)).Format("2006-01-02 15:04:05")
+			} else if entry.Date != "" {
+				timeStr = entry.Date
+			}
+			
+			logDetails.SetCell(i+1, 0, tview.NewTableCell(timeStr))
+			logDetails.SetCell(i+1, 1, tview.NewTableCell(entry.Message))
+			
+			// Color by level if available
+			if entry.Level != "" {
+				color := tcell.ColorWhite
+				switch strings.ToLower(entry.Level) {
+				case "error", "exception":
+					color = tcell.ColorRed
+				case "warning", "debug", "trace":
+					color = tcell.ColorYellow
+				case "info":
+					color = tcell.ColorGreen
+				}
+				logDetails.GetCell(i+1, 1).SetTextColor(color)
+			}
+		}
+		
+		// Update overview panel
+		overview := lp.app.pages.GetPage("logExplorer").GetItem(1).(*tview.TextView)
+		lp.updateOverview(overview)
 	})
 }
 
