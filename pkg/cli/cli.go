@@ -28,7 +28,44 @@ func NewRootCommand(cli *types.CLI, version string) *cobra.Command {
 		Use:   "heatmap",
 		Short: "Start in heatmap mode",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return RunSubCommand(cli, cmd, args)
+			// Handle logs command
+			if len(args) < 1 {
+				return fmt.Errorf("usage: logs <table>")
+			}
+
+			targetTable := args[0]
+			selectedFields := []string{"message", "time"}
+			windowSize := 1000
+
+			// Get fields from cobra flag
+			if fields, _ := cmd.Flags().GetString("fields"); fields != "" {
+				selectedFields = strings.Split(fields, ",")
+			}
+
+			// Get window size from cobra flag
+			if window, _ := cmd.Flags().GetInt("window"); window > 0 {
+				windowSize = window
+			}
+
+			// Create app and execute query
+			cfg, err := config.Load(cli, filepath.Join(os.Getenv("HOME"), ".clickhouse-timeline"))
+			if err != nil {
+				return err
+			}
+
+			app := tui.NewApp(cfg, "")
+			if cli.ConnectTo != "" {
+				if !app.SetConnectByName(cli.ConnectTo) {
+					return fmt.Errorf("context '%s' not found", cli.ConnectTo)
+				}
+			}
+
+			if app.clickHouse == nil {
+				return fmt.Errorf("not connected to ClickHouse")
+			}
+
+			app.executeLogsQuery(targetTable, selectedFields, windowSize)
+			return nil
 		},
 	}
 
