@@ -259,7 +259,7 @@ func (lp *LogPanel) loadLogs() {
 		return
 	}
 
-	// Build query with sliding window
+	// Build logsQuery with sliding window
 	fields := []string{lp.messageField, lp.timeField}
 	if lp.timeMsField != "" {
 		fields = append(fields, lp.timeMsField)
@@ -271,7 +271,7 @@ func (lp *LogPanel) loadLogs() {
 		fields = append(fields, lp.levelField)
 	}
 
-	query := fmt.Sprintf(`
+	logsQuery := fmt.Sprintf(`
 		SELECT %s
 		FROM %s.%s
 		WHERE %s >= ?
@@ -284,9 +284,9 @@ func (lp *LogPanel) loadLogs() {
 		lp.timeField)
 
 	windowStart := time.Now().Add(-time.Duration(lp.windowSize) * time.Millisecond)
-	rows, err := lp.app.clickHouse.Query(query, windowStart, lp.windowSize)
+	rows, err := lp.app.clickHouse.Query(logsQuery, windowStart, lp.windowSize)
 	if err != nil {
-		lp.app.mainView.SetText(fmt.Sprintf("Query failed: %v", err))
+		lp.app.SwitchToMainPage(fmt.Sprintf("loadLogs Query failed: %v", err))
 		return
 	}
 	defer func() {
