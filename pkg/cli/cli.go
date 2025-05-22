@@ -24,109 +24,69 @@ func NewRootCommand(cli *types.CLI, version string) *cobra.Command {
 		return RunRootCommand(cli, version, cmd, args)
 	}
 
-	heatmapCmd := &cobra.Command{
-		Use:   "heatmap",
-		Short: "Start in heatmap mode",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// Handle logs command
-			if len(args) < 1 {
-				return fmt.Errorf("usage: logs <table>")
-			}
-
-			targetTable := args[0]
-			selectedFields := []string{"message", "time"}
-			windowSize := 1000
-
-			// Get fields from cobra flag
-			if fields, _ := cmd.Flags().GetString("fields"); fields != "" {
-				selectedFields = strings.Split(fields, ",")
-			}
-
-			// Get window size from cobra flag
-			if window, _ := cmd.Flags().GetInt("window"); window > 0 {
-				windowSize = window
-			}
-
-			// Create app and execute query
-			cfg, err := config.Load(cli, filepath.Join(os.Getenv("HOME"), ".clickhouse-timeline"))
-			if err != nil {
-				return err
-			}
-
-			app := tui.NewApp(cfg, "")
-			if cli.ConnectTo != "" {
-				if !app.SetConnectByName(cli.ConnectTo) {
-					return fmt.Errorf("context '%s' not found", cli.ConnectTo)
-				}
-			}
-
-			if app.clickHouse == nil {
-				return fmt.Errorf("not connected to ClickHouse")
-			}
-
-			app.executeLogsQuery(targetTable, selectedFields, windowSize)
-			return nil
-		},
-	}
-
-	flamegraphCmd := &cobra.Command{
-		Use:   "flamegraph",
-		Short: "Start in flamegraph mode",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return RunSubCommand(cli, cmd, args)
-		},
-	}
-
-	profileEventsCmd := &cobra.Command{
-		Use:   "profile_events",
-		Short: "Start in profile events mode",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return RunSubCommand(cli, cmd, args)
-		},
-	}
-
-	metricLogCmd := &cobra.Command{
-		Use:   "metric_log",
-		Short: "Start in metric_log mode",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return RunSubCommand(cli, cmd, args)
-		},
-	}
-
-	asyncMetricLogCmd := &cobra.Command{
-		Use:   "asynchronous_metric_log",
-		Short: "Start in asynchronous_metric_log mode",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return RunSubCommand(cli, cmd, args)
-		},
-	}
-
 	// Add global flags
 	rootCmd.PersistentFlags().StringVar(&cli.ConfigPath, "config", "", "Path to config file (default: ~/.clickhouse-timeline/clickhouse-timeline.yml)")
 	rootCmd.PersistentFlags().StringVar(&cli.LogPath, "log", "", "Path to log file (default: ~/.clickhouse-timeline/clickhouse-timeline.log)")
 	rootCmd.PersistentFlags().StringVar(&cli.FromTime, "from", "", "Start time (in any parsable format, see https://github.com/araddon/dateparse)")
 	rootCmd.PersistentFlags().StringVar(&cli.ToTime, "to", "", "End time (in any parsable format, see https://github.com/araddon/dateparse)")
 	rootCmd.PersistentFlags().StringVar(&cli.RangeOption, "range", "", "Predefined time range (e.g. 1h, 24h, 7d)")
-	rootCmd.PersistentFlags().StringVar(&cli.ConnectTo, "connect", "", "Connection name to use from config")
+	rootCmd.PersistentFlags().StringVar(&cli.ConnectTo, "connect", "", "ClickHouse connection context name from config")
 	rootCmd.PersistentFlags().StringVar(&cli.Cluster, "cluster", "", "Cluster name to analyze")
 	rootCmd.PersistentFlags().StringVar(&cli.Metric, "metric", "", "Metric to visualize (count, memoryUsage, cpuUsage, etc)")
 	rootCmd.PersistentFlags().StringVar(&cli.Category, "category", "", "Category to group by (query_hash, tables, hosts, errors)")
 	rootCmd.PersistentFlags().BoolVar(&cli.FlamegraphNative, "flamegraph-native", false, "Use native flamegraph viewer instead of flamelens")
 
-	// Add subcommands
+	heatmapCmd := &cobra.Command{
+		Use:   "heatmap",
+		Short: "Start in heatmap mode",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return RunSubCommand(cli, version, cmd, args)
+		},
+	}
 	rootCmd.AddCommand(heatmapCmd)
+
+	flamegraphCmd := &cobra.Command{
+		Use:   "flamegraph",
+		Short: "Start in flamegraph mode",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return RunSubCommand(cli, version, cmd, args)
+		},
+	}
 	rootCmd.AddCommand(flamegraphCmd)
+
+	profileEventsCmd := &cobra.Command{
+		Use:   "profile_events",
+		Short: "Start in profile events mode",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return RunSubCommand(cli, version, cmd, args)
+		},
+	}
 	rootCmd.AddCommand(profileEventsCmd)
+
+	metricLogCmd := &cobra.Command{
+		Use:   "metric_log",
+		Short: "Start in metric_log mode",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return RunSubCommand(cli, version, cmd, args)
+		},
+	}
 	rootCmd.AddCommand(metricLogCmd)
+
+	asyncMetricLogCmd := &cobra.Command{
+		Use:   "asynchronous_metric_log",
+		Short: "Start in asynchronous_metric_log mode",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return RunSubCommand(cli, version, cmd, args)
+		},
+	}
 	rootCmd.AddCommand(asyncMetricLogCmd)
 
-	// Add logs command
 	logsCmd := &cobra.Command{
 		Use:   "logs [table]",
 		Short: "Start in logs mode (query_log, query_thread_log)",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return RunSubCommand(cli, cmd, args)
+			return RunSubCommand(cli, version, cmd, args)
 		},
 	}
 	logsCmd.Flags().String("fields", "", "Comma-separated list of fields to include")
@@ -180,7 +140,7 @@ func RunRootCommand(cliInstance *types.CLI, version string, cmd *cobra.Command, 
 	return nil
 }
 
-func RunSubCommand(c *types.CLI, cmd *cobra.Command, args []string) error {
+func RunSubCommand(c *types.CLI, version string, cmd *cobra.Command, args []string) error {
 	// Create a new context with the CLI instance if the current context is nil
 	ctx := context.Background()
 	if cmd.Context() != nil {
@@ -194,5 +154,5 @@ func RunSubCommand(c *types.CLI, cmd *cobra.Command, args []string) error {
 	cmd.SetContext(ctx)
 
 	// Run the root command directly instead of executing again
-	return RunRootCommand(c, "", cmd, args)
+	return RunRootCommand(c, version, cmd, args)
 }
