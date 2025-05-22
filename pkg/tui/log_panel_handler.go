@@ -231,7 +231,9 @@ func (lp *LogPanel) showLogExplorer() {
 	lp.logDetails.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		rowNumber, _ := lp.logDetails.GetSelection()
 		if event.Key() == tcell.KeyEnter {
-			// TODO: Show log details modal
+			if rowNumber > 0 && rowNumber-1 < len(lp.currentResults) {
+				lp.showLogDetailsModal(lp.currentResults[rowNumber-1])
+			}
 		} else if event.Key() == tcell.KeyPgDn {
 			lp.loadMoreLogs(false) // Load older logs
 		} else if event.Key() == tcell.KeyPgUp {
