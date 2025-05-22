@@ -344,6 +344,8 @@ func (a *App) setupKeybindings() {
 					)
 				case CmdMetricLog:
 					a.ShowMetricLog(a.fromTime, a.toTime, a.cluster)
+				case CmdAsyncMetricLog:
+					a.ShowAsynchronousMetricLog(a.fromTime, a.toTime, a.cluster)
 				}
 			}
 		})

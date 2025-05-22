@@ -55,6 +55,14 @@ func NewRootCommand(cli *types.CLI, version string) *cobra.Command {
 		},
 	}
 
+	asyncMetricLogCmd := &cobra.Command{
+		Use:   "asynchronous_metric_log",
+		Short: "Start in asynchronous_metric_log mode",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return RunSubCommand(cli, cmd, args)
+		},
+	}
+
 	// Add global flags
 	rootCmd.PersistentFlags().StringVar(&cli.ConfigPath, "config", "", "Path to config file (default: ~/.clickhouse-timeline/clickhouse-timeline.yml)")
 	rootCmd.PersistentFlags().StringVar(&cli.LogPath, "log", "", "Path to log file (default: ~/.clickhouse-timeline/clickhouse-timeline.log)")
@@ -72,6 +80,7 @@ func NewRootCommand(cli *types.CLI, version string) *cobra.Command {
 	rootCmd.AddCommand(flamegraphCmd)
 	rootCmd.AddCommand(profileEventsCmd)
 	rootCmd.AddCommand(metricLogCmd)
+	rootCmd.AddCommand(asyncMetricLogCmd)
 
 	return rootCmd
 }
