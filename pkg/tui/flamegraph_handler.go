@@ -168,9 +168,9 @@ func (a *App) showNativeFlamegraph(rows *sql.Rows, sourcePage string) {
 		// Create content for the stack trace view
 		// Format stack with highlighted selected line
 		var stackBuilder strings.Builder
-		stackBuilder.WriteString(fmt.Sprintf("Selected stacktrace count: %d (%.2f%% of total)\n\nFull Stack Trace:\n", 
+		stackBuilder.WriteString(fmt.Sprintf("Selected stacktrace count: %d (%.2f%% of total)\n\nFull Stack Trace:\n",
 			count, percentage*100.0))
-		
+
 		for i, frame := range stack {
 			if i == selectedLevel {
 				stackBuilder.WriteString(fmt.Sprintf("[yellow]%d. %s[-]\n", i+1, frame))
@@ -178,7 +178,7 @@ func (a *App) showNativeFlamegraph(rows *sql.Rows, sourcePage string) {
 				stackBuilder.WriteString(fmt.Sprintf("%d. %s\n", i+1, frame))
 			}
 		}
-		
+
 		stackBuilder.WriteString("\n[yellow]Use arrow keys to scroll, ESC or Close button to return[-]")
 		stackTraceText := stackBuilder.String()
 
@@ -381,7 +381,7 @@ func (a *App) ShowFlamegraphForm(params ...FlamegraphParams) {
 	}
 
 	cancelFunc := func() {
-		a.pages.SwitchToPage("main")
+		a.SwitchToMainPage("Canceled from flamegraph form")
 	}
 	form.AddButton("Generate", generateFunc)
 	form.AddButton("Cancel", cancelFunc)

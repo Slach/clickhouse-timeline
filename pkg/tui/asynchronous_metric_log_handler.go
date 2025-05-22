@@ -9,22 +9,16 @@ import (
 )
 
 const (
-	asyncMetricLogColumnsQuery = `
-SELECT DISTINCT name 
-FROM system.columns 
-WHERE database='system' 
-  AND table LIKE 'asynchronous_metric_log%'`
+	asyncMetricLogColumnsQuery = `SELECT DISTINCT metric FROM clusterAllReplicas('%s',merge(system, '^asynchronous_metrics'))`
 )
 
 func (a *App) ShowAsynchronousMetricLog(fromTime, toTime time.Time, cluster string) {
 	if a.clickHouse == nil {
-		a.mainView.SetText("Error: Please connect to a ClickHouse instance first using :connect command")
-		a.pages.SwitchToPage("main")
+		a.SwitchToMainPage("Error: Please connect to a ClickHouse instance first using :connect command")
 		return
 	}
 	if cluster == "" {
-		a.mainView.SetText("Error: Please select a cluster first using :cluster command")
-		a.pages.SwitchToPage("main")
+		a.SwitchToMainPage("Error: Please select a cluster first using :cluster command")
 		return
 	}
 
@@ -40,7 +34,7 @@ func (a *App) ShowAsynchronousMetricLog(fromTime, toTime time.Time, cluster stri
 
 	go func() {
 		// Get available metric asyncMetricFields
-		columnNameRows, columnNameErr := a.clickHouse.Query(asyncMetricLogColumnsQuery)
+		columnNameRows, columnNameErr := a.clickHouse.Query(fmt.Sprintf(asyncMetricLogColumnsQuery, cluster))
 		if columnNameErr != nil {
 			a.tviewApp.QueueUpdateDraw(func() {
 				a.mainView.SetText(fmt.Sprintf("Error getting async metric asyncMetricFields: %v", columnNameErr))
@@ -85,13 +79,13 @@ func (a *App) ShowAsynchronousMetricLog(fromTime, toTime time.Time, cluster stri
 
 		// Execute single query for all metrics
 		query := fmt.Sprintf(`
-SELECT name, lttb(%d)(event_time,value) 
-FROM cluster('%s', merge(system,'asynchronous_metric_log'))
+SELECT metric, lttb(%d)(event_time,value) 
+FROM clusterAllReplicas('%s', merge(system,'asynchronous_metric_log'))
 WHERE event_date >= toDate(parseDateTimeBestEffort('%s')) 
   AND event_date <= toDate(parseDateTimeBestEffort('%s'))
   AND event_time >= parseDateTimeBestEffort('%s') 
   AND event_time <= parseDateTimeBestEffort('%s')
-GROUP BY name`,
+GROUP BY metric`,
 			buckets, cluster, fromStr, toStr, fromStr, toStr)
 
 		row := 1
@@ -109,16 +103,16 @@ GROUP BY name`,
 
 			filteredTable.Table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 				if event.Key() == tcell.KeyEscape {
-					a.pages.SwitchToPage("main")
+					a.SwitchToMainPage("returned from :asynchronous_metric_log")
 					return nil
 				}
 				if filterHandler := filteredTable.GetInputCapture(a.tviewApp, a.pages); filterHandler(event) == nil {
 					return nil
 				}
 				if event.Key() == tcell.KeyEnter {
-					row, _ := filteredTable.Table.GetSelection()
-					if row > 0 { // Skip header row
-						metricName := filteredTable.Table.GetCell(row, 0).Text
+					currentRow, _ := filteredTable.Table.GetSelection()
+					if currentRow > 0 {
+						metricName := filteredTable.Table.GetCell(currentRow, 0).Text
 						go a.showMetricDescription(metricName)
 					}
 					return nil

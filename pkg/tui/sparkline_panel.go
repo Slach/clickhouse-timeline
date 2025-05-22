@@ -29,8 +29,8 @@ func (a *App) ExecuteAndProcessSparklineQuery(query string, prefix string, field
 			var name string
 			var timeValue [][]interface{}
 
-			if err := rows.Scan(&name, &timeValue); err != nil {
-				return fmt.Errorf("error scanning %s row: %v", prefix, err)
+			if scanErr := rows.Scan(&name, &timeValue); scanErr != nil {
+				return fmt.Errorf("error scanning %s row: %v", prefix, scanErr)
 			}
 
 			// Extract values
@@ -53,8 +53,8 @@ func (a *App) ExecuteAndProcessSparklineQuery(query string, prefix string, field
 				valuePtrs[i] = values[i]
 			}
 
-			if err := rows.Scan(valuePtrs...); err != nil {
-				return fmt.Errorf("error scanning %s row: %v", prefix, err)
+			if scanErr := rows.Scan(valuePtrs...); scanErr != nil {
+				return fmt.Errorf("error scanning %s row: %v", prefix, scanErr)
 			}
 
 			for i, field := range fields {

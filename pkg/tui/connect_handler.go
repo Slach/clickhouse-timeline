@@ -51,9 +51,7 @@ func (a *App) getContextString(ctx config.Context) string {
 func (a *App) handleContextSelection(i int) {
 	// Check if list is empty
 	if a.connectList.GetItemCount() == 0 {
-		a.mainView.SetText("Error: No contexts available")
-		a.pages.SwitchToPage("main")
-		a.tviewApp.SetFocus(a.mainView)
+		a.SwitchToMainPage("Error: No contexts available")
 		return
 	}
 
@@ -74,24 +72,18 @@ func (a *App) handleContextSelection(i int) {
 	}
 
 	if !found {
-		a.mainView.SetText("Error: Could not find selected context")
-		a.pages.SwitchToPage("main")
-		a.tviewApp.SetFocus(a.mainView)
+		a.SwitchToMainPage("Error: Could not find selected context")
 		return
 	}
 
-	ctx := *selectedCtx
-	clickHouse := client.NewClient(ctx, a.version)
+	clickHouse := client.NewClient(*selectedCtx, a.version)
 
 	version, err := clickHouse.GetVersion()
 	if err != nil {
-		log.Error().Err(err).Str("host", ctx.Host).Int("port", ctx.Port).Msg("failed to connect to ClickHouse")
-		a.mainView.SetText(fmt.Sprintf("Error connecting to ClickHouse: %v", err))
+		log.Error().Err(err).Str("host", selectedCtx.Host).Int("port", selectedCtx.Port).Msg("failed to connect to ClickHouse")
+		a.SwitchToMainPage(fmt.Sprintf("Error connecting to ClickHouse %s: %v", err, a.getContextString(*selectedCtx)))
 	} else {
 		a.clickHouse = clickHouse
-		a.mainView.SetText(fmt.Sprintf("Connected to %s:%d : version %s, press ':' to continue", ctx.Host, ctx.Port, version))
+		a.SwitchToMainPage(fmt.Sprintf("Connected to %s:%d : version %s, press ':' to continue", selectedCtx.Host, selectedCtx.Port, version))
 	}
-
-	a.pages.SwitchToPage("main")
-	a.tviewApp.SetFocus(a.mainView)
 }

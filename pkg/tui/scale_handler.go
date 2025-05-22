@@ -37,8 +37,7 @@ func (a *App) showScaleSelector() {
 
 	scaleList.SetSelectedFunc(func(i int, _ string, _ string, _ rune) {
 		a.scaleType = scales[i].scale
-		a.mainView.SetText(fmt.Sprintf("Scale set to: %s", scales[i].name))
-		a.pages.SwitchToPage("main")
+		a.SwitchToMainPage(fmt.Sprintf("Scale changed to: %s", a.scaleType))
 
 		// If we already have a heatmap, regenerate it with the new scale
 		if a.heatmapTable != nil {

@@ -34,13 +34,11 @@ ORDER BY key
 
 func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string, fromTime, toTime time.Time, cluster string) {
 	if a.clickHouse == nil {
-		a.mainView.SetText("Error: Please connect to a ClickHouse instance first using :connect command")
-		a.pages.SwitchToPage("main")
+		a.SwitchToMainPage("Error: Please connect to a ClickHouse instance first using :connect command")
 		return
 	}
 	if cluster == "" {
-		a.mainView.SetText("Error: Please select a cluster first using :cluster command")
-		a.pages.SwitchToPage("main")
+		a.SwitchToMainPage("Error: Please select a cluster first using :cluster command")
 		return
 	}
 
@@ -184,8 +182,7 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 						descrRows, descrErr := a.clickHouse.Query(descrQuery)
 						if descrErr != nil {
 							a.tviewApp.QueueUpdateDraw(func() {
-								a.mainView.SetText(fmt.Sprintf("Error getting event description: %v", descrErr))
-								a.pages.SwitchToPage("main")
+								a.SwitchToMainPage(fmt.Sprintf("Error getting event description: %v", descrErr))
 							})
 							return
 						}

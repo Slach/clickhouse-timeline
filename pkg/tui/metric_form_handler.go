@@ -84,8 +84,7 @@ func (a *App) showMetricSelector() {
 
 	metricList.SetSelectedFunc(func(i int, _ string, _ string, _ rune) {
 		a.currentMetric = metrics[i].metric
-		a.mainView.SetText(fmt.Sprintf("Metric set to: %s", metrics[i].name))
-		a.pages.SwitchToPage("main")
+		a.SwitchToMainPage(fmt.Sprintf("Metric changed to: %s", metrics[i].name))
 
 		// If we already have a heatmap, regenerate it with the new metric
 		if a.heatmapTable != nil {

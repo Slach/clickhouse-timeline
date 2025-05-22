@@ -33,8 +33,7 @@ func (a *App) showMetricDescription(metricName string) {
 	rows, err := a.clickHouse.Query(query)
 	if err != nil {
 		a.tviewApp.QueueUpdateDraw(func() {
-			a.mainView.SetText(fmt.Sprintf("Error getting %s description: %v", source, err))
-			a.pages.SwitchToPage("main")
+			a.SwitchToMainPage(fmt.Sprintf("Error getting %s description: %v", source, err))
 		})
 		return
 	}

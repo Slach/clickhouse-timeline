@@ -62,8 +62,7 @@ func (a *App) showClusterSelector() {
 
 			clusterList.SetSelectedFunc(func(i int, _ string, _ string, _ rune) {
 				a.cluster = clusters[i]
-				a.mainView.SetText(fmt.Sprintf("Cluster set to: %s", a.cluster))
-				a.pages.SwitchToPage("main")
+				a.SwitchToMainPage(fmt.Sprintf("Cluster set to: %s", a.cluster))
 			})
 
 			a.clusterList = clusterList

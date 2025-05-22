@@ -16,13 +16,15 @@ import (
 )
 
 type App struct {
-	cfg          *config.Config
+	cfg             *config.Config
+	clickHouse      *client.Client
+	selectedContext *config.Context
+
 	tviewApp     *tview.Application
 	pages        *tview.Pages
 	connectList  *tview.List
 	mainView     *tview.TextView
 	commandInput *tview.InputField
-	clickHouse   *client.Client
 	mainFlex     *tview.Flex
 	version      string
 
@@ -50,6 +52,37 @@ type App struct {
 	flamegraphNative bool
 }
 
+func NewApp(cfg *config.Config, version string) *App {
+	app := &App{
+		cfg:           cfg,
+		tviewApp:      tview.NewApplication(),
+		version:       version,
+		fromTime:      time.Now().Add(-24 * time.Hour), // Default: 24 hours ago
+		toTime:        time.Now(),                      // Default: now
+		category:      CategoryQueryHash,               // Default category
+		currentMetric: MetricCount,                     // Default metric
+		scaleType:     ScaleLinear,                     // Default scale
+	}
+
+	app.setupUI()
+	return app
+}
+
+func (a *App) SwitchToMainPage(mainMsg string) {
+	if a.selectedContext != nil {
+		mainMsg += fmt.Sprintf("\nConnected to %s", a.getContextString(*a.selectedContext))
+	}
+	if a.category != "" {
+		mainMsg += fmt.Sprintf("\nSet category to %s", a.selectedCategory)
+	}
+	if a.currentMetric != "" {
+		mainMsg += fmt.Sprintf("\nSet metric to %s", a.currentMetric)
+	}
+	mainMsg += "\nPress ':' to continue"
+	a.mainView.SetText(mainMsg)
+	a.pages.SwitchToPage("main")
+	a.tviewApp.SetFocus(a.mainView)
+}
 func (a *App) ApplyCLIParameters(c *types.CLI, commandName string) {
 	mainMsg := ""
 	a.flamegraphNative = c.FlamegraphNative
@@ -120,11 +153,11 @@ func (a *App) ApplyCLIParameters(c *types.CLI, commandName string) {
 
 	if doCmdExecute {
 		switch commandName {
-		case "heatmap":
+		case CmdHeatmap:
 			a.ShowHeatmap()
-		case "flamegraph":
+		case CmdFlamegraph:
 			a.ShowFlamegraphForm()
-		case "profile_events":
+		case CmdProfileEvents:
 			a.ShowProfileEvents(
 				a.category,
 				a.selectedCategory,
@@ -132,8 +165,10 @@ func (a *App) ApplyCLIParameters(c *types.CLI, commandName string) {
 				a.toTime,
 				a.cluster,
 			)
-		case "metric_log":
+		case CmdMetricLog:
 			a.ShowMetricLog(a.fromTime, a.toTime, a.cluster)
+		case CmdAsyncMetricLog:
+			a.ShowAsynchronousMetricLog(a.fromTime, a.toTime, a.cluster)
 		}
 	}
 }
@@ -196,22 +231,6 @@ func (a *App) ApplyPredefinedRange(rangeOption string) {
 		a.fromTime = time.Now().Add(-24 * time.Hour)
 	}
 	a.toTime = time.Now()
-}
-
-func NewApp(cfg *config.Config, version string) *App {
-	app := &App{
-		cfg:           cfg,
-		tviewApp:      tview.NewApplication(),
-		version:       version,
-		fromTime:      time.Now().Add(-24 * time.Hour), // Default: 24 hours ago
-		toTime:        time.Now(),                      // Default: now
-		category:      CategoryQueryHash,               // Default category
-		currentMetric: MetricCount,                     // Default metric
-		scaleType:     ScaleLinear,                     // Default scale
-	}
-
-	app.setupUI()
-	return app
 }
 
 func (a *App) setupUI() {

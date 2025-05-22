@@ -22,13 +22,11 @@ WHERE database='system'
 
 func (a *App) ShowMetricLog(fromTime, toTime time.Time, cluster string) {
 	if a.clickHouse == nil {
-		a.mainView.SetText("Error: Please connect to a ClickHouse instance first using :connect command")
-		a.pages.SwitchToPage("main")
+		a.SwitchToMainPage("Error: Please connect to a ClickHouse instance first using :connect command")
 		return
 	}
 	if cluster == "" {
-		a.mainView.SetText("Error: Please select a cluster first using :cluster command")
-		a.pages.SwitchToPage("main")
+		a.SwitchToMainPage("Error: Please select a cluster first using :cluster command")
 		return
 	}
 
@@ -170,16 +168,16 @@ ORDER BY bucket_time`,
 
 			filteredTable.Table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 				if event.Key() == tcell.KeyEscape {
-					a.pages.SwitchToPage("main")
+					a.SwitchToMainPage("Retuned from :metric_log")
 					return nil
 				}
 				if filterHandler := filteredTable.GetInputCapture(a.tviewApp, a.pages); filterHandler(event) == nil {
 					return nil
 				}
 				if event.Key() == tcell.KeyEnter {
-					currentRow, currentCol := filteredTable.Table.GetSelection()
-					if currentRow > 0 && currentCol == 0 {
-						metricName := filteredTable.Table.GetCell(row, 0).Text
+					currentRow, _ := filteredTable.Table.GetSelection()
+					if currentRow > 0 {
+						metricName := filteredTable.Table.GetCell(currentRow, 0).Text
 						go a.showMetricDescription(metricName)
 					}
 					return nil

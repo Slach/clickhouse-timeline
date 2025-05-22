@@ -59,8 +59,7 @@ func (a *App) showCategorySelector() {
 
 	categoryList.SetSelectedFunc(func(i int, _ string, _ string, _ rune) {
 		a.category = categories[i].category
-		a.mainView.SetText(fmt.Sprintf("Category set to: %s", categories[i].name))
-		a.pages.SwitchToPage("main")
+		a.SwitchToMainPage(fmt.Sprintf("Category set to: %s", categories[i].name))
 	})
 
 	a.categoryList = categoryList

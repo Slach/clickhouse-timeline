@@ -68,6 +68,7 @@ var availableCommands = []string{
 	CmdScale,
 	CmdProfileEvents,
 	CmdMetricLog,
+	CmdAsyncMetricLog,
 }
 
 // Help text
