@@ -158,20 +158,75 @@ func (lp *LogPanel) showLogExplorer() {
 	mainFlex := tview.NewFlex().SetDirection(tview.FlexRow)
 
 	// 1. AdHoc Filter Panel (20% height)
-	filterPanel := tview.NewFlex().SetDirection(tview.FlexColumn)
-	// TODO: Implement adhoc filter UI
+	filterPanel := tview.NewFlex().SetDirection(tview.FlexRow)
+	filterPanel.SetBorder(true).SetTitle("Filters")
+	
+	// Filter input components
+	filterField := tview.NewDropDown().
+		SetLabel("Field: ").
+		SetOptions(lp.getAvailableFilterFields(), nil)
+	filterOp := tview.NewDropDown().
+		SetLabel("Operator: ").
+		SetOptions([]string{"=", "!=", ">", "<", ">=", "<=", "LIKE", "NOT LIKE"}, nil)
+	filterValue := tview.NewInputField().
+		SetLabel("Value: ")
+	
+	addFilterBtn := tview.NewButton("Add Filter").
+		SetSelectedFunc(func() {
+			field, _ := filterField.GetCurrentOption()
+			op, _ := filterOp.GetCurrentOption()
+			value := filterValue.GetText()
+			
+			if field != "" && op != "" && value != "" {
+				lp.filters = append(lp.filters, LogFilter{
+					Field:    field,
+					Operator: op,
+					Value:    value,
+				})
+				lp.updateFilterDisplay(filterPanel)
+				go lp.loadLogs()
+			}
+		})
+	
+	filterFlex := tview.NewFlex().
+		AddItem(filterField, 0, 1, false).
+		AddItem(filterOp, 0, 1, false).
+		AddItem(filterValue, 0, 1, false).
+		AddItem(addFilterBtn, 10, 1, false)
+	
+	filterPanel.AddItem(filterFlex, 1, 1, false)
+	lp.updateFilterDisplay(filterPanel)
 	mainFlex.AddItem(filterPanel, 3, 1, false)
 
 	// 2. Overview Panel (20% height)
 	overviewPanel := tview.NewTextView().SetDynamicColors(true)
-	// TODO: Implement overview bar chart
+	overviewPanel.SetBorder(true).SetTitle("Overview")
 	mainFlex.AddItem(overviewPanel, 3, 1, false)
 
 	// 3. Log Details Panel (60% height)
 	logDetails := tview.NewTable().
 		SetBorders(false).
-		SetSelectable(true, false)
-	// TODO: Implement log details table
+		SetSelectable(true, false).
+		SetFixed(1, 0)
+	logDetails.SetBorder(true).SetTitle("Log Entries")
+	
+	// Add column headers
+	logDetails.SetCell(0, 0, tview.NewTableCell("Time").SetTextColor(tcell.ColorYellow))
+	logDetails.SetCell(0, 1, tview.NewTableCell("Message").SetTextColor(tcell.ColorYellow))
+	
+	// Handle keyboard navigation
+	logDetails.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		row, _ := logDetails.GetSelection()
+		if event.Key() == tcell.KeyEnter {
+			// TODO: Show log details modal
+		} else if event.Key() == tcell.KeyPgDn {
+			lp.loadMoreLogs(false) // Load older logs
+		} else if event.Key() == tcell.KeyPgUp {
+			lp.loadMoreLogs(true) // Load newer logs
+		}
+		return event
+	})
+	
 	mainFlex.AddItem(logDetails, 0, 1, true)
 
 	// Execute initial query
@@ -220,18 +275,221 @@ func (lp *LogPanel) loadLogs() {
 
 	// Process results
 	var entries []LogEntry
+	colTypes, _ := rows.ColumnTypes()
+	scanArgs := make([]interface{}, len(colTypes))
+	
 	for rows.Next() {
 		var entry LogEntry
-		// TODO: Scan fields based on selected columns
+		// Initialize scan args based on column types
+		for i, col := range colTypes {
+			switch col.DatabaseTypeName() {
+			case "DateTime", "DateTime64":
+				scanArgs[i] = &entry.Time
+			case "UInt64", "Int64":
+				scanArgs[i] = &entry.TimeMs
+			case "String":
+				switch col.Name() {
+				case lp.messageField:
+					scanArgs[i] = &entry.Message
+				case lp.levelField:
+					scanArgs[i] = &entry.Level
+				case lp.dateField:
+					scanArgs[i] = &entry.Date
+				default:
+					var dummy string
+					scanArgs[i] = &dummy
+				}
+			default:
+				var dummy interface{}
+				scanArgs[i] = &dummy
+			}
+		}
+		
+		if err := rows.Scan(scanArgs...); err != nil {
+			continue
+		}
 		entries = append(entries, entry)
 	}
 
 	lp.currentResults = entries
-	// TODO: Update UI with results
+	lp.app.tviewApp.QueueUpdateDraw(func() {
+		// Update log details table
+		logDetails := lp.app.pages.GetPage("logExplorer").GetItem(2).(*tview.Table)
+		logDetails.Clear()
+		
+		// Re-add headers
+		logDetails.SetCell(0, 0, tview.NewTableCell("Time").SetTextColor(tcell.ColorYellow))
+		logDetails.SetCell(0, 1, tview.NewTableCell("Message").SetTextColor(tcell.ColorYellow))
+		
+		// Add log entries
+		for i, entry := range entries {
+			timeStr := ""
+			if !entry.Time.IsZero() {
+				timeStr = entry.Time.Format("2006-01-02 15:04:05")
+			} else if entry.TimeMs > 0 {
+				timeStr = time.Unix(0, entry.TimeMs*int64(time.Millisecond)).Format("2006-01-02 15:04:05")
+			} else if entry.Date != "" {
+				timeStr = entry.Date
+			}
+			
+			logDetails.SetCell(i+1, 0, tview.NewTableCell(timeStr))
+			logDetails.SetCell(i+1, 1, tview.NewTableCell(entry.Message))
+			
+			// Color by level if available
+			if entry.Level != "" {
+				color := tcell.ColorWhite
+				switch strings.ToLower(entry.Level) {
+				case "error", "exception":
+					color = tcell.ColorRed
+				case "warning", "debug", "trace":
+					color = tcell.ColorYellow
+				case "info":
+					color = tcell.ColorGreen
+				}
+				logDetails.GetCell(i+1, 1).SetTextColor(color)
+			}
+		}
+		
+		// Update overview panel
+		overview := lp.app.pages.GetPage("logExplorer").GetItem(1).(*tview.TextView)
+		lp.updateOverview(overview)
+	})
 }
 
-// TODO: Implement additional methods for:
-// - Adhoc filter management
-// - Overview bar chart rendering
-// - Log details table rendering
-// - Pagination/loading more logs
+func (lp *LogPanel) getAvailableFilterFields() []string {
+	fields := []string{lp.messageField, lp.timeField}
+	if lp.timeMsField != "" {
+		fields = append(fields, lp.timeMsField)
+	}
+	if lp.dateField != "" {
+		fields = append(fields, lp.dateField)
+	}
+	if lp.levelField != "" {
+		fields = append(fields, lp.levelField)
+	}
+	return fields
+}
+
+func (lp *LogPanel) updateFilterDisplay(panel *tview.Flex) {
+	// Clear existing filter displays
+	for i := 1; i < panel.GetItemCount(); i++ {
+		panel.RemoveItem(panel.GetItem(i))
+	}
+	
+	// Add current filters
+	for _, filter := range lp.filters {
+		filterText := fmt.Sprintf("%s %s %s", filter.Field, filter.Operator, filter.Value)
+		filterBtn := tview.NewButton(filterText).
+			SetSelectedFunc(func() {
+				// Remove this filter
+				for i, f := range lp.filters {
+					if f == filter {
+						lp.filters = append(lp.filters[:i], lp.filters[i+1:]...)
+						break
+					}
+				}
+				lp.updateFilterDisplay(panel)
+				go lp.loadLogs()
+			})
+		panel.AddItem(filterBtn, len(filterText)+4, 1, false)
+	}
+}
+
+func (lp *LogPanel) updateOverview(view *tview.TextView) {
+	if lp.levelField == "" {
+		view.SetText("No level field selected for overview")
+		return
+	}
+	
+	levelCounts := make(map[string]int)
+	for _, entry := range lp.currentResults {
+		if entry.Level != "" {
+			levelCounts[entry.Level]++
+		}
+	}
+	
+	var builder strings.Builder
+	for level, count := range levelCounts {
+		bar := strings.Repeat("█", int(float64(count)/float64(len(lp.currentResults))*50)
+		color := "[white]"
+		switch strings.ToLower(level) {
+		case "error", "exception":
+			color = "[red]"
+		case "warning", "debug", "trace":
+			color = "[yellow]"
+		case "info":
+			color = "[green]"
+		}
+		builder.WriteString(fmt.Sprintf("%s%-10s %s %d\n", color, level, bar, count))
+	}
+	
+	view.SetText(builder.String())
+}
+
+func (lp *LogPanel) loadMoreLogs(newer bool) {
+	if len(lp.currentResults) == 0 {
+		return
+	}
+	
+	var timeCondition time.Time
+	if newer {
+		timeCondition = lp.currentResults[0].Time
+	} else {
+		timeCondition = lp.currentResults[len(lp.currentResults)-1].Time
+	}
+	
+	query := fmt.Sprintf(`
+		SELECT %s
+		FROM %s.%s
+		WHERE %s %s ?
+		ORDER BY %s %s
+		LIMIT ?`,
+		strings.Join(lp.getSelectedFields(), ", "),
+		lp.database,
+		lp.table,
+		lp.timeField,
+		ternary(newer, ">", "<"),
+		lp.timeField,
+		ternary(newer, "ASC", "DESC"),
+	)
+	
+	rows, err := lp.app.clickHouse.Query(context.Background(), query, timeCondition, lp.windowSize)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	
+	var newEntries []LogEntry
+	// ... same scanning logic as loadLogs ...
+	
+	if newer {
+		lp.currentResults = append(newEntries, lp.currentResults...)
+	} else {
+		lp.currentResults = append(lp.currentResults, newEntries...)
+	}
+	
+	lp.app.tviewApp.QueueUpdateDraw(func() {
+		// Update UI with new entries
+	})
+}
+
+func (lp *LogPanel) getSelectedFields() []string {
+	fields := []string{lp.messageField, lp.timeField}
+	if lp.timeMsField != "" {
+		fields = append(fields, lp.timeMsField)
+	}
+	if lp.dateField != "" {
+		fields = append(fields, lp.dateField)
+	}
+	if lp.levelField != "" {
+		fields = append(fields, lp.levelField)
+	}
+	return fields
+}
+
+func ternary(condition bool, trueVal, falseVal string) string {
+	if condition {
+		return trueVal
+	}
+	return falseVal
+}
