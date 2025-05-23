@@ -378,7 +378,7 @@ func (lp *LogPanel) loadLogs() {
 		lp.timeField,
 		lp.timeField)
 
-	windowStart := time.Now().Add(-time.Duration(lp.windowSize) * time.Millisecond)
+	windowStart := lp.app.fromTime
 	rows, err := lp.app.clickHouse.Query(logsQuery, windowStart, lp.windowSize)
 	if err != nil {
 		lp.app.SwitchToMainPage(fmt.Sprintf("loadLogs Query failed: %v", err))
@@ -548,15 +548,17 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 
 	var timeCondition time.Time
 	if newer {
-		timeCondition = lp.currentResults[0].Time
+		// For newer logs, use the earliest time in current results minus window size
+		timeCondition = lp.currentResults[0].Time.Add(-time.Duration(lp.windowSize) * time.Millisecond)
 	} else {
+		// For older logs, use the latest time in current results
 		timeCondition = lp.currentResults[len(lp.currentResults)-1].Time
 	}
 
 	query := fmt.Sprintf(`
 		SELECT %s
 		FROM %s.%s
-		WHERE %s %s ?
+		WHERE %s %s ? AND %s <= ?
 		ORDER BY %s %s
 		LIMIT ?`,
 		strings.Join(lp.getSelectedFields(), ", "),
@@ -568,7 +570,7 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 		ternary(newer, "ASC", "DESC"),
 	)
 
-	rows, err := lp.app.clickHouse.Query(query, timeCondition, lp.windowSize)
+	rows, err := lp.app.clickHouse.Query(query, timeCondition, lp.app.toTime, lp.windowSize)
 	if err != nil {
 		return
 	}
