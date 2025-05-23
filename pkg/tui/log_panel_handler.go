@@ -185,23 +185,57 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 		}
 	}
 
-	// Add field selection dropdowns
+	// Clear form but keep current selections
+	currentDB := lp.database
+	currentTable := lp.table
+	currentMsgField := lp.messageField
+	currentTimeField := lp.timeField
+	currentTimeMsField := lp.timeMsField
+	currentDateField := lp.dateField
+	currentLevelField := lp.levelField
+
 	form.Clear(true)
-	form.AddDropDown("Database", lp.databases, 0,
-		func(db string, index int) { lp.database = db; lp.updateTableDropdown(form) })
-	form.AddDropDown("Table", lp.tables, 0,
-		func(table string, index int) { lp.table = table; lp.updateFieldDropdowns(form) })
-	form.AddDropDown("Message Field", columns, 0,
+
+	// Add dropdowns with current selections
+	dbIdx := indexOf(currentDB, lp.databases)
+	form.AddDropDown("Database", lp.databases, dbIdx,
+		func(db string, index int) { 
+			if db != lp.database { // Only update if changed
+				lp.database = db 
+				lp.updateTableDropdown(form)
+			}
+		})
+
+	tableIdx := indexOf(currentTable, lp.tables)
+	form.AddDropDown("Table", lp.tables, tableIdx,
+		func(table string, index int) { 
+			if table != lp.table { // Only update if changed
+				lp.table = table 
+				lp.updateFieldDropdowns(form)
+			}
+		})
+
+	msgIdx := indexOf(currentMsgField, columns)
+	form.AddDropDown("Message Field", columns, msgIdx,
 		func(field string, index int) { lp.messageField = field })
-	form.AddDropDown("Time Field", timeColumns, 0,
+
+	timeIdx := indexOf(currentTimeField, timeColumns)
+	form.AddDropDown("Time Field", timeColumns, timeIdx,
 		func(field string, index int) { lp.timeField = field })
-	form.AddDropDown("TimeMs Field (optional)", append([]string{""}, timeMsColumns...), 0,
+
+	timeMsIdx := indexOf(currentTimeMsField, append([]string{""}, timeMsColumns...))
+	form.AddDropDown("TimeMs Field (optional)", append([]string{""}, timeMsColumns...), timeMsIdx,
 		func(field string, index int) { lp.timeMsField = field })
-	form.AddDropDown("Date Field (optional)", append([]string{""}, dateColumns...), 0,
+
+	dateIdx := indexOf(currentDateField, append([]string{""}, dateColumns...))
+	form.AddDropDown("Date Field (optional)", append([]string{""}, dateColumns...), dateIdx,
 		func(field string, index int) { lp.dateField = field })
-	form.AddDropDown("Level Field (optional)", append([]string{""}, columns...), 0,
+
+	levelIdx := indexOf(currentLevelField, append([]string{""}, columns...))
+	form.AddDropDown("Level Field (optional)", append([]string{""}, columns...), levelIdx,
 		func(field string, index int) { lp.levelField = field })
-	form.AddInputField("Window Size (ms)", "1000", 10,
+
+	form.AddInputField("Window Size (ms)", fmt.Sprint(lp.windowSize), 10,
 		func(text string, lastRune rune) bool { return unicode.IsDigit(lastRune) },
 		func(text string) { lp.windowSize, _ = strconv.Atoi(text) })
 
@@ -695,4 +729,13 @@ func ternary(condition bool, trueVal, falseVal string) string {
 		return trueVal
 	}
 	return falseVal
+}
+
+func indexOf(value string, slice []string) int {
+	for i, v := range slice {
+		if v == value {
+			return i
+		}
+	}
+	return 0
 }
