@@ -26,6 +26,8 @@ type LogPanel struct {
 	currentResults []LogEntry
 	logDetails     *tview.Table
 	overview       *tview.TextView
+	databases      []string
+	tables         []string
 }
 
 type LogFilter struct {
@@ -61,7 +63,8 @@ func (a *App) ShowLogsPanel() {
 	form.SetBorder(true).SetTitle("Log Explorer")
 
 	// Database dropdown
-	form.AddDropDown("Database", []string{"system", "default"}, 0,
+	lp.databases = []string{"system", "default"}
+	form.AddDropDown("Database", lp.databases, 0,
 		func(db string, index int) {
 			lp.database = db
 			lp.updateTableDropdown(form)
@@ -102,19 +105,19 @@ func (lp *LogPanel) updateTableDropdown(form *tview.Form) {
 		}
 	}()
 
-	var tables []string
+	lp.tables = []string{}
 	for rows.Next() {
 		var table string
 		if scanErr := rows.Scan(&table); scanErr != nil {
 			log.Error().Err(scanErr).Msg("can't scan tables in updateTableDropdown")
 		}
-		tables = append(tables, table)
+		lp.tables = append(lp.tables, table)
 	}
 
 	// Safely update the table dropdown
 	if tableItem := form.GetFormItemByLabel("Table"); tableItem != nil {
 		if tableDropdown, ok := tableItem.(*tview.DropDown); ok {
-			tableDropdown.SetOptions(tables, func(table string, index int) {
+			tableDropdown.SetOptions(lp.tables, func(table string, index int) {
 				lp.table = table
 				lp.updateFieldDropdowns(form)
 			})
@@ -163,9 +166,9 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 
 	// Add field selection dropdowns
 	form.Clear(true)
-	form.AddDropDown("Database", []string{"system", "default"}, 0,
+	form.AddDropDown("Database", lp.databases, 0,
 		func(db string, index int) { lp.database = db; lp.updateTableDropdown(form) })
-	form.AddDropDown("Table", []string{}, 0,
+	form.AddDropDown("Table", lp.tables, 0,
 		func(table string, index int) { lp.table = table; lp.updateFieldDropdowns(form) })
 	form.AddDropDown("Message Field", columns, 0,
 		func(field string, index int) { lp.messageField = field })
