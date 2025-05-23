@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"slices"
 
 	"github.com/rivo/tview"
 )
@@ -197,7 +198,10 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 	form.Clear(true)
 
 	// Add dropdowns with current selections
-	dbIdx := indexOf(currentDB, lp.databases)
+	dbIdx := slices.Index(lp.databases, currentDB)
+	if dbIdx == -1 {
+		dbIdx = 0
+	}
 	form.AddDropDown("Database", lp.databases, dbIdx,
 		func(db string, index int) { 
 			if db != lp.database { // Only update if changed
@@ -206,7 +210,10 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 			}
 		})
 
-	tableIdx := indexOf(currentTable, lp.tables)
+	tableIdx := slices.Index(lp.tables, currentTable)
+	if tableIdx == -1 {
+		tableIdx = 0
+	}
 	form.AddDropDown("Table", lp.tables, tableIdx,
 		func(table string, index int) { 
 			if table != lp.table { // Only update if changed
@@ -215,23 +222,38 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 			}
 		})
 
-	msgIdx := indexOf(currentMsgField, columns)
+	msgIdx := slices.Index(columns, currentMsgField)
+	if msgIdx == -1 {
+		msgIdx = 0
+	}
 	form.AddDropDown("Message Field", columns, msgIdx,
 		func(field string, index int) { lp.messageField = field })
 
-	timeIdx := indexOf(currentTimeField, timeColumns)
+	timeIdx := slices.Index(timeColumns, currentTimeField)
+	if timeIdx == -1 {
+		timeIdx = 0
+	}
 	form.AddDropDown("Time Field", timeColumns, timeIdx,
 		func(field string, index int) { lp.timeField = field })
 
-	timeMsIdx := indexOf(currentTimeMsField, append([]string{""}, timeMsColumns...))
+	timeMsIdx := slices.Index(append([]string{""}, timeMsColumns...), currentTimeMsField)
+	if timeMsIdx == -1 {
+		timeMsIdx = 0
+	}
 	form.AddDropDown("TimeMs Field (optional)", append([]string{""}, timeMsColumns...), timeMsIdx,
 		func(field string, index int) { lp.timeMsField = field })
 
-	dateIdx := indexOf(currentDateField, append([]string{""}, dateColumns...))
+	dateIdx := slices.Index(append([]string{""}, dateColumns...), currentDateField)
+	if dateIdx == -1 {
+		dateIdx = 0
+	}
 	form.AddDropDown("Date Field (optional)", append([]string{""}, dateColumns...), dateIdx,
 		func(field string, index int) { lp.dateField = field })
 
-	levelIdx := indexOf(currentLevelField, append([]string{""}, columns...))
+	levelIdx := slices.Index(append([]string{""}, columns...), currentLevelField)
+	if levelIdx == -1 {
+		levelIdx = 0
+	}
 	form.AddDropDown("Level Field (optional)", append([]string{""}, columns...), levelIdx,
 		func(field string, index int) { lp.levelField = field })
 
@@ -731,11 +753,3 @@ func ternary(condition bool, trueVal, falseVal string) string {
 	return falseVal
 }
 
-func indexOf(value string, slice []string) int {
-	for i, v := range slice {
-		if v == value {
-			return i
-		}
-	}
-	return 0
-}
