@@ -54,7 +54,7 @@ func (a *App) ShowLogsPanel() {
 	}
 
 	// Main flex layout
-	mainFlex := tview.NewFlex().SetDirection(tview.FlexRow)
+	logsFlex := tview.NewFlex().SetDirection(tview.FlexRow)
 
 	// Database and table selection form
 	form := tview.NewForm()
@@ -82,17 +82,18 @@ func (a *App) ShowLogsPanel() {
 		a.SwitchToMainPage("Returned from :logs")
 	})
 
-	mainFlex.AddItem(form, 0, 1, true)
-	a.pages.AddPage("logs", mainFlex, true, true)
+	logsFlex.AddItem(form, 0, 1, true)
+	a.pages.AddPage("logs", logsFlex, true, true)
 	a.pages.SwitchToPage("logs")
+	form.GetFormItemByLabel("Database")
 }
 
 func (lp *LogPanel) updateTableDropdown(form *tview.Form) {
 	// Query ClickHouse for tables in selected database
-	query := fmt.Sprintf("SHOW TABLES FROM %s", lp.database)
+	query := fmt.Sprintf("SHOW TABLES FROM `%s`", lp.database)
 	rows, err := lp.app.clickHouse.Query(query)
 	if err != nil {
-		lp.app.mainView.SetText(fmt.Sprintf("Error getting tables: %v", err))
+		lp.app.SwitchToMainPage(fmt.Sprintf("Error getting tables: %v", err))
 		return
 	}
 	defer func() {
@@ -104,8 +105,8 @@ func (lp *LogPanel) updateTableDropdown(form *tview.Form) {
 	var tables []string
 	for rows.Next() {
 		var table string
-		if err := rows.Scan(&table); err != nil {
-			continue
+		if scanErr := rows.Scan(&table); scanErr != nil {
+			log.Error().Err(scanErr).Msg("can't scan tables in updateTableDropdown")
 		}
 		tables = append(tables, table)
 	}
@@ -113,7 +114,10 @@ func (lp *LogPanel) updateTableDropdown(form *tview.Form) {
 	// Safely update the table dropdown
 	if tableItem := form.GetFormItemByLabel("Table"); tableItem != nil {
 		if tableDropdown, ok := tableItem.(*tview.DropDown); ok {
-			tableDropdown.SetOptions(tables, nil)
+			tableDropdown.SetOptions(tables, func(table string, index int) {
+				lp.table = table
+				lp.updateFieldDropdowns(form)
+			})
 		}
 	}
 }
@@ -124,10 +128,10 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 	}
 
 	// Query ClickHouse for columns in selected table
-	query := fmt.Sprintf("DESCRIBE %s.%s", lp.database, lp.table)
+	query := fmt.Sprintf("SELECT name,type FROM system.columns WHERE database='%s' AND table='%s'", lp.database, lp.table)
 	rows, err := lp.app.clickHouse.Query(query)
 	if err != nil {
-		lp.app.mainView.SetText(fmt.Sprintf("Error getting columns: %v", err))
+		lp.app.SwitchToMainPage(fmt.Sprintf("Error getting columns: %v", err))
 		return
 	}
 	defer func() {
@@ -136,13 +140,25 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 		}
 	}()
 
-	var columns []string
+	var columns, timeMsColumns, timeColumns, dateColumns []string
 	for rows.Next() {
-		var name, typ, defaultType, defaultExpr, comment, codec string
-		if err := rows.Scan(&name, &typ, &defaultType, &defaultExpr, &comment, &codec); err != nil {
+		var fieldName, fieldType string
+		if scanErr := rows.Scan(&fieldName, &fieldType); scanErr != nil {
+			log.Error().Err(scanErr).Msg("can't scan columns in updateFieldDropdowns")
 			continue
 		}
-		columns = append(columns, name)
+		if strings.Contains(fieldType, "String") {
+			columns = append(columns, fieldName)
+		}
+		if fieldType == "Date" || fieldType == "Date32" || strings.HasPrefix(fieldType, "Date(") || strings.HasPrefix(fieldType, "Date32(") {
+			dateColumns = append(dateColumns, fieldName)
+		}
+		if fieldType == "DateTime" || strings.HasPrefix(fieldType, "DateTime(") {
+			timeColumns = append(timeColumns, fieldName)
+		}
+		if fieldType == "DateTime64" || strings.HasPrefix(fieldType, "DateTime64(") {
+			timeMsColumns = append(timeMsColumns, fieldName)
+		}
 	}
 
 	// Add field selection dropdowns
@@ -153,11 +169,11 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 		func(table string, index int) { lp.table = table; lp.updateFieldDropdowns(form) })
 	form.AddDropDown("Message Field", columns, 0,
 		func(field string, index int) { lp.messageField = field })
-	form.AddDropDown("Time Field", columns, 0,
+	form.AddDropDown("Time Field", timeColumns, 0,
 		func(field string, index int) { lp.timeField = field })
-	form.AddDropDown("TimeMs Field (optional)", append([]string{""}, columns...), 0,
+	form.AddDropDown("TimeMs Field (optional)", append([]string{""}, timeMsColumns...), 0,
 		func(field string, index int) { lp.timeMsField = field })
-	form.AddDropDown("Date Field (optional)", append([]string{""}, columns...), 0,
+	form.AddDropDown("Date Field (optional)", append([]string{""}, dateColumns...), 0,
 		func(field string, index int) { lp.dateField = field })
 	form.AddDropDown("Level Field (optional)", append([]string{""}, columns...), 0,
 		func(field string, index int) { lp.levelField = field })

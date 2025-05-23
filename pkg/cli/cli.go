@@ -82,14 +82,19 @@ func NewRootCommand(cli *types.CLI, version string) *cobra.Command {
 	rootCmd.AddCommand(asyncMetricLogCmd)
 
 	logsCmd := &cobra.Command{
-		Use:   "logs [table]",
-		Short: "Start in logs mode (query_log, query_thread_log)",
-		Args:  cobra.MinimumNArgs(1),
+		Use:   "logs",
+		Short: "Start in logs mode (text_log, error_log, query_log, query_thread_log)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return RunSubCommand(cli, version, cmd, args)
 		},
 	}
-	logsCmd.Flags().String("fields", "", "Comma-separated list of fields to include")
+	logsCmd.Flags().String("database", "", "Database which will use for look log")
+	logsCmd.Flags().String("table", "", "Database which will use for look log")
+	logsCmd.Flags().String("message", "", "Column name for message")
+	logsCmd.Flags().String("time", "", "Column name for time")
+	logsCmd.Flags().String("time-ms", "", "Column name for time with milliseconds")
+	logsCmd.Flags().String("date", "", "Column name for date")
+	logsCmd.Flags().String("level", "", "Column name for message level")
 	logsCmd.Flags().Int("window", 1000, "Sliding window size in milliseconds")
 	rootCmd.AddCommand(logsCmd)
 
