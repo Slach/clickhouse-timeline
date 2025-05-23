@@ -62,8 +62,29 @@ func (a *App) ShowLogsPanel() {
 	form := tview.NewForm()
 	form.SetBorder(true).SetTitle("Log Explorer")
 
+	// Query ClickHouse for available databases
+	rows, err := a.clickHouse.Query("SELECT name FROM system.databases")
+	if err != nil {
+		a.SwitchToMainPage(fmt.Sprintf("Error getting databases: %v", err))
+		return
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Error().Err(closeErr).Msgf("can't close databases query rows")
+		}
+	}()
+
+	lp.databases = []string{}
+	for rows.Next() {
+		var db string
+		if scanErr := rows.Scan(&db); scanErr != nil {
+			log.Error().Err(scanErr).Msg("can't scan database name")
+			continue
+		}
+		lp.databases = append(lp.databases, db)
+	}
+
 	// Database dropdown
-	lp.databases = []string{"system", "default"}
 	form.AddDropDown("Database", lp.databases, 0,
 		func(db string, index int) {
 			lp.database = db
