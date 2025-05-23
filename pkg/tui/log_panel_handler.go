@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rs/zerolog/log"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 	"unicode"
-	"slices"
 
 	"github.com/rivo/tview"
 )
@@ -203,9 +203,9 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 		dbIdx = 0
 	}
 	form.AddDropDown("Database", lp.databases, dbIdx,
-		func(db string, index int) { 
+		func(db string, index int) {
 			if db != lp.database { // Only update if changed
-				lp.database = db 
+				lp.database = db
 				lp.updateTableDropdown(form)
 			}
 		})
@@ -215,9 +215,9 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 		tableIdx = 0
 	}
 	form.AddDropDown("Table", lp.tables, tableIdx,
-		func(table string, index int) { 
+		func(table string, index int) {
 			if table != lp.table { // Only update if changed
-				lp.table = table 
+				lp.table = table
 				lp.updateFieldDropdowns(form)
 			}
 		})
@@ -369,9 +369,9 @@ func (lp *LogPanel) loadLogs() {
 
 	logsQuery := fmt.Sprintf(`
 		SELECT %s
-		FROM %s.%s
+		FROM `+"`%s`.`%s`"+`
 		WHERE %s >= ?
-		ORDER BY %s DESC
+		ORDER BY %s
 		LIMIT ?`,
 		strings.Join(fields, ", "),
 		lp.database,
@@ -752,4 +752,3 @@ func ternary(condition bool, trueVal, falseVal string) string {
 	}
 	return falseVal
 }
-
