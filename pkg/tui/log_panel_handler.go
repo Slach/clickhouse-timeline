@@ -50,7 +50,6 @@ func (a *App) ShowLogsPanel() {
 		a.SwitchToMainPage("Error: Please connect to ClickHouse first")
 		return
 	}
-
 	lp := &LogPanel{
 		app:        a,
 		windowSize: 1000,
