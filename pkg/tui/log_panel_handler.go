@@ -41,7 +41,7 @@ type LogEntry struct {
 	Time    time.Time
 	TimeMs  int64
 	Date    string
-	Level   LevelType
+	Level   string
 	Message string
 }
 
@@ -698,7 +698,7 @@ func (lp *LogPanel) formatLogDetails(entry LogEntry) string {
 
 	// Show level if available
 	if entry.Level != "" {
-		builder.WriteString(fmt.Sprintf("[yellow]%s[-]: %s\n", lp.levelField, entry.Level.String()))
+		builder.WriteString(fmt.Sprintf("[yellow]%s[-]: %s\n", lp.levelField, entry.Level))
 	}
 
 	// Show message
