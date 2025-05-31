@@ -559,7 +559,7 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 		SELECT %s
 		FROM %s.%s
 		WHERE %s %s ? AND %s <= ?
-		ORDER BY %s %s
+		ORDER BY %s
 		LIMIT ?`,
 		strings.Join(lp.getSelectedFields(), ", "),
 		lp.database,
@@ -567,7 +567,6 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 		lp.timeField,
 		ternary(newer, ">", "<"),
 		lp.timeField,
-		ternary(newer, "ASC", "DESC"),
 	)
 
 	rows, err := lp.app.clickHouse.Query(query, timeCondition, lp.app.toTime, lp.windowSize)
