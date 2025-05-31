@@ -558,14 +558,13 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 	query := fmt.Sprintf(`
 		SELECT %s
 		FROM %s.%s
-		WHERE %s %s ? AND %s <= ?
+		WHERE %s BETWEEN ? AND ?
 		ORDER BY %s %s
 		LIMIT ?`,
 		strings.Join(lp.getSelectedFields(), ", "),
 		lp.database,
 		lp.table,
 		lp.timeField,
-		ternary(newer, ">", "<"),
 		lp.timeField,
 		ternary(newer, "ASC", "DESC"),
 	)
