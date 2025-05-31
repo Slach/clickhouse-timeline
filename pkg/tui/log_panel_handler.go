@@ -171,7 +171,7 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 			log.Error().Err(scanErr).Msg("can't scan columns in updateFieldDropdowns")
 			continue
 		}
-		if strings.Contains(fieldType, "String") {
+		if !strings.Contains(fieldType, "Date") && !strings.Contains(fieldType, "Array") && !strings.Contains(fieldType, "Tuple") {
 			columns = append(columns, fieldName)
 		}
 		if fieldType == "Date" || fieldType == "Date32" || strings.HasPrefix(fieldType, "Date(") || strings.HasPrefix(fieldType, "Date32(") {
