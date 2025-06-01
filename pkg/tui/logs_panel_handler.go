@@ -39,7 +39,7 @@ type LogFilter struct {
 
 type LogEntry struct {
 	Time    time.Time
-	TimeMs  int64
+	TimeMs  time.Time
 	Date    string
 	Level   string
 	Message string
@@ -571,8 +571,8 @@ func (lp *LogPanel) showLogDetailsModal(entry LogEntry) {
 	if !entry.Time.IsZero() {
 		headerBuilder.WriteString(fmt.Sprintf("[yellow]%s:[-] %s\n", lp.timeField, entry.Time.Format("2006-01-02 15:04:05 MST")))
 	}
-	if entry.TimeMs > 0 {
-		headerBuilder.WriteString(fmt.Sprintf("[yellow]%s:[-] %d\n", lp.timeMsField, entry.TimeMs))
+	if !entry.TimeMs.IsZero() {
+		headerBuilder.WriteString(fmt.Sprintf("[yellow]%s:[-] %s\n", lp.timeMsField, entry.TimeMs))
 	}
 	if entry.Date != "" {
 		headerBuilder.WriteString(fmt.Sprintf("[yellow]%s:[-] %s\n", lp.dateField, entry.Date))
@@ -681,14 +681,13 @@ func (lp *LogPanel) processRows(rows *sql.Rows) ([]LogEntry, error) {
 		// Initialize scan args based on column types
 		for i, col := range colTypes {
 			fieldName := col.Name()
-			fieldType := col.DatabaseTypeName()
 
 			// Check if this is a time-related field
-			if fieldName == lp.timeField && (fieldType == "DateTime" || fieldType == "Nullable(DateTime)" || strings.HasPrefix(fieldType, "DateTime(") || strings.HasPrefix(fieldType, "Nullable(DateTime(")) {
+			if fieldName == lp.timeField {
 				scanArgs[i] = &entry.Time
-			} else if fieldName == lp.timeMsField && (fieldType == "DateTime64" || strings.HasPrefix(fieldType, "DateTime64(")) {
+			} else if fieldName == lp.timeMsField {
 				scanArgs[i] = &entry.TimeMs
-			} else if fieldName == lp.dateField && (fieldType == "Date" || fieldType == "Date32" || strings.HasPrefix(fieldType, "Date(") || strings.HasPrefix(fieldType, "Date32(") || strings.HasPrefix(fieldType, "Nullable(Date)") || strings.HasPrefix(fieldType, "Nullable(Date(") || strings.HasPrefix(fieldType, "Nullable(Date32")) {
+			} else if fieldName == lp.dateField {
 				scanArgs[i] = &entry.Date
 			} else if fieldName == lp.messageField {
 				scanArgs[i] = &entry.Message
@@ -702,6 +701,7 @@ func (lp *LogPanel) processRows(rows *sql.Rows) ([]LogEntry, error) {
 		}
 
 		if err := rows.Scan(scanArgs...); err != nil {
+			log.Error().Err(err).Send()
 			continue
 		}
 		entries = append(entries, entry)
@@ -721,10 +721,10 @@ func (lp *LogPanel) updateLogTable(entries []LogEntry) {
 		// Add log entries
 		for i, entry := range entries {
 			timeStr := ""
-			if !entry.Time.IsZero() {
-				timeStr = entry.Time.Format("2006-01-02 15:04:05")
-			} else if entry.TimeMs > 0 {
-				timeStr = time.Unix(0, entry.TimeMs*int64(time.Millisecond)).Format("2006-01-02 15:04:05")
+			if !entry.TimeMs.IsZero() {
+				timeStr = entry.Time.Format("2006-01-02 15:04:05 MST")
+			} else if !entry.Time.IsZero() {
+				timeStr = entry.Time.Format("2006-01-02 15:04:05 MST")
 			} else if entry.Date != "" {
 				timeStr = entry.Date
 			}
