@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rs/zerolog/log"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -84,7 +83,7 @@ func (a *App) ShowLogsPanel() {
 	// Main flex layout
 	logsFlex := tview.NewFlex().SetDirection(tview.FlexRow)
 	logsFlex.AddItem(form, 0, 1, true)
-	
+
 	a.pages.AddPage("logs", logsFlex, true, true)
 	a.pages.SwitchToPage("logs")
 }
@@ -749,4 +748,3 @@ func ternary(condition bool, trueVal, falseVal string) string {
 	}
 	return falseVal
 }
-
