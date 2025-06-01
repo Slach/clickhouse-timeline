@@ -156,7 +156,7 @@ func (lp *LogPanel) createForm() *tview.Form {
 			lp.messageField = field
 		})
 	if lp.messageField != "" {
-		messageFieldDropdown.SetText(lp.messageField)
+		// Will be properly set when options are populated in updateFieldDropdowns
 	}
 	form.AddFormItem(messageFieldDropdown)
 
@@ -167,7 +167,7 @@ func (lp *LogPanel) createForm() *tview.Form {
 			lp.timeField = field
 		})
 	if lp.timeField != "" {
-		timeFieldDropdown.SetCurrentOption(-1).SetText(lp.timeField)
+		// Will be properly set when options are populated in updateFieldDropdowns
 	}
 	form.AddFormItem(timeFieldDropdown)
 
@@ -178,7 +178,7 @@ func (lp *LogPanel) createForm() *tview.Form {
 			lp.timeMsField = field
 		})
 	if lp.timeMsField != "" {
-		timeMsFieldDropdown.SetCurrentOption(-1).SetText(lp.timeMsField)
+		// Will be properly set when options are populated in updateFieldDropdowns
 	}
 	form.AddFormItem(timeMsFieldDropdown)
 
@@ -189,7 +189,7 @@ func (lp *LogPanel) createForm() *tview.Form {
 			lp.dateField = field
 		})
 	if lp.dateField != "" {
-		dateFieldDropdown.SetCurrentOption(-1).SetText(lp.dateField)
+		// Will be properly set when options are populated in updateFieldDropdowns
 	}
 	form.AddFormItem(dateFieldDropdown)
 
@@ -200,7 +200,7 @@ func (lp *LogPanel) createForm() *tview.Form {
 			lp.levelField = field
 		})
 	if lp.levelField != "" {
-		levelFieldDropdown.SetCurrentOption(-1).SetText(lp.levelField)
+		// Will be properly set when options are populated in updateFieldDropdowns
 	}
 	form.AddFormItem(levelFieldDropdown)
 
@@ -327,6 +327,30 @@ func (lp *LogPanel) updateDropdownOptions(form *tview.Form, label string, option
 		item := form.GetFormItem(i)
 		if dropdown, ok := item.(*tview.DropDown); ok && dropdown.GetLabel() == label+": " {
 			dropdown.SetOptions(options, selectedFunc)
+			
+			// Set the current option if we have a pre-selected value
+			var currentValue string
+			switch label {
+			case "Message Field":
+				currentValue = lp.messageField
+			case "Time Field":
+				currentValue = lp.timeField
+			case "TimeMs Field (optional)":
+				currentValue = lp.timeMsField
+			case "Date Field (optional)":
+				currentValue = lp.dateField
+			case "Level Field (optional)":
+				currentValue = lp.levelField
+			}
+			
+			if currentValue != "" {
+				for idx, opt := range options {
+					if opt == currentValue {
+						dropdown.SetCurrentOption(idx)
+						break
+					}
+				}
+			}
 			break
 		}
 	}
