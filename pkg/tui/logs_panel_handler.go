@@ -500,10 +500,10 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 		return
 	}
 	lp.app.tviewApp.QueueUpdateDraw(func() {
-		lp.overview.SetText(fmt.Sprintf(ternary(newer, "Loading previous %d rows...", "Loading next %d rows..."), lp.windowSize))
+		lp.overview.SetText(fmt.Sprintf(ternary(newer, "Loading next %d rows...", "Loading previous %d rows..."), lp.windowSize))
 	})
 
-	var timeConditionStr string
+	var timeConditionStr, whereClause string
 	var queryArgs []interface{}
 
 	if !newer {
