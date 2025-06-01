@@ -135,6 +135,7 @@ func RunRootCommand(cliInstance *types.CLI, version string, cmd *cobra.Command, 
 
 	// Get CLI instance from command context
 	if cliInstance != nil {
+		app.cli = cliInstance // Store the CLI instance
 		app.ApplyCLIParameters(cliInstance, cmd.Name())
 	}
 

@@ -27,6 +27,7 @@ type App struct {
 	commandInput *tview.InputField
 	mainFlex     *tview.Flex
 	version      string
+	cli          *types.CLI
 
 	// Date range fields
 	fromTime  time.Time
@@ -65,6 +66,7 @@ func NewApp(cfg *config.Config, version string) *App {
 		category:      CategoryQueryHash,               // Default category
 		currentMetric: MetricCount,                     // Default metric
 		scaleType:     ScaleLinear,                     // Default scale
+		cli:          &types.CLI{},                     // Initialize empty CLI
 	}
 
 	app.setupUI()
