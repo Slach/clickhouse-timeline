@@ -530,12 +530,14 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 		}
 
 		timeConditionStr = fmt.Sprintf("%s BETWEEN ? AND ?", lp.timeField)
-		whereClause, args := lp.buildWhereClause(timeConditionStr, []interface{}{prevBatchTime, lp.firstEntryTime})
+		builtWhereClause, args := lp.buildWhereClause(timeConditionStr, []interface{}{prevBatchTime, lp.firstEntryTime})
 		queryArgs = args
+		whereClause = builtWhereClause
 	} else {
 		timeConditionStr = fmt.Sprintf("%s BETWEEN ? AND ?", lp.timeField)
-		whereClause, args := lp.buildWhereClause(timeConditionStr, []interface{}{lp.lastEntryTime, lp.app.toTime})
+		builtWhereClause, args := lp.buildWhereClause(timeConditionStr, []interface{}{lp.lastEntryTime, lp.app.toTime})
 		queryArgs = args
+		whereClause = builtWhereClause
 	}
 
 	// Build query with appropriate ordering

@@ -111,6 +111,14 @@ func (c *Client) Query(query string, args ...interface{}) (*sql.Rows, error) {
 	return c.db.QueryContext(context.Background(), query, args...)
 }
 
+func (c *Client) QueryRow(query string, args ...interface{}) *sql.Row {
+	log.Info().Msg(query)
+	if len(args) > 0 {
+		log.Info().Msgf("args=%#v", args)
+	}
+	return c.db.QueryRowContext(context.Background(), query, args...)
+}
+
 func (c *Client) Close() error {
 	if c.db != nil {
 		return c.db.Close()
