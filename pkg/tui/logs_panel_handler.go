@@ -3,7 +3,6 @@ package tui
 import (
 	"database/sql"
 	"fmt"
-	"github.com/Slach/clickhouse-timeline/pkg/types"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rs/zerolog/log"
 	"strconv"
@@ -49,48 +48,43 @@ type LogEntry struct {
 }
 
 func (lp *LogPanel) Show() {
-	if a.clickHouse == nil {
-		a.SwitchToMainPage("Error: Please connect to ClickHouse first")
+	if lp.app.clickHouse == nil {
+		lp.app.SwitchToMainPage("Error: Please connect to ClickHouse first")
 		return
-	}
-	lp := &LogPanel{
-		app:        a,
-		windowSize: 1000,
-		cliParams:  a.cli,
 	}
 
 	// Apply CLI params if available
-	if a.cli != nil {
-		if a.cli.Database != "" {
-			lp.database = a.cli.Database
+	if lp.app.cli != nil {
+		if lp.app.cli.Database != "" {
+			lp.database = lp.app.cli.Database
 		}
-		if a.cli.Table != "" {
-			lp.table = a.cli.Table
+		if lp.app.cli.Table != "" {
+			lp.table = lp.app.cli.Table
 		}
-		if a.cli.Message != "" {
-			lp.messageField = a.cli.Message
+		if lp.app.cli.Message != "" {
+			lp.messageField = lp.app.cli.Message
 		}
-		if a.cli.Time != "" {
-			lp.timeField = a.cli.Time
+		if lp.app.cli.Time != "" {
+			lp.timeField = lp.app.cli.Time
 		}
-		if a.cli.TimeMs != "" {
-			lp.timeMsField = a.cli.TimeMs
+		if lp.app.cli.TimeMs != "" {
+			lp.timeMsField = lp.app.cli.TimeMs
 		}
-		if a.cli.Date != "" {
-			lp.dateField = a.cli.Date
+		if lp.app.cli.Date != "" {
+			lp.dateField = lp.app.cli.Date
 		}
-		if a.cli.Level != "" {
-			lp.levelField = a.cli.Level
+		if lp.app.cli.Level != "" {
+			lp.levelField = lp.app.cli.Level
 		}
-		if a.cli.Window > 0 {
-			lp.windowSize = a.cli.Window
+		if lp.app.cli.Window > 0 {
+			lp.windowSize = lp.app.cli.Window
 		}
 	}
 
 	// Query ClickHouse for available databases
-	rows, err := a.clickHouse.Query("SELECT name FROM system.databases")
+	rows, err := lp.app.clickHouse.Query("SELECT name FROM system.databases")
 	if err != nil {
-		a.SwitchToMainPage(fmt.Sprintf("Error getting databases: %v", err))
+		lp.app.SwitchToMainPage(fmt.Sprintf("Error getting databases: %v", err))
 		return
 	}
 	defer func() {
@@ -116,8 +110,8 @@ func (lp *LogPanel) Show() {
 	logsFlex := tview.NewFlex().SetDirection(tview.FlexRow)
 	logsFlex.AddItem(form, 0, 1, true)
 
-	a.pages.AddPage("logs", logsFlex, true, true)
-	a.pages.SwitchToPage("logs")
+	lp.app.pages.AddPage("logs", logsFlex, true, true)
+	lp.app.pages.SwitchToPage("logs")
 }
 
 func (lp *LogPanel) createForm() *tview.Form {
@@ -734,7 +728,7 @@ func (lp *LogPanel) getSelectedFields() []string {
 }
 
 func (lp *LogPanel) buildWhereClause(timeCondition string, args []interface{}) (string, []interface{}) {
-	whereConditions := []string{}
+	whereConditions := make([]string, 0)
 	queryArgs := args
 
 	// Optimize time filtering by using dateField if available
