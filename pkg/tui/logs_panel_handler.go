@@ -90,6 +90,10 @@ func (a *App) ShowLogsPanel() {
 		func(db string, index int) {
 			lp.database = db
 			lp.updateTableDropdown(form)
+			// Set focus to table dropdown after database selection
+			if tableItem := form.GetFormItemByLabel("Table"); tableItem != nil {
+				form.SetFocus(tableItem)
+			}
 		})
 
 	// Table dropdown (will be populated after database selection)
@@ -97,6 +101,10 @@ func (a *App) ShowLogsPanel() {
 		func(table string, index int) {
 			lp.table = table
 			lp.updateFieldDropdowns(form)
+			// Set focus to message field dropdown after table selection
+			if msgItem := form.GetFormItemByLabel("Message Field"); msgItem != nil {
+				form.SetFocus(msgItem)
+			}
 		})
 
 	// Add buttons
@@ -142,6 +150,10 @@ func (lp *LogPanel) updateTableDropdown(form *tview.Form) {
 			tableDropdown.SetOptions(lp.tables, func(table string, index int) {
 				lp.table = table
 				lp.updateFieldDropdowns(form)
+				// Set focus to message field dropdown after table selection
+				if msgItem := form.GetFormItemByLabel("Message Field"); msgItem != nil {
+					form.SetFocus(msgItem)
+				}
 			})
 		}
 	}
@@ -219,6 +231,10 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 			if table != lp.table { // Only update if changed
 				lp.table = table
 				lp.updateFieldDropdowns(form)
+				// Set focus to message field dropdown after table selection
+				if msgItem := form.GetFormItemByLabel("Message Field"); msgItem != nil {
+					form.SetFocus(msgItem)
+				}
 			}
 		})
 
