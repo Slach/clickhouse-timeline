@@ -225,10 +225,9 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 		}
 		form.AddDropDown("Table", lp.tables, tableIdx,
 			func(table string, index int) {
-				if table != lp.table { // Only update if changed
-					lp.table = table
-					lp.updateFieldDropdowns(form)
-				}
+				lp.table = table
+				// Don't call updateFieldDropdowns here to avoid infinite loop
+				// The field dropdowns are already populated in this function
 			})
 
 		msgIdx := slices.Index(columns, currentMsgField)
