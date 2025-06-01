@@ -200,7 +200,7 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 	currentLevelField := lp.levelField
 	
 	// Get current focus index before clearing
-	currentFocusIndex := form.GetFocusedItemIndex()
+	currentFocusIndex, _ := form.GetFocusedItemIndex()
 
 	// Use QueueUpdateDraw to ensure proper focus handling
 	lp.app.tviewApp.QueueUpdateDraw(func() {
