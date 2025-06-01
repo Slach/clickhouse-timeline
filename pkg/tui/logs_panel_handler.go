@@ -433,8 +433,14 @@ func (lp *LogPanel) updateFilterDisplay(panel *tview.Flex) {
 }
 
 func (lp *LogPanel) updateOverview(view *tview.TextView) {
+	totalItems := len(lp.currentResults)
+	if totalItems == 0 {
+		view.SetText("No log entries to display")
+		return
+	}
+
 	if lp.levelField == "" {
-		view.SetText("No level field selected for overview")
+		view.SetText(fmt.Sprintf("Total log entries: %d (no level field selected for breakdown)", totalItems))
 		return
 	}
 
@@ -442,12 +448,31 @@ func (lp *LogPanel) updateOverview(view *tview.TextView) {
 	for _, entry := range lp.currentResults {
 		if entry.Level != "" {
 			levelCounts[entry.Level]++
+		} else {
+			levelCounts["unknown"]++
 		}
 	}
 
+	// Build a single line bar chart
 	var builder strings.Builder
-	for level, count := range levelCounts {
-		bar := strings.Repeat("█", int(float64(count)/float64(len(lp.currentResults))*50))
+	builder.WriteString(fmt.Sprintf("Total: %d | ", totalItems))
+
+	// Sort levels for consistent display
+	levels := []string{"error", "exception", "warning", "debug", "trace", "info", "unknown"}
+	barWidth := 40 // Total width of the bar
+	
+	for _, level := range levels {
+		count := levelCounts[level]
+		if count == 0 {
+			continue
+		}
+		
+		proportion := float64(count) / float64(totalItems)
+		segmentWidth := int(proportion * float64(barWidth))
+		if segmentWidth == 0 && count > 0 {
+			segmentWidth = 1 // Ensure at least 1 character for non-zero counts
+		}
+		
 		color := "[white]"
 		switch strings.ToLower(level) {
 		case "error", "exception":
@@ -456,8 +481,35 @@ func (lp *LogPanel) updateOverview(view *tview.TextView) {
 			color = "[yellow]"
 		case "info":
 			color = "[green]"
+		case "unknown":
+			color = "[gray]"
 		}
-		builder.WriteString(fmt.Sprintf("%s%-10s %s %d", color, level, bar, count))
+		
+		builder.WriteString(fmt.Sprintf("%s%s[-]", color, strings.Repeat("█", segmentWidth)))
+	}
+	
+	builder.WriteString(" | ")
+	
+	// Add legend with counts
+	for _, level := range levels {
+		count := levelCounts[level]
+		if count == 0 {
+			continue
+		}
+		
+		color := "[white]"
+		switch strings.ToLower(level) {
+		case "error", "exception":
+			color = "[red]"
+		case "warning", "debug", "trace":
+			color = "[yellow]"
+		case "info":
+			color = "[green]"
+		case "unknown":
+			color = "[gray]"
+		}
+		
+		builder.WriteString(fmt.Sprintf("%s%s:%d[-] ", color, level, count))
 	}
 
 	view.SetText(builder.String())
