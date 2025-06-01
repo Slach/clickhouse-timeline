@@ -460,19 +460,19 @@ func (lp *LogPanel) updateOverview(view *tview.TextView) {
 	// Sort levels for consistent display
 	levels := []string{"error", "exception", "warning", "debug", "trace", "info", "unknown"}
 	barWidth := 40 // Total width of the bar
-	
+
 	for _, level := range levels {
 		count := levelCounts[level]
 		if count == 0 {
 			continue
 		}
-		
+
 		proportion := float64(count) / float64(totalItems)
 		segmentWidth := int(proportion * float64(barWidth))
 		if segmentWidth == 0 && count > 0 {
 			segmentWidth = 1 // Ensure at least 1 character for non-zero counts
 		}
-		
+
 		color := "[white]"
 		switch strings.ToLower(level) {
 		case "error", "exception":
@@ -484,19 +484,19 @@ func (lp *LogPanel) updateOverview(view *tview.TextView) {
 		case "unknown":
 			color = "[gray]"
 		}
-		
+
 		builder.WriteString(fmt.Sprintf("%s%s[-]", color, strings.Repeat("█", segmentWidth)))
 	}
-	
+
 	builder.WriteString(" | ")
-	
+
 	// Add legend with counts
 	for _, level := range levels {
 		count := levelCounts[level]
 		if count == 0 {
 			continue
 		}
-		
+
 		color := "[white]"
 		switch strings.ToLower(level) {
 		case "error", "exception":
@@ -508,7 +508,7 @@ func (lp *LogPanel) updateOverview(view *tview.TextView) {
 		case "unknown":
 			color = "[gray]"
 		}
-		
+
 		builder.WriteString(fmt.Sprintf("%s%s:%d[-] ", color, level, count))
 	}
 
@@ -620,11 +620,11 @@ func (lp *LogPanel) showLogDetailsModal(entry LogEntry) {
 
 	// Handle keyboard input
 	detailsFlex.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-		case tcell.KeyEscape:
+		if event.Key() == tcell.KeyEscape {
 			lp.app.pages.RemovePage("logDetails")
 			return nil
-		case tcell.KeyRune:
+		}
+		if event.Key() == tcell.KeyRune {
 			switch event.Rune() {
 			case 'q', 'Q':
 				lp.app.pages.RemovePage("logDetails")
