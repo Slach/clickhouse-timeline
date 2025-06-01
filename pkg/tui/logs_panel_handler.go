@@ -632,7 +632,7 @@ func (lp *LogPanel) processRows(rows *sql.Rows) ([]LogEntry, error) {
 		for i, col := range colTypes {
 			fieldName := col.Name()
 			fieldType := col.DatabaseTypeName()
-			
+
 			// Check if this is a time-related field
 			if fieldName == lp.timeField && (fieldType == "DateTime" || fieldType == "Nullable(DateTime)" || strings.HasPrefix(fieldType, "DateTime(") || strings.HasPrefix(fieldType, "Nullable(DateTime(")) {
 				scanArgs[i] = &entry.Time
@@ -668,7 +668,6 @@ func (lp *LogPanel) updateLogTable(entries []LogEntry) {
 		// Re-add headers
 		lp.logDetails.SetCell(0, 0, tview.NewTableCell("Time").SetTextColor(tcell.ColorYellow))
 		lp.logDetails.SetCell(0, 1, tview.NewTableCell("Message").SetTextColor(tcell.ColorYellow))
-
 		// Add log entries
 		for i, entry := range entries {
 			timeStr := ""
