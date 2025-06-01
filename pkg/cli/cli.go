@@ -95,7 +95,7 @@ func NewRootCommand(cli *types.CLI, version string) *cobra.Command {
 	logsCmd.Flags().StringVar(&cli.LogsParams.TimeMs, "time-ms", "", "Column name for time with milliseconds")
 	logsCmd.Flags().StringVar(&cli.LogsParams.Date, "date", "", "Column name for date")
 	logsCmd.Flags().StringVar(&cli.LogsParams.Level, "level", "", "Column name for message level")
-	logsCmd.Flags().IntVar(&cli.LogsParams.Window, "window", 1000, "Sliding window size in milliseconds")
+	logsCmd.Flags().IntVar(&cli.LogsParams.Window, "window", 1000, "Sliding window size in rows")
 	rootCmd.AddCommand(logsCmd)
 
 	return rootCmd
@@ -135,7 +135,7 @@ func RunRootCommand(cliInstance *types.CLI, version string, cmd *cobra.Command, 
 
 	// Get CLI instance from command context
 	if cliInstance != nil {
-		app.cli = cliInstance // Store the CLI instance
+		app.CLI = cliInstance
 		app.ApplyCLIParameters(cliInstance, cmd.Name())
 	}
 
