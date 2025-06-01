@@ -508,6 +508,12 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 
 	if !newer {
 		// Use window function to find the exact timestamp for the previous batch
+		// Prefer timeMsField if available for more precise pagination
+		timeField := lp.timeField
+		if lp.timeMsField != "" {
+			timeField = lp.timeMsField
+		}
+
 		timeQuery := fmt.Sprintf(`
 			SELECT timestamp FROM (
 				SELECT
@@ -516,12 +522,12 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 				FROM `+"`%s`.`%s`"+`
 				ORDER BY %s
 			) WHERE %s = ?`,
-			lp.timeField, lp.timeField, lp.timeField, lp.windowSize,
-			lp.database, lp.table, lp.timeField,
-			lp.timeField)
+			timeField, timeField, timeField, lp.windowSize,
+			lp.database, lp.table, timeField,
+			timeField)
 
 		var prevBatchTime time.Time
-		err := lp.app.clickHouse.QueryRow(timeQuery, lp.firstEntryTime).Scan(&prevBatchTime)
+		err := lp.app.clickHouse.QueryRow(timeQuery, ternary(lp.timeMsField != "", lp.firstEntryTime, lp.firstEntryTime)).Scan(&prevBatchTime)
 		if err != nil {
 			lp.app.tviewApp.QueueUpdateDraw(func() {
 				lp.overview.SetText(fmt.Sprintf("Error finding previous batch time: %v", err))
@@ -671,8 +677,17 @@ func (lp *LogPanel) getSelectedFields() []string {
 }
 
 func (lp *LogPanel) buildWhereClause(timeCondition string, args []interface{}) (string, []interface{}) {
-	whereConditions := []string{timeCondition}
+	whereConditions := []string{}
 	queryArgs := args
+
+	// Optimize time filtering by using dateField if available
+	if len(args) > 0 && lp.dateField != "" {
+		date := args[0].(time.Time).Format("2006-01-02")
+		whereConditions = append(whereConditions, fmt.Sprintf("%s = '%s'", lp.dateField, date))
+	}
+
+	// Add the main time condition
+	whereConditions = append(whereConditions, timeCondition)
 
 	// Add filter conditions
 	for _, filter := range lp.filters {
@@ -684,6 +699,12 @@ func (lp *LogPanel) buildWhereClause(timeCondition string, args []interface{}) (
 }
 
 func (lp *LogPanel) buildQuery(whereClause, orderBy string) string {
+	// Use timeMsField for ordering if available
+	sortField := orderBy
+	if lp.timeMsField != "" {
+		sortField = lp.timeMsField
+	}
+
 	return fmt.Sprintf(`
 		SELECT %s
 		FROM `+"`%s`.`%s`"+`
@@ -694,7 +715,7 @@ func (lp *LogPanel) buildQuery(whereClause, orderBy string) string {
 		lp.database,
 		lp.table,
 		whereClause,
-		orderBy)
+		sortField)
 }
 
 func (lp *LogPanel) streamRowsToTable(rows *sql.Rows, clearFirst bool) {
