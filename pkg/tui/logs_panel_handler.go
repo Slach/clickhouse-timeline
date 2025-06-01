@@ -453,10 +453,6 @@ func (lp *LogPanel) updateOverview(view *tview.TextView) {
 		}
 	}
 
-	// Build a single line bar chart
-	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("Total: %d | ", totalItems))
-
 	// Get all actual levels found in data, sorted by count (descending)
 	type levelCount struct {
 		level string
@@ -476,15 +472,33 @@ func (lp *LogPanel) updateOverview(view *tview.TextView) {
 		}
 	}
 
-	barWidth := 40 // Total width of the bar
+	// Get available width from the view
+	_, _, viewWidth, _ := view.GetInnerRect()
+	if viewWidth <= 0 {
+		viewWidth = 80 // fallback width
+	}
 
+	// Reserve space for "Total: XXXX | " prefix and some padding
+	prefixText := fmt.Sprintf("Total: %d | ", totalItems)
+	availableWidth := viewWidth - len(prefixText) - 5 // 5 chars padding
+
+	if availableWidth < 20 {
+		availableWidth = 20 // minimum bar width
+	}
+
+	// Build the bar with embedded legend
+	var builder strings.Builder
+	builder.WriteString(prefixText)
+
+	// Create segments with embedded labels
+	currentPos := 0
 	for _, lc := range sortedLevels {
 		if lc.count == 0 {
 			continue
 		}
 
 		proportion := float64(lc.count) / float64(totalItems)
-		segmentWidth := int(proportion * float64(barWidth))
+		segmentWidth := int(proportion * float64(availableWidth))
 		if segmentWidth == 0 && lc.count > 0 {
 			segmentWidth = 1 // Ensure at least 1 character for non-zero counts
 		}
@@ -503,32 +517,27 @@ func (lp *LogPanel) updateOverview(view *tview.TextView) {
 			color = "[cyan]" // For any other levels
 		}
 
-		builder.WriteString(fmt.Sprintf("%s%s[-]", color, strings.Repeat("█", segmentWidth)))
+		// Create label text for this segment
+		labelText := fmt.Sprintf("%s:%d", lc.level, lc.count)
+		
+		// If segment is wide enough to fit the label, embed it
+		if segmentWidth >= len(labelText) {
+			// Calculate padding to center the label
+			padding := (segmentWidth - len(labelText)) / 2
+			leftPad := strings.Repeat("█", padding)
+			rightPad := strings.Repeat("█", segmentWidth-padding-len(labelText))
+			builder.WriteString(fmt.Sprintf("%s%s[black::]%s[%s::]%s[-]", color, leftPad, labelText, color[1:len(color)-1], rightPad))
+		} else {
+			// Segment too small for label, just fill with blocks
+			builder.WriteString(fmt.Sprintf("%s%s[-]", color, strings.Repeat("█", segmentWidth)))
+		}
+
+		currentPos += segmentWidth
 	}
 
-	builder.WriteString(" | ")
-
-	// Add legend with counts
-	for _, lc := range sortedLevels {
-		if lc.count == 0 {
-			continue
-		}
-
-		color := "[white]"
-		switch lc.level {
-		case "error", "exception", "fatal", "critical":
-			color = "[red]"
-		case "warning", "warn", "debug", "trace":
-			color = "[yellow]"
-		case "info", "information":
-			color = "[green]"
-		case "unknown":
-			color = "[gray]"
-		default:
-			color = "[cyan]" // For any other levels
-		}
-
-		builder.WriteString(fmt.Sprintf("%s%s:%d[-] ", color, lc.level, lc.count))
+	// Fill remaining space if any
+	if currentPos < availableWidth {
+		builder.WriteString(strings.Repeat(" ", availableWidth-currentPos))
 	}
 
 	view.SetText(builder.String())
