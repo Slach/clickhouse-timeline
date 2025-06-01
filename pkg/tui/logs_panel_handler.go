@@ -91,16 +91,7 @@ func (a *App) ShowLogsPanel() {
 			lp.database = db
 			lp.updateTableDropdown(form)
 			// Set focus to table dropdown after database selection
-			for i := 0; i < form.GetFormItemCount(); i++ {
-				if item := form.GetFormItem(i); item != nil {
-					if dropdown, ok := item.(*tview.DropDown); ok {
-						if label, _ := dropdown.GetLabel(); label == "Table" {
-							form.SetFocus(i)
-							break
-						}
-					}
-				}
-			}
+			lp.SetFocusByLabel(form, "Table", "dropdown")
 		})
 
 	// Table dropdown (will be populated after database selection)
@@ -109,16 +100,7 @@ func (a *App) ShowLogsPanel() {
 			lp.table = table
 			lp.updateFieldDropdowns(form)
 			// Set focus to message field dropdown after table selection
-			for i := 0; i < form.GetFormItemCount(); i++ {
-				if item := form.GetFormItem(i); item != nil {
-					if dropdown, ok := item.(*tview.DropDown); ok {
-						if label, _ := dropdown.GetLabel(); label == "Message Field" {
-							form.SetFocus(i)
-							break
-						}
-					}
-				}
-			}
+			lp.SetFocusByLabel(form, "Message Field", "dropdown")
 		})
 
 	// Add buttons
@@ -165,16 +147,7 @@ func (lp *LogPanel) updateTableDropdown(form *tview.Form) {
 				lp.table = table
 				lp.updateFieldDropdowns(form)
 				// Set focus to message field dropdown after table selection
-				for i := 0; i < form.GetFormItemCount(); i++ {
-					if item := form.GetFormItem(i); item != nil {
-						if dropdown, ok := item.(*tview.DropDown); ok {
-							if label, _ := dropdown.GetLabel(); label == "Message Field" {
-								form.SetFocus(i)
-								break
-							}
-						}
-					}
-				}
+				lp.SetFocusByLabel(form, "Message Field", "dropdown")
 			})
 		}
 	}
@@ -253,16 +226,7 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 				lp.table = table
 				lp.updateFieldDropdowns(form)
 				// Set focus to message field dropdown after table selection
-				for i := 0; i < form.GetFormItemCount(); i++ {
-					if item := form.GetFormItem(i); item != nil {
-						if dropdown, ok := item.(*tview.DropDown); ok {
-							if label, _ := dropdown.GetLabel(); label == "Message Field" {
-								form.SetFocus(i)
-								break
-							}
-						}
-					}
-				}
+				lp.SetFocusByLabel(form, "Message Field", "dropdown")
 			}
 		})
 
@@ -746,4 +710,34 @@ func ternary(condition bool, trueVal, falseVal string) string {
 		return trueVal
 	}
 	return falseVal
+}
+
+func (lp *LogPanel) SetFocusByLabel(form *tview.Form, label string, itemType string) {
+	for i := 0; i < form.GetFormItemCount(); i++ {
+		if item := form.GetFormItem(i); item != nil {
+			switch itemType {
+			case "dropdown":
+				if dropdown, ok := item.(*tview.DropDown); ok {
+					if itemLabel, _ := dropdown.GetLabel(); itemLabel == label {
+						form.SetFocus(i)
+						return
+					}
+				}
+			case "input":
+				if input, ok := item.(*tview.InputField); ok {
+					if itemLabel, _ := input.GetLabel(); itemLabel == label {
+						form.SetFocus(i)
+						return
+					}
+				}
+			case "button":
+				if button, ok := item.(*tview.Button); ok {
+					if button.GetLabel() == label {
+						form.SetFocus(i)
+						return
+					}
+				}
+			}
+		}
+	}
 }
