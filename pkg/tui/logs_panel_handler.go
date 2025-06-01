@@ -91,8 +91,15 @@ func (a *App) ShowLogsPanel() {
 			lp.database = db
 			lp.updateTableDropdown(form)
 			// Set focus to table dropdown after database selection
-			if tableItem := form.GetFormItemByLabel("Table"); tableItem != nil {
-				form.SetFocus(tableItem)
+			for i := 0; i < form.GetFormItemCount(); i++ {
+				if item := form.GetFormItem(i); item != nil {
+					if dropdown, ok := item.(*tview.DropDown); ok {
+						if label, _ := dropdown.GetLabel(); label == "Table" {
+							form.SetFocus(i)
+							break
+						}
+					}
+				}
 			}
 		})
 
@@ -102,8 +109,15 @@ func (a *App) ShowLogsPanel() {
 			lp.table = table
 			lp.updateFieldDropdowns(form)
 			// Set focus to message field dropdown after table selection
-			if msgItem := form.GetFormItemByLabel("Message Field"); msgItem != nil {
-				form.SetFocus(msgItem)
+			for i := 0; i < form.GetFormItemCount(); i++ {
+				if item := form.GetFormItem(i); item != nil {
+					if dropdown, ok := item.(*tview.DropDown); ok {
+						if label, _ := dropdown.GetLabel(); label == "Message Field" {
+							form.SetFocus(i)
+							break
+						}
+					}
+				}
 			}
 		})
 
@@ -151,8 +165,15 @@ func (lp *LogPanel) updateTableDropdown(form *tview.Form) {
 				lp.table = table
 				lp.updateFieldDropdowns(form)
 				// Set focus to message field dropdown after table selection
-				if msgItem := form.GetFormItemByLabel("Message Field"); msgItem != nil {
-					form.SetFocus(msgItem)
+				for i := 0; i < form.GetFormItemCount(); i++ {
+					if item := form.GetFormItem(i); item != nil {
+						if dropdown, ok := item.(*tview.DropDown); ok {
+							if label, _ := dropdown.GetLabel(); label == "Message Field" {
+								form.SetFocus(i)
+								break
+							}
+						}
+					}
 				}
 			})
 		}
@@ -232,8 +253,15 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 				lp.table = table
 				lp.updateFieldDropdowns(form)
 				// Set focus to message field dropdown after table selection
-				if msgItem := form.GetFormItemByLabel("Message Field"); msgItem != nil {
-					form.SetFocus(msgItem)
+				for i := 0; i < form.GetFormItemCount(); i++ {
+					if item := form.GetFormItem(i); item != nil {
+						if dropdown, ok := item.(*tview.DropDown); ok {
+							if label, _ := dropdown.GetLabel(); label == "Message Field" {
+								form.SetFocus(i)
+								break
+							}
+						}
+					}
 				}
 			}
 		})
