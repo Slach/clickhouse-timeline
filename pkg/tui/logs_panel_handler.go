@@ -508,12 +508,6 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 
 	if !newer {
 		// Use window function to find the exact timestamp for the previous batch
-		// Prefer timeMsField if available for more precise pagination
-		timeField := lp.timeField
-		if lp.timeMsField != "" {
-			timeField = lp.timeMsField
-		}
-
 		timeQuery := fmt.Sprintf(`
 			SELECT timestamp FROM (
 				SELECT
@@ -522,12 +516,13 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 				FROM `+"`%s`.`%s`"+`
 				ORDER BY %s
 			) WHERE %s = ?`,
-			timeField, timeField, timeField, lp.windowSize,
-			lp.database, lp.table, timeField,
-			timeField)
+			lp.timeField, lp.timeField, lp.timeField, lp.windowSize,
+			lp.database, lp.table,
+			lp.timeField,
+			lp.timeField)
 
 		var prevBatchTime time.Time
-		err := lp.app.clickHouse.QueryRow(timeQuery, ternary(lp.timeMsField != "", lp.firstEntryTime, lp.firstEntryTime)).Scan(&prevBatchTime)
+		err := lp.app.clickHouse.QueryRow(timeQuery, lp.firstEntryTime).Scan(&prevBatchTime)
 		if err != nil {
 			lp.app.tviewApp.QueueUpdateDraw(func() {
 				lp.overview.SetText(fmt.Sprintf("Error finding previous batch time: %v", err))
@@ -699,12 +694,6 @@ func (lp *LogPanel) buildWhereClause(timeCondition string, args []interface{}) (
 }
 
 func (lp *LogPanel) buildQuery(whereClause, orderBy string) string {
-	// Use timeMsField for ordering if available
-	sortField := orderBy
-	if lp.timeMsField != "" {
-		sortField = lp.timeMsField
-	}
-
 	return fmt.Sprintf(`
 		SELECT %s
 		FROM `+"`%s`.`%s`"+`
@@ -715,7 +704,7 @@ func (lp *LogPanel) buildQuery(whereClause, orderBy string) string {
 		lp.database,
 		lp.table,
 		whereClause,
-		sortField)
+		orderBy)
 }
 
 func (lp *LogPanel) streamRowsToTable(rows *sql.Rows, clearFirst bool) {
