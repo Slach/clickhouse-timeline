@@ -307,15 +307,9 @@ func (lp *LogPanel) showLogExplorer() {
 			if rowNumber > 0 && rowNumber <= lp.totalRows {
 				lp.showLogDetailsModal(rowNumber)
 			}
-		} else if event.Key() == tcell.KeyPgDn && event.Modifiers()&tcell.ModCtrl != 0 {
-			lp.app.tviewApp.QueueUpdateDraw(func() {
-				lp.overview.SetText(fmt.Sprintf("Loading next %d rows...", lp.windowSize))
-			})
-			go lp.loadMoreLogs(false) // Load older logs
 		} else if event.Key() == tcell.KeyPgUp && event.Modifiers()&tcell.ModCtrl != 0 {
-			lp.app.tviewApp.QueueUpdateDraw(func() {
-				lp.overview.SetText(fmt.Sprintf("Loading previous %d rows...", lp.windowSize))
-			})
+			go lp.loadMoreLogs(false) // Load older logs
+		} else if event.Key() == tcell.KeyPgDn && event.Modifiers()&tcell.ModCtrl != 0 {
 			go lp.loadMoreLogs(true) // Load newer logs
 		}
 		return event
@@ -505,13 +499,14 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 		})
 		return
 	}
+	lp.app.tviewApp.QueueUpdateDraw(func() {
+		lp.overview.SetText(fmt.Sprintf(ternary(newer, "Loading previous %d rows...", "Loading next %d rows..."), lp.windowSize))
+	})
 
 	var timeCondition time.Time
-	if newer {
-		// For newer logs, use the earliest time minus window size
+	if !newer {
 		timeCondition = lp.firstEntryTime.Add(-time.Duration(lp.windowSize) * time.Millisecond)
 	} else {
-		// For older logs, use the latest time
 		timeCondition = lp.lastEntryTime
 	}
 
@@ -520,8 +515,7 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 	whereClause, queryArgs := lp.buildWhereClause(timeConditionStr, []interface{}{timeCondition, lp.app.toTime})
 
 	// Build query with appropriate ordering
-	orderBy := fmt.Sprintf("%s %s", lp.timeField, ternary(newer, "ASC", "DESC"))
-	query := lp.buildQuery(whereClause, orderBy)
+	query := lp.buildQuery(whereClause, lp.timeField)
 	queryArgs = append(queryArgs, lp.windowSize)
 
 	rows, err := lp.app.clickHouse.Query(query, queryArgs...)
@@ -549,7 +543,7 @@ func (lp *LogPanel) showLogDetailsModal(rowIndex int) {
 	// Get data from table cells
 	timeCell := lp.logDetails.GetCell(rowIndex, 0)
 	messageCell := lp.logDetails.GetCell(rowIndex, 1)
-	
+
 	if timeCell == nil || messageCell == nil {
 		return
 	}
@@ -696,7 +690,7 @@ func (lp *LogPanel) streamRowsToTable(rows *sql.Rows, clearFirst bool) {
 
 	colTypes, _ := rows.ColumnTypes()
 	scanArgs := make([]interface{}, len(colTypes))
-	
+
 	// For overview statistics
 	levelCounts := make(map[string]int)
 	rowIndex := lp.totalRows
@@ -704,7 +698,7 @@ func (lp *LogPanel) streamRowsToTable(rows *sql.Rows, clearFirst bool) {
 
 	for rows.Next() {
 		var entry LogEntry
-		
+
 		// Initialize scan args
 		for i, col := range colTypes {
 			fieldName := col.Name()
@@ -779,7 +773,7 @@ func (lp *LogPanel) processBatch(batch []LogEntry, startRow int) {
 
 			lp.logDetails.SetCell(row, 0, tview.NewTableCell(timeStr))
 			messageCell := tview.NewTableCell(entry.Message)
-			
+
 			// Color by level
 			if entry.Level != "" {
 				messageCell.SetTextColor(lp.getColorForLevel(entry.Level))
