@@ -503,16 +503,40 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 		lp.overview.SetText(fmt.Sprintf(ternary(newer, "Loading previous %d rows...", "Loading next %d rows..."), lp.windowSize))
 	})
 
-	var timeCondition time.Time
-	if !newer {
-		timeCondition = lp.firstEntryTime.Add(-time.Duration(lp.windowSize) * time.Millisecond)
-	} else {
-		timeCondition = lp.lastEntryTime
-	}
+	var timeConditionStr string
+	var queryArgs []interface{}
 
-	// Build WHERE clause with filters
-	timeConditionStr := fmt.Sprintf("%s BETWEEN ? AND ?", lp.timeField)
-	whereClause, queryArgs := lp.buildWhereClause(timeConditionStr, []interface{}{timeCondition, lp.app.toTime})
+	if !newer {
+		// Use window function to find the exact timestamp for the previous batch
+		timeQuery := fmt.Sprintf(`
+			SELECT timestamp FROM (
+				SELECT
+					%s,
+					FIRST_VALUE(%s) OVER (ORDER BY %s ROWS BETWEEN %d PRECEDING AND CURRENT ROW) AS timestamp
+				FROM `+"`%s`.`%s`"+`
+				ORDER BY %s
+			) WHERE %s = ?`,
+			lp.timeField, lp.timeField, lp.timeField, lp.windowSize,
+			lp.database, lp.table, lp.timeField,
+			lp.timeField)
+
+		var prevBatchTime time.Time
+		err := lp.app.clickHouse.QueryRow(timeQuery, lp.firstEntryTime).Scan(&prevBatchTime)
+		if err != nil {
+			lp.app.tviewApp.QueueUpdateDraw(func() {
+				lp.overview.SetText(fmt.Sprintf("Error finding previous batch time: %v", err))
+			})
+			return
+		}
+
+		timeConditionStr = fmt.Sprintf("%s BETWEEN ? AND ?", lp.timeField)
+		whereClause, args := lp.buildWhereClause(timeConditionStr, []interface{}{prevBatchTime, lp.firstEntryTime})
+		queryArgs = args
+	} else {
+		timeConditionStr = fmt.Sprintf("%s BETWEEN ? AND ?", lp.timeField)
+		whereClause, args := lp.buildWhereClause(timeConditionStr, []interface{}{lp.lastEntryTime, lp.app.toTime})
+		queryArgs = args
+	}
 
 	// Build query with appropriate ordering
 	query := lp.buildQuery(whereClause, lp.timeField)
