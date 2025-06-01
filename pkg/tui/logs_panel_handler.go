@@ -447,7 +447,7 @@ func (lp *LogPanel) updateOverview(view *tview.TextView) {
 	levelCounts := make(map[string]int)
 	for _, entry := range lp.currentResults {
 		if entry.Level != "" {
-			levelCounts[entry.Level]++
+			levelCounts[strings.ToLower(entry.Level)]++
 		} else {
 			levelCounts["unknown"]++
 		}
@@ -457,32 +457,50 @@ func (lp *LogPanel) updateOverview(view *tview.TextView) {
 	var builder strings.Builder
 	builder.WriteString(fmt.Sprintf("Total: %d | ", totalItems))
 
-	// Sort levels for consistent display
-	levels := []string{"error", "exception", "warning", "debug", "trace", "info", "unknown"}
+	// Get all actual levels found in data, sorted by count (descending)
+	type levelCount struct {
+		level string
+		count int
+	}
+	var sortedLevels []levelCount
+	for level, count := range levelCounts {
+		sortedLevels = append(sortedLevels, levelCount{level, count})
+	}
+	
+	// Sort by count descending
+	for i := 0; i < len(sortedLevels)-1; i++ {
+		for j := i + 1; j < len(sortedLevels); j++ {
+			if sortedLevels[j].count > sortedLevels[i].count {
+				sortedLevels[i], sortedLevels[j] = sortedLevels[j], sortedLevels[i]
+			}
+		}
+	}
+
 	barWidth := 40 // Total width of the bar
 
-	for _, level := range levels {
-		count := levelCounts[level]
-		if count == 0 {
+	for _, lc := range sortedLevels {
+		if lc.count == 0 {
 			continue
 		}
 
-		proportion := float64(count) / float64(totalItems)
+		proportion := float64(lc.count) / float64(totalItems)
 		segmentWidth := int(proportion * float64(barWidth))
-		if segmentWidth == 0 && count > 0 {
+		if segmentWidth == 0 && lc.count > 0 {
 			segmentWidth = 1 // Ensure at least 1 character for non-zero counts
 		}
 
 		color := "[white]"
-		switch strings.ToLower(level) {
-		case "error", "exception":
+		switch lc.level {
+		case "error", "exception", "fatal", "critical":
 			color = "[red]"
-		case "warning", "debug", "trace":
+		case "warning", "warn", "debug", "trace":
 			color = "[yellow]"
-		case "info":
+		case "info", "information":
 			color = "[green]"
 		case "unknown":
 			color = "[gray]"
+		default:
+			color = "[cyan]" // For any other levels
 		}
 
 		builder.WriteString(fmt.Sprintf("%s%s[-]", color, strings.Repeat("█", segmentWidth)))
@@ -491,27 +509,28 @@ func (lp *LogPanel) updateOverview(view *tview.TextView) {
 	builder.WriteString(" | ")
 
 	// Add legend with counts
-	for _, level := range levels {
-		count := levelCounts[level]
-		if count == 0 {
+	for _, lc := range sortedLevels {
+		if lc.count == 0 {
 			continue
 		}
 
 		color := "[white]"
-		switch strings.ToLower(level) {
-		case "error", "exception":
+		switch lc.level {
+		case "error", "exception", "fatal", "critical":
 			color = "[red]"
-		case "warning", "debug", "trace":
+		case "warning", "warn", "debug", "trace":
 			color = "[yellow]"
-		case "info":
+		case "info", "information":
 			color = "[green]"
 		case "unknown":
 			color = "[gray]"
+		default:
+			color = "[cyan]" // For any other levels
 		}
 
-		builder.WriteString(fmt.Sprintf("%s%s:%d[-] ", color, level, count))
+		builder.WriteString(fmt.Sprintf("%s%s:%d[-] ", color, lc.level, lc.count))
 	}
-	log.Info().Str("SUKA", builder.String()).Send()
+
 	view.SetText(builder.String())
 }
 
