@@ -224,7 +224,7 @@ func (a *App) executeCommand(commandName string) string {
 		a.ShowAsynchronousMetricLog(a.fromTime, a.toTime, a.cluster)
 	case CmdLogs:
 		// Only apply CLI params when explicitly executing logs command
-		if commandName == CmdLogs && a.CLI != nil {
+		if a.CLI != nil {
 			a.logPanel = &LogPanel{
 				app:          a,
 				windowSize:   1000,
