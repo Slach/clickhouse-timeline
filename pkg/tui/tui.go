@@ -224,26 +224,43 @@ func (a *App) executeCommand(commandName string) string {
 		a.ShowAsynchronousMetricLog(a.fromTime, a.toTime, a.cluster)
 	case CmdLogs:
 		// Only apply CLI params when explicitly executing logs command
+		// Initialize log panel with CLI params if available
+		a.logPanel = &LogPanel{
+			app:          a,
+			windowSize:   1000,
+			database:     "",
+			table:        "",
+			messageField: "message",
+			timeField:    "",
+			timeMsField:  "",
+			dateField:    "",
+			levelField:   "",
+		}
+
 		if a.CLI != nil {
-			a.logPanel = &LogPanel{
-				app:          a,
-				windowSize:   1000,
-				database:     a.CLI.LogsParams.Database,
-				table:        a.CLI.LogsParams.Table,
-				messageField: a.CLI.LogsParams.Message,
-				timeField:    a.CLI.LogsParams.Time,
-				timeMsField:  a.CLI.LogsParams.TimeMs,
-				dateField:    a.CLI.LogsParams.Date,
-				levelField:   a.CLI.LogsParams.Level,
+			if a.CLI.LogsParams.Database != "" {
+				a.logPanel.database = a.CLI.LogsParams.Database
+			}
+			if a.CLI.LogsParams.Table != "" {
+				a.logPanel.table = a.CLI.LogsParams.Table
+			}
+			if a.CLI.LogsParams.Message != "" {
+				a.logPanel.messageField = a.CLI.LogsParams.Message
+			}
+			if a.CLI.LogsParams.Time != "" {
+				a.logPanel.timeField = a.CLI.LogsParams.Time
+			}
+			if a.CLI.LogsParams.TimeMs != "" {
+				a.logPanel.timeMsField = a.CLI.LogsParams.TimeMs
+			}
+			if a.CLI.LogsParams.Date != "" {
+				a.logPanel.dateField = a.CLI.LogsParams.Date
+			}
+			if a.CLI.LogsParams.Level != "" {
+				a.logPanel.levelField = a.CLI.LogsParams.Level
 			}
 			if a.CLI.LogsParams.Window > 0 {
 				a.logPanel.windowSize = a.CLI.LogsParams.Window
-			}
-		} else if a.logPanel == nil {
-			// Initialize empty panel if not exists
-			a.logPanel = &LogPanel{
-				app:        a,
-				windowSize: 1000,
 			}
 		}
 		a.logPanel.Show()
