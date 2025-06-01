@@ -366,20 +366,30 @@ func (lp *LogPanel) loadLogs() {
 		fields = append(fields, lp.levelField)
 	}
 
+	// Build WHERE clause with filters
+	whereConditions := []string{fmt.Sprintf("%s >= ?", lp.timeField)}
+	queryArgs := []interface{}{lp.app.fromTime}
+
+	// Add filter conditions
+	for _, filter := range lp.filters {
+		whereConditions = append(whereConditions, fmt.Sprintf("%s %s ?", filter.Field, filter.Operator))
+		queryArgs = append(queryArgs, filter.Value)
+	}
+
 	logsQuery := fmt.Sprintf(`
 		SELECT %s
 		FROM `+"`%s`.`%s`"+`
-		WHERE %s >= ?
+		WHERE %s
 		ORDER BY %s
 		LIMIT ?`,
 		strings.Join(fields, ", "),
 		lp.database,
 		lp.table,
-		lp.timeField,
+		strings.Join(whereConditions, " AND "),
 		lp.timeField)
 
-	windowStart := lp.app.fromTime
-	rows, err := lp.app.clickHouse.Query(logsQuery, windowStart, lp.windowSize)
+	queryArgs = append(queryArgs, lp.windowSize)
+	rows, err := lp.app.clickHouse.Query(logsQuery, queryArgs...)
 	if err != nil {
 		lp.app.SwitchToMainPage(fmt.Sprintf("loadLogs Query failed: %v", err))
 		return
@@ -555,21 +565,32 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 		timeCondition = lp.currentResults[len(lp.currentResults)-1].Time
 	}
 
+	// Build WHERE clause with filters
+	whereConditions := []string{fmt.Sprintf("%s BETWEEN ? AND ?", lp.timeField)}
+	queryArgs := []interface{}{timeCondition, lp.app.toTime}
+
+	// Add filter conditions
+	for _, filter := range lp.filters {
+		whereConditions = append(whereConditions, fmt.Sprintf("%s %s ?", filter.Field, filter.Operator))
+		queryArgs = append(queryArgs, filter.Value)
+	}
+
 	query := fmt.Sprintf(`
 		SELECT %s
 		FROM %s.%s
-		WHERE %s BETWEEN ? AND ?
+		WHERE %s
 		ORDER BY %s %s
 		LIMIT ?`,
 		strings.Join(lp.getSelectedFields(), ", "),
 		lp.database,
 		lp.table,
-		lp.timeField,
+		strings.Join(whereConditions, " AND "),
 		lp.timeField,
 		ternary(newer, "ASC", "DESC"),
 	)
 
-	rows, err := lp.app.clickHouse.Query(query, timeCondition, lp.app.toTime, lp.windowSize)
+	queryArgs = append(queryArgs, lp.windowSize)
+	rows, err := lp.app.clickHouse.Query(query, queryArgs...)
 	if err != nil {
 		return
 	}
