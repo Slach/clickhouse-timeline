@@ -457,7 +457,7 @@ func (lp *LogPanel) updateOverview(view *tview.TextView) {
 		case "info":
 			color = "[green]"
 		}
-		builder.WriteString(fmt.Sprintf("%s%-10s %s %d\n", color, level, bar, count))
+		builder.WriteString(fmt.Sprintf("%s%-10s %s %d", color, level, bar, count))
 	}
 
 	view.SetText(builder.String())
@@ -521,7 +521,7 @@ func (lp *LogPanel) showLogDetailsModal(entry LogEntry) {
 		SetDynamicColors(true).
 		SetWordWrap(true)
 	headerText.SetBorder(true).SetTitle("Log Entry Info")
-	
+
 	// Build header content
 	var headerBuilder strings.Builder
 	if !entry.Time.IsZero() {
@@ -562,8 +562,8 @@ func (lp *LogPanel) showLogDetailsModal(entry LogEntry) {
 	instructionsText.SetTextAlign(tview.AlignCenter)
 
 	// Add components to flex layout
-	detailsFlex.AddItem(headerText, 0, 1, false)      // Header takes minimum space needed
-	detailsFlex.AddItem(messageText, 0, 3, true)      // Message takes most space and is focusable
+	detailsFlex.AddItem(headerText, 0, 1, false)       // Header takes minimum space needed
+	detailsFlex.AddItem(messageText, 0, 3, true)       // Message takes most space and is focusable
 	detailsFlex.AddItem(instructionsText, 1, 0, false) // Instructions take 1 line
 
 	// Handle keyboard input
@@ -585,7 +585,6 @@ func (lp *LogPanel) showLogDetailsModal(entry LogEntry) {
 	lp.app.pages.AddPage("logDetails", detailsFlex, true, true)
 	lp.app.pages.SwitchToPage("logDetails")
 }
-
 
 func (lp *LogPanel) getSelectedFields() []string {
 	fields := []string{lp.messageField, lp.timeField}
