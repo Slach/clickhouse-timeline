@@ -24,7 +24,9 @@ type LogPanel struct {
 	levelField     string
 	windowSize     int
 	filters        []LogFilter
-	currentResults []LogEntry
+	firstEntryTime time.Time
+	lastEntryTime  time.Time
+	totalRows      int
 	logDetails     *tview.Table
 	overview       *tview.TextView
 	databases      []string
@@ -302,8 +304,8 @@ func (lp *LogPanel) showLogExplorer() {
 	lp.logDetails.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		rowNumber, _ := lp.logDetails.GetSelection()
 		if event.Key() == tcell.KeyEnter {
-			if rowNumber > 0 && rowNumber-1 < len(lp.currentResults) {
-				lp.showLogDetailsModal(lp.currentResults[rowNumber-1])
+			if rowNumber > 0 && rowNumber <= lp.totalRows {
+				lp.showLogDetailsModal(rowNumber)
 			}
 		} else if event.Key() == tcell.KeyPgDn {
 			lp.loadMoreLogs(false) // Load older logs
@@ -346,15 +348,8 @@ func (lp *LogPanel) loadLogs() {
 		}
 	}()
 
-	// Process results
-	entries, err := lp.processRows(rows)
-	if err != nil {
-		lp.app.SwitchToMainPage(fmt.Sprintf("Error processing rows: %v", err))
-		return
-	}
-
-	lp.currentResults = entries
-	lp.updateLogTable(entries)
+	// Stream directly to table
+	lp.streamRowsToTable(rows, true)
 }
 
 func (lp *LogPanel) getAvailableFilterFields() []string {
@@ -396,25 +391,15 @@ func (lp *LogPanel) updateFilterDisplay(panel *tview.Flex) {
 	}
 }
 
-func (lp *LogPanel) updateOverview(view *tview.TextView) {
-	totalItems := len(lp.currentResults)
+func (lp *LogPanel) updateOverviewWithStats(levelCounts map[string]int, totalItems int) {
 	if totalItems == 0 {
-		view.SetText("No log entries to display")
+		lp.overview.SetText("No log entries to display")
 		return
 	}
 
 	if lp.levelField == "" {
-		view.SetText(fmt.Sprintf("Total log entries: %d (no level field selected for breakdown)", totalItems))
+		lp.overview.SetText(fmt.Sprintf("Total log entries: %d (no level field selected for breakdown)", totalItems))
 		return
-	}
-
-	levelCounts := make(map[string]int)
-	for _, entry := range lp.currentResults {
-		if entry.Level != "" {
-			levelCounts[strings.ToLower(entry.Level)]++
-		} else {
-			levelCounts["unknown"]++
-		}
 	}
 
 	// Get all actual levels found in data, sorted by count (descending)
@@ -504,21 +489,21 @@ func (lp *LogPanel) updateOverview(view *tview.TextView) {
 		builder.WriteString(strings.Repeat(" ", availableWidth-currentPos))
 	}
 
-	view.SetText(builder.String())
+	lp.overview.SetText(builder.String())
 }
 
 func (lp *LogPanel) loadMoreLogs(newer bool) {
-	if len(lp.currentResults) == 0 {
+	if lp.totalRows == 0 {
 		return
 	}
 
 	var timeCondition time.Time
 	if newer {
-		// For newer logs, use the earliest time in current results minus window size
-		timeCondition = lp.currentResults[0].Time.Add(-time.Duration(lp.windowSize) * time.Millisecond)
+		// For newer logs, use the earliest time minus window size
+		timeCondition = lp.firstEntryTime.Add(-time.Duration(lp.windowSize) * time.Millisecond)
 	} else {
-		// For older logs, use the latest time in current results
-		timeCondition = lp.currentResults[len(lp.currentResults)-1].Time
+		// For older logs, use the latest time
+		timeCondition = lp.lastEntryTime
 	}
 
 	// Build WHERE clause with filters
@@ -540,23 +525,32 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 		}
 	}()
 
-	// Process results
-	newEntries, err := lp.processRows(rows)
-	if err != nil {
+	// Stream additional rows (don't clear table)
+	lp.streamRowsToTable(rows, false)
+}
+
+func (lp *LogPanel) showLogDetailsModal(rowIndex int) {
+	if rowIndex <= 0 || rowIndex > lp.totalRows {
 		return
 	}
 
-	// Merge results
-	if newer {
-		lp.currentResults = append(newEntries, lp.currentResults...)
-	} else {
-		lp.currentResults = append(lp.currentResults, newEntries...)
+	// Get data from table cells
+	timeCell := lp.logDetails.GetCell(rowIndex, 0)
+	messageCell := lp.logDetails.GetCell(rowIndex, 1)
+	
+	if timeCell == nil || messageCell == nil {
+		return
 	}
 
-	lp.updateLogTable(lp.currentResults)
+	// Create entry from table data
+	entry := LogEntry{
+		Message: messageCell.Text,
+	}
+
+	lp.showLogDetailsModalWithEntry(entry)
 }
 
-func (lp *LogPanel) showLogDetailsModal(entry LogEntry) {
+func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 	// Create a flex layout for the details window
 	detailsFlex := tview.NewFlex().SetDirection(tview.FlexRow)
 
@@ -671,30 +665,42 @@ func (lp *LogPanel) buildQuery(whereClause, orderBy string) string {
 		orderBy)
 }
 
-func (lp *LogPanel) processRows(rows *sql.Rows) ([]LogEntry, error) {
-	var entries []LogEntry
+func (lp *LogPanel) streamRowsToTable(rows *sql.Rows, clearFirst bool) {
+	lp.app.tviewApp.QueueUpdateDraw(func() {
+		if clearFirst {
+			lp.logDetails.Clear()
+			// Re-add headers
+			lp.logDetails.SetCell(0, 0, tview.NewTableCell("Time").SetTextColor(tcell.ColorYellow))
+			lp.logDetails.SetCell(0, 1, tview.NewTableCell("Message").SetTextColor(tcell.ColorYellow))
+			lp.totalRows = 0
+		}
+	})
+
 	colTypes, _ := rows.ColumnTypes()
 	scanArgs := make([]interface{}, len(colTypes))
+	
+	// For overview statistics
+	levelCounts := make(map[string]int)
+	rowIndex := lp.totalRows
 
 	for rows.Next() {
 		var entry LogEntry
-		// Initialize scan args based on column types
+		
+		// Initialize scan args
 		for i, col := range colTypes {
 			fieldName := col.Name()
-
-			// Check if this is a time-related field
-			if fieldName == lp.timeField {
+			switch fieldName {
+			case lp.timeField:
 				scanArgs[i] = &entry.Time
-			} else if fieldName == lp.timeMsField {
+			case lp.timeMsField:
 				scanArgs[i] = &entry.TimeMs
-			} else if fieldName == lp.dateField {
+			case lp.dateField:
 				scanArgs[i] = &entry.Date
-			} else if fieldName == lp.messageField {
+			case lp.messageField:
 				scanArgs[i] = &entry.Message
-			} else if fieldName == lp.levelField {
+			case lp.levelField:
 				scanArgs[i] = &entry.Level
-			} else {
-				// For any other field, use a dummy variable
+			default:
 				var dummy interface{}
 				scanArgs[i] = &dummy
 			}
@@ -704,52 +710,72 @@ func (lp *LogPanel) processRows(rows *sql.Rows) ([]LogEntry, error) {
 			log.Error().Err(err).Send()
 			continue
 		}
-		entries = append(entries, entry)
-	}
 
-	return entries, nil
-}
+		// Track time bounds for pagination
+		if rowIndex == 0 || (!entry.Time.IsZero() && entry.Time.Before(lp.firstEntryTime)) {
+			lp.firstEntryTime = entry.Time
+		}
+		if rowIndex == 0 || (!entry.Time.IsZero() && entry.Time.After(lp.lastEntryTime)) {
+			lp.lastEntryTime = entry.Time
+		}
 
-func (lp *LogPanel) updateLogTable(entries []LogEntry) {
-	lp.app.tviewApp.QueueUpdateDraw(func() {
-		// Update log details table
-		lp.logDetails.Clear()
-
-		// Re-add headers
-		lp.logDetails.SetCell(0, 0, tview.NewTableCell("Time").SetTextColor(tcell.ColorYellow))
-		lp.logDetails.SetCell(0, 1, tview.NewTableCell("Message").SetTextColor(tcell.ColorYellow))
-		// Add log entries
-		for i, entry := range entries {
-			timeStr := ""
-			if !entry.TimeMs.IsZero() {
-				timeStr = entry.TimeMs.Format("2006-01-02 15:04:05.000 MST")
-			} else if !entry.Time.IsZero() {
-				timeStr = entry.Time.Format("2006-01-02 15:04:05 MST")
-			} else if entry.Date != "" {
-				timeStr = entry.Date
-			}
-
-			lp.logDetails.SetCell(i+1, 0, tview.NewTableCell(timeStr))
-			lp.logDetails.SetCell(i+1, 1, tview.NewTableCell(entry.Message))
-
-			// Color by level if available
+		// Update level counts for overview
+		if lp.levelField != "" {
 			if entry.Level != "" {
-				color := tcell.ColorWhite
-				switch strings.ToLower(entry.Level) {
-				case "error", "exception":
-					color = tcell.ColorRed
-				case "warning", "debug", "trace":
-					color = tcell.ColorYellow
-				case "info":
-					color = tcell.ColorGreen
-				}
-				lp.logDetails.GetCell(i+1, 1).SetTextColor(color)
+				levelCounts[strings.ToLower(entry.Level)]++
+			} else {
+				levelCounts["unknown"]++
 			}
 		}
 
-		// Update overview panel
-		lp.updateOverview(lp.overview)
+		// Format time for display
+		timeStr := lp.formatTimeForDisplay(entry)
+
+		// Add to table immediately
+		lp.app.tviewApp.QueueUpdateDraw(func() {
+			lp.logDetails.SetCell(rowIndex+1, 0, tview.NewTableCell(timeStr))
+			lp.logDetails.SetCell(rowIndex+1, 1, tview.NewTableCell(entry.Message))
+
+			// Color by level
+			if entry.Level != "" {
+				color := lp.getColorForLevel(entry.Level)
+				lp.logDetails.GetCell(rowIndex+1, 1).SetTextColor(color)
+			}
+		})
+
+		rowIndex++
+	}
+
+	lp.totalRows = rowIndex
+
+	// Update overview with collected statistics
+	lp.app.tviewApp.QueueUpdateDraw(func() {
+		lp.updateOverviewWithStats(levelCounts, lp.totalRows)
 	})
+}
+
+func (lp *LogPanel) formatTimeForDisplay(entry LogEntry) string {
+	if !entry.TimeMs.IsZero() {
+		return entry.TimeMs.Format("2006-01-02 15:04:05.000 MST")
+	} else if !entry.Time.IsZero() {
+		return entry.Time.Format("2006-01-02 15:04:05 MST")
+	} else if entry.Date != "" {
+		return entry.Date
+	}
+	return ""
+}
+
+func (lp *LogPanel) getColorForLevel(level string) tcell.Color {
+	switch strings.ToLower(level) {
+	case "error", "exception":
+		return tcell.ColorRed
+	case "warning", "debug", "trace":
+		return tcell.ColorYellow
+	case "info":
+		return tcell.ColorGreen
+	default:
+		return tcell.ColorWhite
+	}
 }
 
 func ternary(condition bool, trueVal, falseVal string) string {
