@@ -98,7 +98,7 @@ func (a *App) ShowLogsPanel() {
 	form.AddDropDown("Table", []string{}, 0,
 		func(table string, index int) {
 			lp.table = table
-			lp.updateFieldDropdowns(form)
+			lp.updateColumnsDropdowns(form)
 		})
 
 	// Add buttons
@@ -143,7 +143,7 @@ func (lp *LogPanel) updateTableDropdown(form *tview.Form) {
 		if tableDropdown, ok := tableItem.(*tview.DropDown); ok {
 			tableDropdown.SetOptions(lp.tables, func(table string, index int) {
 				lp.table = table
-				lp.updateFieldDropdowns(form)
+				lp.updateColumnsDropdowns(form)
 				// Set focus to message field dropdown after table selection
 				lp.SetFocusByLabel(form, "Message Field")
 			})
@@ -151,7 +151,7 @@ func (lp *LogPanel) updateTableDropdown(form *tview.Form) {
 	}
 }
 
-func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
+func (lp *LogPanel) updateColumnsDropdowns(form *tview.Form) {
 	if lp.database == "" || lp.table == "" {
 		return
 	}
@@ -173,7 +173,7 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 	for rows.Next() {
 		var fieldName, fieldType string
 		if scanErr := rows.Scan(&fieldName, &fieldType); scanErr != nil {
-			log.Error().Err(scanErr).Msg("can't scan columns in updateFieldDropdowns")
+			log.Error().Err(scanErr).Msg("can't scan columns in updateColumnsDropdowns")
 			continue
 		}
 		if !strings.Contains(fieldType, "Date") && !strings.Contains(fieldType, "Array") && !strings.Contains(fieldType, "Tuple") && !strings.Contains(fieldType, "Map") {
@@ -225,10 +225,7 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 		}
 		form.AddDropDown("Table", lp.tables, tableIdx,
 			func(table string, index int) {
-				if table != lp.table { // Only update if changed
-					lp.table = table
-					lp.updateFieldDropdowns(form)
-				}
+				lp.table = table
 			})
 
 		msgIdx := slices.Index(columns, currentMsgField)
@@ -245,25 +242,25 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 		form.AddDropDown("Time Field", timeColumns, timeIdx,
 			func(field string, index int) { lp.timeField = field })
 
-		timeMsIdx := slices.Index(append([]string{""}, timeMsColumns...), currentTimeMsField)
+		timeMsIdx := slices.Index(timeMsColumns, currentTimeMsField)
 		if timeMsIdx == -1 {
 			timeMsIdx = 0
 		}
-		form.AddDropDown("TimeMs Field (optional)", append([]string{""}, timeMsColumns...), timeMsIdx,
+		form.AddDropDown("TimeMs Field (optional)", timeMsColumns, timeMsIdx,
 			func(field string, index int) { lp.timeMsField = field })
 
-		dateIdx := slices.Index(append([]string{""}, dateColumns...), currentDateField)
+		dateIdx := slices.Index(dateColumns, currentDateField)
 		if dateIdx == -1 {
 			dateIdx = 0
 		}
-		form.AddDropDown("Date Field (optional)", append([]string{""}, dateColumns...), dateIdx,
+		form.AddDropDown("Date Field (optional)", dateColumns, dateIdx,
 			func(field string, index int) { lp.dateField = field })
 
-		levelIdx := slices.Index(append([]string{""}, columns...), currentLevelField)
+		levelIdx := slices.Index(columns, currentLevelField)
 		if levelIdx == -1 {
 			levelIdx = 0
 		}
-		form.AddDropDown("Level Field (optional)", append([]string{""}, columns...), levelIdx,
+		form.AddDropDown("Level Field (optional)", columns, levelIdx,
 			func(field string, index int) { lp.levelField = field })
 
 		form.AddInputField("Window Size (rows)", fmt.Sprint(lp.windowSize), 10,
