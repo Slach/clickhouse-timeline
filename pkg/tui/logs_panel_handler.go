@@ -256,7 +256,7 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 	form.AddDropDown("Level Field (optional)", append([]string{""}, columns...), levelIdx,
 		func(field string, index int) { lp.levelField = field })
 
-	form.AddInputField("Window Size (ms)", fmt.Sprint(lp.windowSize), 10,
+	form.AddInputField("Window Size (rows)", fmt.Sprint(lp.windowSize), 10,
 		func(text string, lastRune rune) bool { return unicode.IsDigit(lastRune) },
 		func(text string) { lp.windowSize, _ = strconv.Atoi(text) })
 
@@ -404,7 +404,6 @@ func (lp *LogPanel) loadLogs() {
 	var entries []LogEntry
 	colTypes, _ := rows.ColumnTypes()
 	scanArgs := make([]interface{}, len(colTypes))
-
 	for rows.Next() {
 		var entry LogEntry
 		// Initialize scan args based on column types
