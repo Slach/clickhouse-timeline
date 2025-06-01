@@ -198,7 +198,7 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 	currentTimeMsField := lp.timeMsField
 	currentDateField := lp.dateField
 	currentLevelField := lp.levelField
-	
+
 	// Get current focus index before clearing
 	currentFocusIndex, _ := form.GetFocusedItemIndex()
 
@@ -225,9 +225,10 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 		}
 		form.AddDropDown("Table", lp.tables, tableIdx,
 			func(table string, index int) {
-				lp.table = table
-				// Don't call updateFieldDropdowns here to avoid infinite loop
-				// The field dropdowns are already populated in this function
+				if table != lp.table { // Only update if changed
+					lp.table = table
+					lp.updateFieldDropdowns(form)
+				}
 			})
 
 		msgIdx := slices.Index(columns, currentMsgField)
