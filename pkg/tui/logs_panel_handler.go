@@ -307,10 +307,16 @@ func (lp *LogPanel) showLogExplorer() {
 			if rowNumber > 0 && rowNumber <= lp.totalRows {
 				lp.showLogDetailsModal(rowNumber)
 			}
-		} else if event.Key() == tcell.KeyPgDn {
-			lp.loadMoreLogs(false) // Load older logs
-		} else if event.Key() == tcell.KeyPgUp {
-			lp.loadMoreLogs(true) // Load newer logs
+		} else if event.Key() == tcell.KeyPgDn && event.Modifiers()&tcell.ModCtrl != 0 {
+			lp.app.tviewApp.QueueUpdateDraw(func() {
+				lp.overview.SetText(fmt.Sprintf("Loading next %d rows...", lp.windowSize))
+			})
+			go lp.loadMoreLogs(false) // Load older logs
+		} else if event.Key() == tcell.KeyPgUp && event.Modifiers()&tcell.ModCtrl != 0 {
+			lp.app.tviewApp.QueueUpdateDraw(func() {
+				lp.overview.SetText(fmt.Sprintf("Loading previous %d rows...", lp.windowSize))
+			})
+			go lp.loadMoreLogs(true) // Load newer logs
 		}
 		return event
 	})
@@ -494,6 +500,9 @@ func (lp *LogPanel) updateOverviewWithStats(levelCounts map[string]int, totalIte
 
 func (lp *LogPanel) loadMoreLogs(newer bool) {
 	if lp.totalRows == 0 {
+		lp.app.tviewApp.QueueUpdateDraw(func() {
+			lp.overview.SetText("No logs loaded yet")
+		})
 		return
 	}
 
@@ -517,6 +526,9 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 
 	rows, err := lp.app.clickHouse.Query(query, queryArgs...)
 	if err != nil {
+		lp.app.tviewApp.QueueUpdateDraw(func() {
+			lp.overview.SetText(fmt.Sprintf("Error loading more logs: %v", err))
+		})
 		return
 	}
 	defer func() {
