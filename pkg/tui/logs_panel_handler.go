@@ -677,8 +677,14 @@ func (lp *LogPanel) buildWhereClause(timeCondition string, args []interface{}) (
 
 	// Optimize time filtering by using dateField if available
 	if len(args) > 0 && lp.dateField != "" {
-		date := args[0].(time.Time).Format("2006-01-02")
-		whereConditions = append(whereConditions, fmt.Sprintf("%s = '%s'", lp.dateField, date))
+		if len(args) >= 1 {
+			dateStr := args[0].(time.Time).Format("2006-01-02")
+			whereConditions = append(whereConditions, fmt.Sprintf("%s >= '%s'", lp.dateField, dateStr))
+		}
+		if len(args) >= 2 {
+			dateStr := args[1].(time.Time).Format("2006-01-02")
+			whereConditions = append(whereConditions, fmt.Sprintf("%s <= '%s'", lp.dateField, dateStr))
+		}
 	}
 
 	// Add the main time condition
