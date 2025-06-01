@@ -513,72 +513,79 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 }
 
 func (lp *LogPanel) showLogDetailsModal(entry LogEntry) {
-	// Create modal dialog
-	modal := tview.NewModal().
-		SetText(lp.formatLogDetails(entry)).
-		AddButtons([]string{"OK"}).
-		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+	// Create a flex layout for the details window
+	detailsFlex := tview.NewFlex().SetDirection(tview.FlexRow)
+
+	// Header section with time and level info
+	headerText := tview.NewTextView().
+		SetDynamicColors(true).
+		SetWordWrap(true)
+	headerText.SetBorder(true).SetTitle("Log Entry Info")
+	
+	// Build header content
+	var headerBuilder strings.Builder
+	if !entry.Time.IsZero() {
+		headerBuilder.WriteString(fmt.Sprintf("[yellow]%s:[-] %s\n", lp.timeField, entry.Time.Format("2006-01-02 15:04:05 MST")))
+	}
+	if entry.TimeMs > 0 {
+		headerBuilder.WriteString(fmt.Sprintf("[yellow]%s:[-] %d\n", lp.timeMsField, entry.TimeMs))
+	}
+	if entry.Date != "" {
+		headerBuilder.WriteString(fmt.Sprintf("[yellow]%s:[-] %s\n", lp.dateField, entry.Date))
+	}
+	if entry.Level != "" {
+		levelColor := "[white]"
+		switch strings.ToLower(entry.Level) {
+		case "error", "exception":
+			levelColor = "[red]"
+		case "warning", "debug", "trace":
+			levelColor = "[yellow]"
+		case "info":
+			levelColor = "[green]"
+		}
+		headerBuilder.WriteString(fmt.Sprintf("[yellow]%s:[-] %s%s[-]\n", lp.levelField, levelColor, entry.Level))
+	}
+	headerText.SetText(headerBuilder.String())
+
+	// Message section with scrolling
+	messageText := tview.NewTextView().
+		SetDynamicColors(true).
+		SetWordWrap(true).
+		SetScrollable(true)
+	messageText.SetBorder(true).SetTitle(fmt.Sprintf("Message (%s)", lp.messageField))
+	messageText.SetText(entry.Message)
+
+	// Instructions
+	instructionsText := tview.NewTextView().
+		SetDynamicColors(true).
+		SetText("[yellow]Navigation:[-] ↑/↓ or j/k to scroll, [yellow]Esc[-] to close")
+	instructionsText.SetTextAlign(tview.AlignCenter)
+
+	// Add components to flex layout
+	detailsFlex.AddItem(headerText, 0, 1, false)      // Header takes minimum space needed
+	detailsFlex.AddItem(messageText, 0, 3, true)      // Message takes most space and is focusable
+	detailsFlex.AddItem(instructionsText, 1, 0, false) // Instructions take 1 line
+
+	// Handle keyboard input
+	detailsFlex.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyEscape:
 			lp.app.pages.RemovePage("logDetails")
-		})
+			return nil
+		case tcell.KeyRune:
+			switch event.Rune() {
+			case 'q', 'Q':
+				lp.app.pages.RemovePage("logDetails")
+				return nil
+			}
+		}
+		return event
+	})
 
-	modal.SetTitle("Log Entry Details").
-		SetBorder(true).
-		SetBackgroundColor(tcell.ColorDefault)
-
-	lp.app.pages.AddPage("logDetails", modal, true, true)
+	lp.app.pages.AddPage("logDetails", detailsFlex, true, true)
 	lp.app.pages.SwitchToPage("logDetails")
 }
 
-func (lp *LogPanel) formatLogDetails(entry LogEntry) string {
-	var builder strings.Builder
-
-	// Always show time fields if available
-	if !entry.Time.IsZero() {
-		builder.WriteString(fmt.Sprintf("[yellow]%s[-]: %s\n", lp.timeField, entry.Time.Format(time.RFC3339)))
-	}
-	if entry.TimeMs > 0 {
-		builder.WriteString(fmt.Sprintf("[yellow]%s[-]: %d\n", lp.timeMsField, entry.TimeMs))
-	}
-	if entry.Date != "" {
-		builder.WriteString(fmt.Sprintf("[yellow]%s[-]: %s\n", lp.dateField, entry.Date))
-	}
-
-	// Show level if available
-	if entry.Level != "" {
-		builder.WriteString(fmt.Sprintf("[yellow]%s[-]: %s\n", lp.levelField, entry.Level))
-	}
-
-	// Show message
-	builder.WriteString(fmt.Sprintf("[yellow]%s[-]:\n", lp.messageField))
-	messageLines := wordWrap(entry.Message, 80) // Wrap at 80 chars
-	for _, line := range messageLines {
-		builder.WriteString(fmt.Sprintf("  %s\n", line))
-	}
-
-	return builder.String()
-}
-
-func wordWrap(text string, lineWidth int) []string {
-	words := strings.Fields(text)
-	if len(words) == 0 {
-		return []string{""}
-	}
-
-	var lines []string
-	currentLine := words[0]
-
-	for _, word := range words[1:] {
-		if len(currentLine)+1+len(word) <= lineWidth {
-			currentLine += " " + word
-		} else {
-			lines = append(lines, currentLine)
-			currentLine = word
-		}
-	}
-	lines = append(lines, currentLine)
-
-	return lines
-}
 
 func (lp *LogPanel) getSelectedFields() []string {
 	fields := []string{lp.messageField, lp.timeField}
