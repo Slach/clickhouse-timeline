@@ -50,6 +50,9 @@ type App struct {
 
 	//use Native Flamegraph widget
 	flamegraphNative bool
+	
+	// Log panel state
+	logPanel *LogPanel
 }
 
 func NewApp(cfg *config.Config, version string) *App {
@@ -218,7 +221,30 @@ func (a *App) executeCommand(commandName string) string {
 	case CmdAsyncMetricLog:
 		a.ShowAsynchronousMetricLog(a.fromTime, a.toTime, a.cluster)
 	case CmdLogs:
-		a.ShowLogsPanel()
+		// Only apply CLI params when explicitly executing logs command
+		if cmd == CmdLogs && a.cli != nil {
+			a.logPanel = &LogPanel{
+				app:        a,
+				windowSize: 1000,
+				database:   a.cli.Database,
+				table:      a.cli.Table,
+				messageField: a.cli.Message,
+				timeField:    a.cli.Time,
+				timeMsField:  a.cli.TimeMs,
+				dateField:    a.cli.Date,
+				levelField:   a.cli.Level,
+			}
+			if a.cli.Window > 0 {
+				a.logPanel.windowSize = a.cli.Window
+			}
+		} else if a.logPanel == nil {
+			// Initialize empty panel if not exists
+			a.logPanel = &LogPanel{
+				app:        a,
+				windowSize: 1000,
+			}
+		}
+		a.logPanel.Show()
 	}
 	return ""
 }

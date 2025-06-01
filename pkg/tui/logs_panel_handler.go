@@ -32,7 +32,6 @@ type LogPanel struct {
 	overview       *tview.TextView
 	databases      []string
 	tables         []string
-	cliParams      *types.CLI
 }
 
 type LogFilter struct {
@@ -49,7 +48,7 @@ type LogEntry struct {
 	Message string
 }
 
-func (a *App) ShowLogsPanel() {
+func (lp *LogPanel) Show() {
 	if a.clickHouse == nil {
 		a.SwitchToMainPage("Error: Please connect to ClickHouse first")
 		return
