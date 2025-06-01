@@ -192,7 +192,7 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 		}
 	}
 
-	// Clear form but keep current selections
+	// Store current selections and focused item index
 	currentDB := lp.database
 	currentTable := lp.table
 	currentMsgField := lp.messageField
@@ -200,77 +200,89 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 	currentTimeMsField := lp.timeMsField
 	currentDateField := lp.dateField
 	currentLevelField := lp.levelField
+	
+	// Get current focus index before clearing
+	currentFocusIndex := form.GetFocusedItemIndex()
 
-	form.Clear(true)
+	// Use QueueUpdateDraw to ensure proper focus handling
+	lp.app.tviewApp.QueueUpdateDraw(func() {
+		form.Clear(true)
 
-	// Add dropdowns with current selections
-	dbIdx := slices.Index(lp.databases, currentDB)
-	if dbIdx == -1 {
-		dbIdx = 0
-	}
-	form.AddDropDown("Database", lp.databases, dbIdx,
-		func(db string, index int) {
-			if db != lp.database { // Only update if changed
-				lp.database = db
-				lp.updateTableDropdown(form)
-			}
-		})
+		// Add dropdowns with current selections
+		dbIdx := slices.Index(lp.databases, currentDB)
+		if dbIdx == -1 {
+			dbIdx = 0
+		}
+		form.AddDropDown("Database", lp.databases, dbIdx,
+			func(db string, index int) {
+				if db != lp.database { // Only update if changed
+					lp.database = db
+					lp.updateTableDropdown(form)
+				}
+			})
 
-	tableIdx := slices.Index(lp.tables, currentTable)
-	if tableIdx == -1 {
-		tableIdx = 0
-	}
-	form.AddDropDown("Table", lp.tables, tableIdx,
-		func(table string, index int) {
-			if table != lp.table { // Only update if changed
-				lp.table = table
-				lp.updateFieldDropdowns(form)
-				// Set focus to message field dropdown after table selection
-				lp.SetFocusByLabel(form, "Message Field")
-			}
-		})
+		tableIdx := slices.Index(lp.tables, currentTable)
+		if tableIdx == -1 {
+			tableIdx = 0
+		}
+		form.AddDropDown("Table", lp.tables, tableIdx,
+			func(table string, index int) {
+				if table != lp.table { // Only update if changed
+					lp.table = table
+					lp.updateFieldDropdowns(form)
+				}
+			})
 
-	msgIdx := slices.Index(columns, currentMsgField)
-	if msgIdx == -1 {
-		msgIdx = 0
-	}
-	form.AddDropDown("Message Field", columns, msgIdx,
-		func(field string, index int) { lp.messageField = field })
+		msgIdx := slices.Index(columns, currentMsgField)
+		if msgIdx == -1 {
+			msgIdx = 0
+		}
+		form.AddDropDown("Message Field", columns, msgIdx,
+			func(field string, index int) { lp.messageField = field })
 
-	timeIdx := slices.Index(timeColumns, currentTimeField)
-	if timeIdx == -1 {
-		timeIdx = 0
-	}
-	form.AddDropDown("Time Field", timeColumns, timeIdx,
-		func(field string, index int) { lp.timeField = field })
+		timeIdx := slices.Index(timeColumns, currentTimeField)
+		if timeIdx == -1 {
+			timeIdx = 0
+		}
+		form.AddDropDown("Time Field", timeColumns, timeIdx,
+			func(field string, index int) { lp.timeField = field })
 
-	timeMsIdx := slices.Index(append([]string{""}, timeMsColumns...), currentTimeMsField)
-	if timeMsIdx == -1 {
-		timeMsIdx = 0
-	}
-	form.AddDropDown("TimeMs Field (optional)", append([]string{""}, timeMsColumns...), timeMsIdx,
-		func(field string, index int) { lp.timeMsField = field })
+		timeMsIdx := slices.Index(append([]string{""}, timeMsColumns...), currentTimeMsField)
+		if timeMsIdx == -1 {
+			timeMsIdx = 0
+		}
+		form.AddDropDown("TimeMs Field (optional)", append([]string{""}, timeMsColumns...), timeMsIdx,
+			func(field string, index int) { lp.timeMsField = field })
 
-	dateIdx := slices.Index(append([]string{""}, dateColumns...), currentDateField)
-	if dateIdx == -1 {
-		dateIdx = 0
-	}
-	form.AddDropDown("Date Field (optional)", append([]string{""}, dateColumns...), dateIdx,
-		func(field string, index int) { lp.dateField = field })
+		dateIdx := slices.Index(append([]string{""}, dateColumns...), currentDateField)
+		if dateIdx == -1 {
+			dateIdx = 0
+		}
+		form.AddDropDown("Date Field (optional)", append([]string{""}, dateColumns...), dateIdx,
+			func(field string, index int) { lp.dateField = field })
 
-	levelIdx := slices.Index(append([]string{""}, columns...), currentLevelField)
-	if levelIdx == -1 {
-		levelIdx = 0
-	}
-	form.AddDropDown("Level Field (optional)", append([]string{""}, columns...), levelIdx,
-		func(field string, index int) { lp.levelField = field })
+		levelIdx := slices.Index(append([]string{""}, columns...), currentLevelField)
+		if levelIdx == -1 {
+			levelIdx = 0
+		}
+		form.AddDropDown("Level Field (optional)", append([]string{""}, columns...), levelIdx,
+			func(field string, index int) { lp.levelField = field })
 
-	form.AddInputField("Window Size (rows)", fmt.Sprint(lp.windowSize), 10,
-		func(text string, lastRune rune) bool { return unicode.IsDigit(lastRune) },
-		func(text string) { lp.windowSize, _ = strconv.Atoi(text) })
+		form.AddInputField("Window Size (rows)", fmt.Sprint(lp.windowSize), 10,
+			func(text string, lastRune rune) bool { return unicode.IsDigit(lastRune) },
+			func(text string) { lp.windowSize, _ = strconv.Atoi(text) })
 
-	form.AddButton("Explore Logs", func() { lp.showLogExplorer() })
-	form.AddButton("Cancel", func() { lp.app.SwitchToMainPage("Returned from :logs") })
+		form.AddButton("Explore Logs", func() { lp.showLogExplorer() })
+		form.AddButton("Cancel", func() { lp.app.SwitchToMainPage("Returned from :logs") })
+
+		// Restore focus to the same position or move to next logical field
+		if currentFocusIndex >= 0 && currentFocusIndex < form.GetFormItemCount() {
+			form.SetFocus(currentFocusIndex)
+		} else {
+			// Default to Message Field if we can't restore previous focus
+			lp.SetFocusByLabel(form, "Message Field")
+		}
+	})
 }
 
 func (lp *LogPanel) showLogExplorer() {
