@@ -421,8 +421,8 @@ func (lp *LogPanel) updateOverviewWithStats(levelCounts map[string]int, totalIte
 		}
 	}
 
-	// Get available width from the view
-	_, _, viewWidth, _ := view.GetInnerRect()
+	// Get available width from the overview TextView
+	_, _, viewWidth, _ := lp.overview.GetInnerRect()
 	if viewWidth <= 0 {
 		viewWidth = 80 // fallback width
 	}
