@@ -503,18 +503,18 @@ func (lp *LogPanel) updateOverview(view *tview.TextView) {
 			segmentWidth = 1 // Ensure at least 1 character for non-zero counts
 		}
 
-		color := "[white]"
+		var bgColor string
 		switch lc.level {
 		case "error", "exception", "fatal", "critical":
-			color = "[red]"
+			bgColor = "red"
 		case "warning", "warn", "debug", "trace":
-			color = "[yellow]"
+			bgColor = "yellow"
 		case "info", "information":
-			color = "[green]"
+			bgColor = "green"
 		case "unknown":
-			color = "[gray]"
+			bgColor = "gray"
 		default:
-			color = "[cyan]" // For any other levels
+			bgColor = "cyan" // For any other levels
 		}
 
 		// Create label text for this segment
@@ -526,10 +526,10 @@ func (lp *LogPanel) updateOverview(view *tview.TextView) {
 			padding := (segmentWidth - len(labelText)) / 2
 			leftPad := strings.Repeat("█", padding)
 			rightPad := strings.Repeat("█", segmentWidth-padding-len(labelText))
-			builder.WriteString(fmt.Sprintf("%s%s[black::]%s[%s::]%s[-]", color, leftPad, labelText, color[1:len(color)-1], rightPad))
+			builder.WriteString(fmt.Sprintf("[black:%s]%s%s%s[-]", bgColor, leftPad, labelText, rightPad))
 		} else {
 			// Segment too small for label, just fill with blocks
-			builder.WriteString(fmt.Sprintf("%s%s[-]", color, strings.Repeat("█", segmentWidth)))
+			builder.WriteString(fmt.Sprintf("[black:%s]%s[-]", bgColor, strings.Repeat("█", segmentWidth)))
 		}
 
 		currentPos += segmentWidth
