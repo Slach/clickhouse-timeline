@@ -722,7 +722,7 @@ func (lp *LogPanel) updateLogTable(entries []LogEntry) {
 		for i, entry := range entries {
 			timeStr := ""
 			if !entry.TimeMs.IsZero() {
-				timeStr = entry.Time.Format("2006-01-02 15:04:05 MST")
+				timeStr = entry.TimeMs.Format("2006-01-02 15:04:05.000 MST")
 			} else if !entry.Time.IsZero() {
 				timeStr = entry.Time.Format("2006-01-02 15:04:05 MST")
 			} else if entry.Date != "" {
