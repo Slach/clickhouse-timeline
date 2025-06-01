@@ -149,25 +149,60 @@ func (lp *LogPanel) createForm() *tview.Form {
 	})
 
 	// Field dropdowns - preselect if CLI params exist
-	form.AddDropDown("Message Field", []string{}, 0, func(field string, index int) {
-		lp.messageField = field
-	}).SetText(lp.messageField)
+	// Message Field dropdown
+	messageFieldDropdown := tview.NewDropDown().
+		SetLabel("Message Field: ").
+		SetOptions([]string{}, func(field string, index int) {
+			lp.messageField = field
+		})
+	if lp.messageField != "" {
+		messageFieldDropdown.SetCurrentOption(-1).SetText(lp.messageField)
+	}
+	form.AddFormItem(messageFieldDropdown)
 
-	form.AddDropDown("Time Field", []string{}, 0, func(field string, index int) {
-		lp.timeField = field
-	}).SetText(lp.timeField)
+	// Time Field dropdown
+	timeFieldDropdown := tview.NewDropDown().
+		SetLabel("Time Field: ").
+		SetOptions([]string{}, func(field string, index int) {
+			lp.timeField = field
+		})
+	if lp.timeField != "" {
+		timeFieldDropdown.SetCurrentOption(-1).SetText(lp.timeField)
+	}
+	form.AddFormItem(timeFieldDropdown)
 
-	form.AddDropDown("TimeMs Field (optional)", []string{}, 0, func(field string, index int) {
-		lp.timeMsField = field
-	}).SetText(lp.timeMsField)
+	// TimeMs Field dropdown
+	timeMsFieldDropdown := tview.NewDropDown().
+		SetLabel("TimeMs Field (optional): ").
+		SetOptions([]string{}, func(field string, index int) {
+			lp.timeMsField = field
+		})
+	if lp.timeMsField != "" {
+		timeMsFieldDropdown.SetCurrentOption(-1).SetText(lp.timeMsField)
+	}
+	form.AddFormItem(timeMsFieldDropdown)
 
-	form.AddDropDown("Date Field (optional)", []string{}, 0, func(field string, index int) {
-		lp.dateField = field
-	}).SetText(lp.dateField)
+	// Date Field dropdown
+	dateFieldDropdown := tview.NewDropDown().
+		SetLabel("Date Field (optional): ").
+		SetOptions([]string{}, func(field string, index int) {
+			lp.dateField = field
+		})
+	if lp.dateField != "" {
+		dateFieldDropdown.SetCurrentOption(-1).SetText(lp.dateField)
+	}
+	form.AddFormItem(dateFieldDropdown)
 
-	form.AddDropDown("Level Field (optional)", []string{}, 0, func(field string, index int) {
-		lp.levelField = field
-	}).SetText(lp.levelField)
+	// Level Field dropdown
+	levelFieldDropdown := tview.NewDropDown().
+		SetLabel("Level Field (optional): ").
+		SetOptions([]string{}, func(field string, index int) {
+			lp.levelField = field
+		})
+	if lp.levelField != "" {
+		levelFieldDropdown.SetCurrentOption(-1).SetText(lp.levelField)
+	}
+	form.AddFormItem(levelFieldDropdown)
 
 	// Window size input - use CLI param if available
 	form.AddInputField("Window Size (rows)", fmt.Sprint(lp.windowSize), 10,
@@ -288,9 +323,11 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 }
 
 func (lp *LogPanel) updateDropdownOptions(form *tview.Form, label string, options []string, selectedFunc func(option string, optionIndex int)) {
-	if item := form.GetFormItemByLabel(label); item != nil {
-		if dropdown, ok := item.(*tview.DropDown); ok {
+	for i := 0; i < form.GetFormItemCount(); i++ {
+		item := form.GetFormItem(i)
+		if dropdown, ok := item.(*tview.DropDown); ok && dropdown.GetLabel() == label+": " {
 			dropdown.SetOptions(options, selectedFunc)
+			break
 		}
 	}
 }
