@@ -149,59 +149,40 @@ func (lp *LogPanel) createForm() *tview.Form {
 	})
 
 	// Field dropdowns - preselect if CLI params exist
-	// Message Field dropdown
+	// Create dropdowns for each log field type
 	messageFieldDropdown := tview.NewDropDown().
 		SetLabel("Message Field: ").
 		SetOptions([]string{}, func(field string, index int) {
 			lp.messageField = field
 		})
-	if lp.messageField != "" {
-		// Will be properly set when options are populated in updateFieldDropdowns
-	}
 	form.AddFormItem(messageFieldDropdown)
 
-	// Time Field dropdown
 	timeFieldDropdown := tview.NewDropDown().
 		SetLabel("Time Field: ").
 		SetOptions([]string{}, func(field string, index int) {
 			lp.timeField = field
 		})
-	if lp.timeField != "" {
-		// Will be properly set when options are populated in updateFieldDropdowns
-	}
 	form.AddFormItem(timeFieldDropdown)
 
-	// TimeMs Field dropdown
 	timeMsFieldDropdown := tview.NewDropDown().
 		SetLabel("TimeMs Field (optional): ").
 		SetOptions([]string{}, func(field string, index int) {
 			lp.timeMsField = field
 		})
-	if lp.timeMsField != "" {
-		// Will be properly set when options are populated in updateFieldDropdowns
-	}
 	form.AddFormItem(timeMsFieldDropdown)
 
-	// Date Field dropdown
 	dateFieldDropdown := tview.NewDropDown().
 		SetLabel("Date Field (optional): ").
 		SetOptions([]string{}, func(field string, index int) {
 			lp.dateField = field
 		})
-	if lp.dateField != "" {
-		// Will be properly set when options are populated in updateFieldDropdowns
-	}
 	form.AddFormItem(dateFieldDropdown)
 
-	// Level Field dropdown
 	levelFieldDropdown := tview.NewDropDown().
 		SetLabel("Level Field (optional): ").
 		SetOptions([]string{}, func(field string, index int) {
 			lp.levelField = field
 		})
-	if lp.levelField != "" {
-		// Will be properly set when options are populated in updateFieldDropdowns
-	}
 	form.AddFormItem(levelFieldDropdown)
 
 	// Window size input - use CLI param if available
@@ -322,13 +303,14 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 	})
 }
 
+// updateDropdownOptions updates a dropdown's options and selects the current value if set
 func (lp *LogPanel) updateDropdownOptions(form *tview.Form, label string, options []string, selectedFunc func(option string, optionIndex int)) {
 	for i := 0; i < form.GetFormItemCount(); i++ {
 		item := form.GetFormItem(i)
 		if dropdown, ok := item.(*tview.DropDown); ok && dropdown.GetLabel() == label+": " {
 			dropdown.SetOptions(options, selectedFunc)
 			
-			// Set the current option if we have a pre-selected value
+			// Get current value for this field type
 			var currentValue string
 			switch label {
 			case "Message Field":
@@ -343,12 +325,11 @@ func (lp *LogPanel) updateDropdownOptions(form *tview.Form, label string, option
 				currentValue = lp.levelField
 			}
 			
-			if currentValue != "" {
-				for idx, opt := range options {
-					if opt == currentValue {
-						dropdown.SetCurrentOption(idx)
-						break
-					}
+			// Select matching option if current value exists
+			for idx, opt := range options {
+				if opt == currentValue {
+					dropdown.SetCurrentOption(idx)
+					break
 				}
 			}
 			break
