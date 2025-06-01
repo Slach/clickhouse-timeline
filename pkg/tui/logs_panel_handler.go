@@ -511,7 +511,7 @@ func (lp *LogPanel) updateOverview(view *tview.TextView) {
 
 		builder.WriteString(fmt.Sprintf("%s%s:%d[-] ", color, level, count))
 	}
-
+	log.Info().Str("SUKA", builder.String()).Send()
 	view.SetText(builder.String())
 }
 
