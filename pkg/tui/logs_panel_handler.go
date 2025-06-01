@@ -212,17 +212,27 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 	}
 
 	// Update field dropdowns
-	lp.updateDropdownOptions(form, "Message Field", columns)
-	lp.updateDropdownOptions(form, "Time Field", timeColumns)
-	lp.updateDropdownOptions(form, "TimeMs Field (optional)", timeMsColumns)
-	lp.updateDropdownOptions(form, "Date Field (optional)", dateColumns)
-	lp.updateDropdownOptions(form, "Level Field (optional)", columns)
+	lp.updateDropdownOptions(form, "Message Field", columns, func(field string, index int) {
+		lp.messageField = field
+	})
+	lp.updateDropdownOptions(form, "Time Field", timeColumns, func(field string, index int) {
+		lp.timeField = field
+	})
+	lp.updateDropdownOptions(form, "TimeMs Field (optional)", timeMsColumns, func(field string, index int) {
+		lp.timeMsField = field
+	})
+	lp.updateDropdownOptions(form, "Date Field (optional)", dateColumns, func(field string, index int) {
+		lp.dateField = field
+	})
+	lp.updateDropdownOptions(form, "Level Field (optional)", columns, func(field string, index int) {
+		lp.levelField = field
+	})
 }
 
-func (lp *LogPanel) updateDropdownOptions(form *tview.Form, label string, options []string) {
+func (lp *LogPanel) updateDropdownOptions(form *tview.Form, label string, options []string, selectedFunc func(option string, optionIndex int)) {
 	if item := form.GetFormItemByLabel(label); item != nil {
 		if dropdown, ok := item.(*tview.DropDown); ok {
-			dropdown.SetOptions(options, nil)
+			dropdown.SetOptions(options, selectedFunc)
 		}
 	}
 }
