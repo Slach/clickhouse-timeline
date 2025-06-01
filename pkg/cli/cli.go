@@ -88,14 +88,14 @@ func NewRootCommand(cli *types.CLI, version string) *cobra.Command {
 			return RunSubCommand(cli, version, cmd, args)
 		},
 	}
-	logsCmd.Flags().StringVar(&cli.Database, "database", "", "Database which will use for look log")
-	logsCmd.Flags().StringVar(&cli.Table, "table", "", "Database which will use for look log")
-	logsCmd.Flags().StringVar(&cli.Message, "message", "", "Column name for message")
-	logsCmd.Flags().StringVar(&cli.Time, "time", "", "Column name for time")
-	logsCmd.Flags().StringVar(&cli.TimeMs, "time-ms", "", "Column name for time with milliseconds")
-	logsCmd.Flags().StringVar(&cli.Date, "date", "", "Column name for date")
-	logsCmd.Flags().StringVar(&cli.Level, "level", "", "Column name for message level")
-	logsCmd.Flags().IntVar(&cli.Window, "window", 1000, "Sliding window size in milliseconds")
+	logsCmd.Flags().StringVar(&cli.LogsParams.Database, "database", "", "Database which will use for look log")
+	logsCmd.Flags().StringVar(&cli.LogsParams.Table, "table", "", "Database which will use for look log")
+	logsCmd.Flags().StringVar(&cli.LogsParams.Message, "message", "", "Column name for message")
+	logsCmd.Flags().StringVar(&cli.LogsParams.Time, "time", "", "Column name for time")
+	logsCmd.Flags().StringVar(&cli.LogsParams.TimeMs, "time-ms", "", "Column name for time with milliseconds")
+	logsCmd.Flags().StringVar(&cli.LogsParams.Date, "date", "", "Column name for date")
+	logsCmd.Flags().StringVar(&cli.LogsParams.Level, "level", "", "Column name for message level")
+	logsCmd.Flags().IntVar(&cli.LogsParams.Window, "window", 1000, "Sliding window size in milliseconds")
 	rootCmd.AddCommand(logsCmd)
 
 	return rootCmd

@@ -228,16 +228,16 @@ func (a *App) executeCommand(commandName string) string {
 			a.logPanel = &LogPanel{
 				app:          a,
 				windowSize:   1000,
-				database:     a.CLI.Database,
-				table:        a.CLI.Table,
-				messageField: a.CLI.Message,
-				timeField:    a.CLI.Time,
-				timeMsField:  a.CLI.TimeMs,
-				dateField:    a.CLI.Date,
-				levelField:   a.CLI.Level,
+				database:     a.CLI.LogsParams.Database,
+				table:        a.CLI.LogsParams.Table,
+				messageField: a.CLI.LogsParams.Message,
+				timeField:    a.CLI.LogsParams.Time,
+				timeMsField:  a.CLI.LogsParams.TimeMs,
+				dateField:    a.CLI.LogsParams.Date,
+				levelField:   a.CLI.LogsParams.Level,
 			}
-			if a.CLI.Window > 0 {
-				a.logPanel.windowSize = a.CLI.Window
+			if a.CLI.LogsParams.Window > 0 {
+				a.logPanel.windowSize = a.CLI.LogsParams.Window
 			}
 		} else if a.logPanel == nil {
 			// Initialize empty panel if not exists

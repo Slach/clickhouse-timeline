@@ -17,6 +17,18 @@ type CLI struct {
 	ConfigPath       string
 	LogPath          string
 	FlamegraphNative bool
+	LogsParams       LogsParams
+}
+
+type LogsParams struct {
+	Database  string
+	Table     string
+	Message   string
+	Time      string
+	TimeMs    string
+	Date      string
+	Level     string
+	Window    int
 }
 
 func (c *CLI) ParseToTime() (time.Time, error) {

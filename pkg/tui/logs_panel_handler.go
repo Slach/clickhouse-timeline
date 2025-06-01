@@ -55,29 +55,29 @@ func (lp *LogPanel) Show() {
 
 	// Apply CLI params if available
 	if lp.app.CLI != nil {
-		if lp.app.CLI.Database != "" {
-			lp.database = lp.app.CLI.Database
+		if lp.app.CLI.LogsParams.Database != "" {
+			lp.database = lp.app.CLI.LogsParams.Database
 		}
-		if lp.app.CLI.Table != "" {
-			lp.table = lp.app.CLI.Table
+		if lp.app.CLI.LogsParams.Table != "" {
+			lp.table = lp.app.CLI.LogsParams.Table
 		}
-		if lp.app.CLI.Message != "" {
-			lp.messageField = lp.app.CLI.Message
+		if lp.app.CLI.LogsParams.Message != "" {
+			lp.messageField = lp.app.CLI.LogsParams.Message
 		}
-		if lp.app.CLI.Time != "" {
-			lp.timeField = lp.app.CLI.Time
+		if lp.app.CLI.LogsParams.Time != "" {
+			lp.timeField = lp.app.CLI.LogsParams.Time
 		}
-		if lp.app.CLI.TimeMs != "" {
-			lp.timeMsField = lp.app.CLI.TimeMs
+		if lp.app.CLI.LogsParams.TimeMs != "" {
+			lp.timeMsField = lp.app.CLI.LogsParams.TimeMs
 		}
-		if lp.app.CLI.Date != "" {
-			lp.dateField = lp.app.CLI.Date
+		if lp.app.CLI.LogsParams.Date != "" {
+			lp.dateField = lp.app.CLI.LogsParams.Date
 		}
-		if lp.app.CLI.Level != "" {
-			lp.levelField = lp.app.CLI.Level
+		if lp.app.CLI.LogsParams.Level != "" {
+			lp.levelField = lp.app.CLI.LogsParams.Level
 		}
-		if lp.app.CLI.Window > 0 {
-			lp.windowSize = lp.app.CLI.Window
+		if lp.app.CLI.LogsParams.Window > 0 {
+			lp.windowSize = lp.app.CLI.LogsParams.Window
 		}
 	}
 
