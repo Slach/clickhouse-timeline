@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"database/sql"
 	"fmt"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rs/zerolog/log"
@@ -354,41 +355,14 @@ func (lp *LogPanel) loadLogs() {
 		return
 	}
 
-	// Build logsQuery with sliding window
-	fields := []string{lp.messageField, lp.timeField}
-	if lp.timeMsField != "" {
-		fields = append(fields, lp.timeMsField)
-	}
-	if lp.dateField != "" {
-		fields = append(fields, lp.dateField)
-	}
-	if lp.levelField != "" {
-		fields = append(fields, lp.levelField)
-	}
-
 	// Build WHERE clause with filters
-	whereConditions := []string{fmt.Sprintf("%s >= ?", lp.timeField)}
-	queryArgs := []interface{}{lp.app.fromTime}
+	timeCondition := fmt.Sprintf("%s >= ?", lp.timeField)
+	whereClause, queryArgs := lp.buildWhereClause(timeCondition, []interface{}{lp.app.fromTime})
 
-	// Add filter conditions
-	for _, filter := range lp.filters {
-		whereConditions = append(whereConditions, fmt.Sprintf("%s %s ?", filter.Field, filter.Operator))
-		queryArgs = append(queryArgs, filter.Value)
-	}
-
-	logsQuery := fmt.Sprintf(`
-		SELECT %s
-		FROM `+"`%s`.`%s`"+`
-		WHERE %s
-		ORDER BY %s
-		LIMIT ?`,
-		strings.Join(fields, ", "),
-		lp.database,
-		lp.table,
-		strings.Join(whereConditions, " AND "),
-		lp.timeField)
-
+	// Build query
+	logsQuery := lp.buildQuery(whereClause, lp.timeField)
 	queryArgs = append(queryArgs, lp.windowSize)
+
 	rows, err := lp.app.clickHouse.Query(logsQuery, queryArgs...)
 	if err != nil {
 		lp.app.SwitchToMainPage(fmt.Sprintf("loadLogs Query failed: %v", err))
@@ -401,83 +375,14 @@ func (lp *LogPanel) loadLogs() {
 	}()
 
 	// Process results
-	var entries []LogEntry
-	colTypes, _ := rows.ColumnTypes()
-	scanArgs := make([]interface{}, len(colTypes))
-	for rows.Next() {
-		var entry LogEntry
-		// Initialize scan args based on column types
-		for i, col := range colTypes {
-			switch col.DatabaseTypeName() {
-			case "DateTime", "DateTime64":
-				scanArgs[i] = &entry.Time
-			case "UInt64", "Int64":
-				scanArgs[i] = &entry.TimeMs
-			case "String", "Enum":
-				switch col.Name() {
-				case lp.messageField:
-					scanArgs[i] = &entry.Message
-				case lp.levelField:
-					scanArgs[i] = &entry.Level
-				case lp.dateField:
-					scanArgs[i] = &entry.Date
-				default:
-					var dummy string
-					scanArgs[i] = &dummy
-				}
-			default:
-				var dummy interface{}
-				scanArgs[i] = &dummy
-			}
-		}
-
-		if err := rows.Scan(scanArgs...); err != nil {
-			continue
-		}
-		entries = append(entries, entry)
+	entries, err := lp.processRows(rows)
+	if err != nil {
+		lp.app.SwitchToMainPage(fmt.Sprintf("Error processing rows: %v", err))
+		return
 	}
 
 	lp.currentResults = entries
-	lp.app.tviewApp.QueueUpdateDraw(func() {
-		// Update log details table
-		lp.logDetails.Clear()
-
-		// Re-add headers
-		lp.logDetails.SetCell(0, 0, tview.NewTableCell("Time").SetTextColor(tcell.ColorYellow))
-		lp.logDetails.SetCell(0, 1, tview.NewTableCell("Message").SetTextColor(tcell.ColorYellow))
-
-		// Add log entries
-		for i, entry := range entries {
-			timeStr := ""
-			if !entry.Time.IsZero() {
-				timeStr = entry.Time.Format("2006-01-02 15:04:05")
-			} else if entry.TimeMs > 0 {
-				timeStr = time.Unix(0, entry.TimeMs*int64(time.Millisecond)).Format("2006-01-02 15:04:05")
-			} else if entry.Date != "" {
-				timeStr = entry.Date
-			}
-
-			lp.logDetails.SetCell(i+1, 0, tview.NewTableCell(timeStr))
-			lp.logDetails.SetCell(i+1, 1, tview.NewTableCell(entry.Message))
-
-			// Color by level if available
-			if entry.Level != "" {
-				color := tcell.ColorWhite
-				switch strings.ToLower(entry.Level) {
-				case "error", "exception":
-					color = tcell.ColorRed
-				case "warning", "debug", "trace":
-					color = tcell.ColorYellow
-				case "info":
-					color = tcell.ColorGreen
-				}
-				lp.logDetails.GetCell(i+1, 1).SetTextColor(color)
-			}
-		}
-
-		// Update overview panel
-		lp.updateOverview(lp.overview)
-	})
+	lp.updateLogTable(entries)
 }
 
 func (lp *LogPanel) getAvailableFilterFields() []string {
@@ -565,30 +470,14 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 	}
 
 	// Build WHERE clause with filters
-	whereConditions := []string{fmt.Sprintf("%s BETWEEN ? AND ?", lp.timeField)}
-	queryArgs := []interface{}{timeCondition, lp.app.toTime}
+	timeConditionStr := fmt.Sprintf("%s BETWEEN ? AND ?", lp.timeField)
+	whereClause, queryArgs := lp.buildWhereClause(timeConditionStr, []interface{}{timeCondition, lp.app.toTime})
 
-	// Add filter conditions
-	for _, filter := range lp.filters {
-		whereConditions = append(whereConditions, fmt.Sprintf("%s %s ?", filter.Field, filter.Operator))
-		queryArgs = append(queryArgs, filter.Value)
-	}
-
-	query := fmt.Sprintf(`
-		SELECT %s
-		FROM %s.%s
-		WHERE %s
-		ORDER BY %s %s
-		LIMIT ?`,
-		strings.Join(lp.getSelectedFields(), ", "),
-		lp.database,
-		lp.table,
-		strings.Join(whereConditions, " AND "),
-		lp.timeField,
-		ternary(newer, "ASC", "DESC"),
-	)
-
+	// Build query with appropriate ordering
+	orderBy := fmt.Sprintf("%s %s", lp.timeField, ternary(newer, "ASC", "DESC"))
+	query := lp.buildQuery(whereClause, orderBy)
 	queryArgs = append(queryArgs, lp.windowSize)
+
 	rows, err := lp.app.clickHouse.Query(query, queryArgs...)
 	if err != nil {
 		return
@@ -599,89 +488,20 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 		}
 	}()
 
-	var newEntries []LogEntry
-	colTypes, _ := rows.ColumnTypes()
-	scanArgs := make([]interface{}, len(colTypes))
-
-	for rows.Next() {
-		var entry LogEntry
-		// Initialize scan args based on column types
-		for i, col := range colTypes {
-			switch col.DatabaseTypeName() {
-			case "DateTime", "DateTime64":
-				scanArgs[i] = &entry.Time
-			case "UInt64", "Int64":
-				scanArgs[i] = &entry.TimeMs
-			case "String":
-				switch col.Name() {
-				case lp.messageField:
-					scanArgs[i] = &entry.Message
-				case lp.levelField:
-					scanArgs[i] = &entry.Level
-				case lp.dateField:
-					scanArgs[i] = &entry.Date
-				default:
-					var dummy string
-					scanArgs[i] = &dummy
-				}
-			default:
-				var dummy interface{}
-				scanArgs[i] = &dummy
-			}
-		}
-
-		if err := rows.Scan(scanArgs...); err != nil {
-			continue
-		}
-		newEntries = append(newEntries, entry)
+	// Process results
+	newEntries, err := lp.processRows(rows)
+	if err != nil {
+		return
 	}
 
+	// Merge results
 	if newer {
 		lp.currentResults = append(newEntries, lp.currentResults...)
 	} else {
 		lp.currentResults = append(lp.currentResults, newEntries...)
 	}
 
-	lp.app.tviewApp.QueueUpdateDraw(func() {
-		// Update log details table
-		lp.logDetails.Clear()
-
-		// Re-add headers
-		lp.logDetails.SetCell(0, 0, tview.NewTableCell("Time").SetTextColor(tcell.ColorYellow))
-		lp.logDetails.SetCell(0, 1, tview.NewTableCell("Message").SetTextColor(tcell.ColorYellow))
-
-		// Add log entries
-		for i, entry := range lp.currentResults {
-			timeStr := ""
-			if !entry.Time.IsZero() {
-				timeStr = entry.Time.Format("2006-01-02 15:04:05")
-			} else if entry.TimeMs > 0 {
-				timeStr = time.Unix(0, entry.TimeMs*int64(time.Millisecond)).Format("2006-01-02 15:04:05")
-			} else if entry.Date != "" {
-				timeStr = entry.Date
-			}
-
-			lp.logDetails.SetCell(i+1, 0, tview.NewTableCell(timeStr))
-			lp.logDetails.SetCell(i+1, 1, tview.NewTableCell(entry.Message))
-
-			// Color by level if available
-			if entry.Level != "" {
-				color := tcell.ColorWhite
-				switch strings.ToLower(entry.Level) {
-				case "error", "exception":
-					color = tcell.ColorRed
-				case "warning", "debug", "trace":
-					color = tcell.ColorYellow
-				case "info":
-					color = tcell.ColorGreen
-				}
-				lp.logDetails.GetCell(i+1, 1).SetTextColor(color)
-			}
-		}
-
-		// Update overview panel
-		lp.updateOverview(lp.overview)
-	})
+	lp.updateLogTable(lp.currentResults)
 }
 
 func (lp *LogPanel) showLogDetailsModal(entry LogEntry) {
@@ -764,6 +584,117 @@ func (lp *LogPanel) getSelectedFields() []string {
 		fields = append(fields, lp.levelField)
 	}
 	return fields
+}
+
+func (lp *LogPanel) buildWhereClause(timeCondition string, args []interface{}) (string, []interface{}) {
+	whereConditions := []string{timeCondition}
+	queryArgs := args
+
+	// Add filter conditions
+	for _, filter := range lp.filters {
+		whereConditions = append(whereConditions, fmt.Sprintf("%s %s ?", filter.Field, filter.Operator))
+		queryArgs = append(queryArgs, filter.Value)
+	}
+
+	return strings.Join(whereConditions, " AND "), queryArgs
+}
+
+func (lp *LogPanel) buildQuery(whereClause, orderBy string) string {
+	return fmt.Sprintf(`
+		SELECT %s
+		FROM `+"`%s`.`%s`"+`
+		WHERE %s
+		ORDER BY %s
+		LIMIT ?`,
+		strings.Join(lp.getSelectedFields(), ", "),
+		lp.database,
+		lp.table,
+		whereClause,
+		orderBy)
+}
+
+func (lp *LogPanel) processRows(rows *sql.Rows) ([]LogEntry, error) {
+	var entries []LogEntry
+	colTypes, _ := rows.ColumnTypes()
+	scanArgs := make([]interface{}, len(colTypes))
+
+	for rows.Next() {
+		var entry LogEntry
+		// Initialize scan args based on column types
+		for i, col := range colTypes {
+			switch col.DatabaseTypeName() {
+			case "DateTime", "DateTime64":
+				scanArgs[i] = &entry.Time
+			case "UInt64", "Int64":
+				scanArgs[i] = &entry.TimeMs
+			case "String", "Enum":
+				switch col.Name() {
+				case lp.messageField:
+					scanArgs[i] = &entry.Message
+				case lp.levelField:
+					scanArgs[i] = &entry.Level
+				case lp.dateField:
+					scanArgs[i] = &entry.Date
+				default:
+					var dummy string
+					scanArgs[i] = &dummy
+				}
+			default:
+				var dummy interface{}
+				scanArgs[i] = &dummy
+			}
+		}
+
+		if err := rows.Scan(scanArgs...); err != nil {
+			continue
+		}
+		entries = append(entries, entry)
+	}
+
+	return entries, nil
+}
+
+func (lp *LogPanel) updateLogTable(entries []LogEntry) {
+	lp.app.tviewApp.QueueUpdateDraw(func() {
+		// Update log details table
+		lp.logDetails.Clear()
+
+		// Re-add headers
+		lp.logDetails.SetCell(0, 0, tview.NewTableCell("Time").SetTextColor(tcell.ColorYellow))
+		lp.logDetails.SetCell(0, 1, tview.NewTableCell("Message").SetTextColor(tcell.ColorYellow))
+
+		// Add log entries
+		for i, entry := range entries {
+			timeStr := ""
+			if !entry.Time.IsZero() {
+				timeStr = entry.Time.Format("2006-01-02 15:04:05")
+			} else if entry.TimeMs > 0 {
+				timeStr = time.Unix(0, entry.TimeMs*int64(time.Millisecond)).Format("2006-01-02 15:04:05")
+			} else if entry.Date != "" {
+				timeStr = entry.Date
+			}
+
+			lp.logDetails.SetCell(i+1, 0, tview.NewTableCell(timeStr))
+			lp.logDetails.SetCell(i+1, 1, tview.NewTableCell(entry.Message))
+
+			// Color by level if available
+			if entry.Level != "" {
+				color := tcell.ColorWhite
+				switch strings.ToLower(entry.Level) {
+				case "error", "exception":
+					color = tcell.ColorRed
+				case "warning", "debug", "trace":
+					color = tcell.ColorYellow
+				case "info":
+					color = tcell.ColorGreen
+				}
+				lp.logDetails.GetCell(i+1, 1).SetTextColor(color)
+			}
+		}
+
+		// Update overview panel
+		lp.updateOverview(lp.overview)
+	})
 }
 
 func ternary(condition bool, trueVal, falseVal string) string {
