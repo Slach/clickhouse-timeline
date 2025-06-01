@@ -714,30 +714,12 @@ func ternary(condition bool, trueVal, falseVal string) string {
 
 func (lp *LogPanel) SetFocusByLabel(form *tview.Form, label string, itemType string) {
 	for i := 0; i < form.GetFormItemCount(); i++ {
-		if item := form.GetFormItem(i); item != nil {
-			switch itemType {
-			case "dropdown":
-				if dropdown, ok := item.(*tview.DropDown); ok {
-					if itemLabel, _ := dropdown.GetLabel(); itemLabel == label {
-						form.SetFocus(i)
-						return
-					}
-				}
-			case "input":
-				if input, ok := item.(*tview.InputField); ok {
-					if itemLabel, _ := input.GetLabel(); itemLabel == label {
-						form.SetFocus(i)
-						return
-					}
-				}
-			case "button":
-				if button, ok := item.(*tview.Button); ok {
-					if button.GetLabel() == label {
-						form.SetFocus(i)
-						return
-					}
-				}
-			}
+		item := form.GetFormItem(i)
+		itemLabel := form.GetFormItemLabel(i)
+		
+		if itemLabel == label {
+			form.SetFocus(i)
+			return
 		}
 	}
 }
