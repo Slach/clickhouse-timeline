@@ -462,7 +462,7 @@ func (lp *LogPanel) updateOverview(view *tview.TextView) {
 	for level, count := range levelCounts {
 		sortedLevels = append(sortedLevels, levelCount{level, count})
 	}
-	
+
 	// Sort by count descending
 	for i := 0; i < len(sortedLevels)-1; i++ {
 		for j := i + 1; j < len(sortedLevels); j++ {
@@ -519,17 +519,17 @@ func (lp *LogPanel) updateOverview(view *tview.TextView) {
 
 		// Create label text for this segment
 		labelText := fmt.Sprintf("%s:%d", lc.level, lc.count)
-		
+
 		// If segment is wide enough to fit the label, embed it
 		if segmentWidth >= len(labelText) {
 			// Calculate padding to center the label
 			padding := (segmentWidth - len(labelText)) / 2
-			leftPad := strings.Repeat("█", padding)
-			rightPad := strings.Repeat("█", segmentWidth-padding-len(labelText))
+			leftPad := strings.Repeat(" ", padding)
+			rightPad := strings.Repeat(" ", segmentWidth-padding-len(labelText))
 			builder.WriteString(fmt.Sprintf("[black:%s]%s%s%s[-]", bgColor, leftPad, labelText, rightPad))
 		} else {
 			// Segment too small for label, just fill with blocks
-			builder.WriteString(fmt.Sprintf("[black:%s]%s[-]", bgColor, strings.Repeat("█", segmentWidth)))
+			builder.WriteString(fmt.Sprintf("[black:%s]%s[-]", bgColor, strings.Repeat(" ", segmentWidth)))
 		}
 
 		currentPos += segmentWidth
