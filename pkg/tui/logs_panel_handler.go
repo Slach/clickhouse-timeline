@@ -54,30 +54,30 @@ func (lp *LogPanel) Show() {
 	}
 
 	// Apply CLI params if available
-	if lp.app.cli != nil {
-		if lp.app.cli.Database != "" {
-			lp.database = lp.app.cli.Database
+	if lp.app.CLI != nil {
+		if lp.app.CLI.Database != "" {
+			lp.database = lp.app.CLI.Database
 		}
-		if lp.app.cli.Table != "" {
-			lp.table = lp.app.cli.Table
+		if lp.app.CLI.Table != "" {
+			lp.table = lp.app.CLI.Table
 		}
-		if lp.app.cli.Message != "" {
-			lp.messageField = lp.app.cli.Message
+		if lp.app.CLI.Message != "" {
+			lp.messageField = lp.app.CLI.Message
 		}
-		if lp.app.cli.Time != "" {
-			lp.timeField = lp.app.cli.Time
+		if lp.app.CLI.Time != "" {
+			lp.timeField = lp.app.CLI.Time
 		}
-		if lp.app.cli.TimeMs != "" {
-			lp.timeMsField = lp.app.cli.TimeMs
+		if lp.app.CLI.TimeMs != "" {
+			lp.timeMsField = lp.app.CLI.TimeMs
 		}
-		if lp.app.cli.Date != "" {
-			lp.dateField = lp.app.cli.Date
+		if lp.app.CLI.Date != "" {
+			lp.dateField = lp.app.CLI.Date
 		}
-		if lp.app.cli.Level != "" {
-			lp.levelField = lp.app.cli.Level
+		if lp.app.CLI.Level != "" {
+			lp.levelField = lp.app.CLI.Level
 		}
-		if lp.app.cli.Window > 0 {
-			lp.windowSize = lp.app.cli.Window
+		if lp.app.CLI.Window > 0 {
+			lp.windowSize = lp.app.CLI.Window
 		}
 	}
 

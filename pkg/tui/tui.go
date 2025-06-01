@@ -27,7 +27,7 @@ type App struct {
 	commandInput *tview.InputField
 	mainFlex     *tview.Flex
 	version      string
-	cli          *types.CLI
+	CLI          *types.CLI
 
 	// Date range fields
 	fromTime  time.Time
@@ -51,7 +51,7 @@ type App struct {
 
 	//use Native Flamegraph widget
 	flamegraphNative bool
-	
+
 	// Log panel state
 	logPanel *LogPanel
 }
@@ -66,7 +66,7 @@ func NewApp(cfg *config.Config, version string) *App {
 		category:      CategoryQueryHash,               // Default category
 		currentMetric: MetricCount,                     // Default metric
 		scaleType:     ScaleLinear,                     // Default scale
-		cli:          &types.CLI{},                     // Initialize empty CLI
+		CLI:           &types.CLI{},                    // Initialize empty CLI
 	}
 
 	app.setupUI()
@@ -194,9 +194,9 @@ func (a *App) SetConnectByName(contextName string) bool {
 
 func (a *App) executeCommand(commandName string) string {
 	// Check prerequisites for commands that need them
-	if commandName == CmdHeatmap || commandName == CmdFlamegraph || 
-	   commandName == CmdProfileEvents || commandName == CmdMetricLog || 
-	   commandName == CmdAsyncMetricLog || commandName == CmdLogs {
+	if commandName == CmdHeatmap || commandName == CmdFlamegraph ||
+		commandName == CmdProfileEvents || commandName == CmdMetricLog ||
+		commandName == CmdAsyncMetricLog || commandName == CmdLogs {
 		if a.clickHouse == nil {
 			return "Error: Please connect to a ClickHouse instance first using :connect command\n"
 		}
@@ -224,20 +224,20 @@ func (a *App) executeCommand(commandName string) string {
 		a.ShowAsynchronousMetricLog(a.fromTime, a.toTime, a.cluster)
 	case CmdLogs:
 		// Only apply CLI params when explicitly executing logs command
-		if cmd == CmdLogs && a.cli != nil {
+		if commandName == CmdLogs && a.CLI != nil {
 			a.logPanel = &LogPanel{
-				app:        a,
-				windowSize: 1000,
-				database:   a.cli.Database,
-				table:      a.cli.Table,
-				messageField: a.cli.Message,
-				timeField:    a.cli.Time,
-				timeMsField:  a.cli.TimeMs,
-				dateField:    a.cli.Date,
-				levelField:   a.cli.Level,
+				app:          a,
+				windowSize:   1000,
+				database:     a.CLI.Database,
+				table:        a.CLI.Table,
+				messageField: a.CLI.Message,
+				timeField:    a.CLI.Time,
+				timeMsField:  a.CLI.TimeMs,
+				dateField:    a.CLI.Date,
+				levelField:   a.CLI.Level,
 			}
-			if a.cli.Window > 0 {
-				a.logPanel.windowSize = a.cli.Window
+			if a.CLI.Window > 0 {
+				a.logPanel.windowSize = a.CLI.Window
 			}
 		} else if a.logPanel == nil {
 			// Initialize empty panel if not exists
