@@ -156,7 +156,7 @@ func (lp *LogPanel) createForm() *tview.Form {
 			lp.messageField = field
 		})
 	if lp.messageField != "" {
-		messageFieldDropdown.SetCurrentOption(-1).SetText(lp.messageField)
+		messageFieldDropdown.SetText(lp.messageField)
 	}
 	form.AddFormItem(messageFieldDropdown)
 
