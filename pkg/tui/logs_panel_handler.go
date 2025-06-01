@@ -99,8 +99,6 @@ func (a *App) ShowLogsPanel() {
 		func(table string, index int) {
 			lp.table = table
 			lp.updateFieldDropdowns(form)
-			// Set focus to message field dropdown after table selection
-			lp.SetFocusByLabel(form, "Message Field")
 		})
 
 	// Add buttons
