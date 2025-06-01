@@ -56,13 +56,6 @@ func (a *App) ShowLogsPanel() {
 		windowSize: 1000,
 	}
 
-	// Main flex layout
-	logsFlex := tview.NewFlex().SetDirection(tview.FlexRow)
-
-	// Database and table selection form
-	form := tview.NewForm()
-	form.SetBorder(true).SetTitle("Log Explorer")
-
 	// Query ClickHouse for available databases
 	rows, err := a.clickHouse.Query("SELECT name FROM system.databases")
 	if err != nil {
@@ -85,37 +78,67 @@ func (a *App) ShowLogsPanel() {
 		lp.databases = append(lp.databases, db)
 	}
 
-	// Database dropdown
-	form.AddDropDown("Database", lp.databases, 0,
-		func(db string, index int) {
-			lp.database = db
-			lp.updateTableDropdown(form)
-			// Set focus to table dropdown after database selection
-			lp.SetFocusByLabel(form, "Table")
-		})
+	// Create form with all fields
+	form := lp.createForm()
 
-	// Table dropdown (will be populated after database selection)
-	form.AddDropDown("Table", []string{}, 0,
-		func(table string, index int) {
-			lp.table = table
-			lp.updateColumnsDropdowns(form)
-		})
-
-	// Add buttons
-	form.AddButton("Explore Logs", func() {
-		lp.showLogExplorer()
-	})
-	form.AddButton("Cancel", func() {
-		a.SwitchToMainPage("Returned from :logs")
-	})
-
+	// Main flex layout
+	logsFlex := tview.NewFlex().SetDirection(tview.FlexRow)
 	logsFlex.AddItem(form, 0, 1, true)
+	
 	a.pages.AddPage("logs", logsFlex, true, true)
 	a.pages.SwitchToPage("logs")
-	form.GetFormItemByLabel("Database")
+}
+
+func (lp *LogPanel) createForm() *tview.Form {
+	form := tview.NewForm()
+	form.SetBorder(true).SetTitle("Log Explorer")
+
+	// Database dropdown
+	form.AddDropDown("Database", lp.databases, 0, func(db string, index int) {
+		lp.database = db
+		lp.updateTableDropdown(form)
+	})
+
+	// Table dropdown
+	form.AddDropDown("Table", []string{}, 0, func(table string, index int) {
+		lp.table = table
+		lp.updateFieldDropdowns(form)
+	})
+
+	// Field dropdowns
+	form.AddDropDown("Message Field", []string{}, 0, func(field string, index int) {
+		lp.messageField = field
+	})
+	form.AddDropDown("Time Field", []string{}, 0, func(field string, index int) {
+		lp.timeField = field
+	})
+	form.AddDropDown("TimeMs Field (optional)", []string{}, 0, func(field string, index int) {
+		lp.timeMsField = field
+	})
+	form.AddDropDown("Date Field (optional)", []string{}, 0, func(field string, index int) {
+		lp.dateField = field
+	})
+	form.AddDropDown("Level Field (optional)", []string{}, 0, func(field string, index int) {
+		lp.levelField = field
+	})
+
+	// Window size input
+	form.AddInputField("Window Size (rows)", fmt.Sprint(lp.windowSize), 10,
+		func(text string, lastRune rune) bool { return unicode.IsDigit(lastRune) },
+		func(text string) { lp.windowSize, _ = strconv.Atoi(text) })
+
+	// Buttons
+	form.AddButton("Explore Logs", func() { lp.showLogExplorer() })
+	form.AddButton("Cancel", func() { lp.app.SwitchToMainPage("Returned from :logs") })
+
+	return form
 }
 
 func (lp *LogPanel) updateTableDropdown(form *tview.Form) {
+	if lp.database == "" {
+		return
+	}
+
 	// Query ClickHouse for tables in selected database
 	query := fmt.Sprintf("SHOW TABLES FROM `%s`", lp.database)
 	rows, err := lp.app.clickHouse.Query(query)
@@ -134,24 +157,23 @@ func (lp *LogPanel) updateTableDropdown(form *tview.Form) {
 		var table string
 		if scanErr := rows.Scan(&table); scanErr != nil {
 			log.Error().Err(scanErr).Msg("can't scan tables in updateTableDropdown")
+			continue
 		}
 		lp.tables = append(lp.tables, table)
 	}
 
-	// Safely update the table dropdown
+	// Update the table dropdown
 	if tableItem := form.GetFormItemByLabel("Table"); tableItem != nil {
 		if tableDropdown, ok := tableItem.(*tview.DropDown); ok {
 			tableDropdown.SetOptions(lp.tables, func(table string, index int) {
 				lp.table = table
-				lp.updateColumnsDropdowns(form)
-				// Set focus to message field dropdown after table selection
-				lp.SetFocusByLabel(form, "Message Field")
+				lp.updateFieldDropdowns(form)
 			})
 		}
 	}
 }
 
-func (lp *LogPanel) updateColumnsDropdowns(form *tview.Form) {
+func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 	if lp.database == "" || lp.table == "" {
 		return
 	}
@@ -173,7 +195,7 @@ func (lp *LogPanel) updateColumnsDropdowns(form *tview.Form) {
 	for rows.Next() {
 		var fieldName, fieldType string
 		if scanErr := rows.Scan(&fieldName, &fieldType); scanErr != nil {
-			log.Error().Err(scanErr).Msg("can't scan columns in updateColumnsDropdowns")
+			log.Error().Err(scanErr).Msg("can't scan columns in updateFieldDropdowns")
 			continue
 		}
 		if !strings.Contains(fieldType, "Date") && !strings.Contains(fieldType, "Array") && !strings.Contains(fieldType, "Tuple") && !strings.Contains(fieldType, "Map") {
@@ -190,94 +212,20 @@ func (lp *LogPanel) updateColumnsDropdowns(form *tview.Form) {
 		}
 	}
 
-	// Store current selections and focused item index
-	currentDB := lp.database
-	currentTable := lp.table
-	currentMsgField := lp.messageField
-	currentTimeField := lp.timeField
-	currentTimeMsField := lp.timeMsField
-	currentDateField := lp.dateField
-	currentLevelField := lp.levelField
+	// Update field dropdowns
+	lp.updateDropdownOptions(form, "Message Field", columns)
+	lp.updateDropdownOptions(form, "Time Field", timeColumns)
+	lp.updateDropdownOptions(form, "TimeMs Field (optional)", timeMsColumns)
+	lp.updateDropdownOptions(form, "Date Field (optional)", dateColumns)
+	lp.updateDropdownOptions(form, "Level Field (optional)", columns)
+}
 
-	// Get current focus index before clearing
-	currentFocusIndex, _ := form.GetFocusedItemIndex()
-
-	// Use QueueUpdateDraw to ensure proper focus handling
-	lp.app.tviewApp.QueueUpdateDraw(func() {
-		form.Clear(true)
-
-		// Add dropdowns with current selections
-		dbIdx := slices.Index(lp.databases, currentDB)
-		if dbIdx == -1 {
-			dbIdx = 0
+func (lp *LogPanel) updateDropdownOptions(form *tview.Form, label string, options []string) {
+	if item := form.GetFormItemByLabel(label); item != nil {
+		if dropdown, ok := item.(*tview.DropDown); ok {
+			dropdown.SetOptions(options, nil)
 		}
-		form.AddDropDown("Database", lp.databases, dbIdx,
-			func(db string, index int) {
-				if db != lp.database { // Only update if changed
-					lp.database = db
-					lp.updateTableDropdown(form)
-				}
-			})
-
-		tableIdx := slices.Index(lp.tables, currentTable)
-		if tableIdx == -1 {
-			tableIdx = 0
-		}
-		form.AddDropDown("Table", lp.tables, tableIdx,
-			func(table string, index int) {
-				lp.table = table
-			})
-
-		msgIdx := slices.Index(columns, currentMsgField)
-		if msgIdx == -1 {
-			msgIdx = 0
-		}
-		form.AddDropDown("Message Field", columns, msgIdx,
-			func(field string, index int) { lp.messageField = field })
-
-		timeIdx := slices.Index(timeColumns, currentTimeField)
-		if timeIdx == -1 {
-			timeIdx = 0
-		}
-		form.AddDropDown("Time Field", timeColumns, timeIdx,
-			func(field string, index int) { lp.timeField = field })
-
-		timeMsIdx := slices.Index(timeMsColumns, currentTimeMsField)
-		if timeMsIdx == -1 {
-			timeMsIdx = 0
-		}
-		form.AddDropDown("TimeMs Field (optional)", timeMsColumns, timeMsIdx,
-			func(field string, index int) { lp.timeMsField = field })
-
-		dateIdx := slices.Index(dateColumns, currentDateField)
-		if dateIdx == -1 {
-			dateIdx = 0
-		}
-		form.AddDropDown("Date Field (optional)", dateColumns, dateIdx,
-			func(field string, index int) { lp.dateField = field })
-
-		levelIdx := slices.Index(columns, currentLevelField)
-		if levelIdx == -1 {
-			levelIdx = 0
-		}
-		form.AddDropDown("Level Field (optional)", columns, levelIdx,
-			func(field string, index int) { lp.levelField = field })
-
-		form.AddInputField("Window Size (rows)", fmt.Sprint(lp.windowSize), 10,
-			func(text string, lastRune rune) bool { return unicode.IsDigit(lastRune) },
-			func(text string) { lp.windowSize, _ = strconv.Atoi(text) })
-
-		form.AddButton("Explore Logs", func() { lp.showLogExplorer() })
-		form.AddButton("Cancel", func() { lp.app.SwitchToMainPage("Returned from :logs") })
-
-		// Restore focus to the same position or move to next logical field
-		if currentFocusIndex >= 0 && currentFocusIndex < form.GetFormItemCount() {
-			form.SetFocus(currentFocusIndex)
-		} else {
-			// Default to Message Field if we can't restore previous focus
-			lp.SetFocusByLabel(form, "Message Field")
-		}
-	})
+	}
 }
 
 func (lp *LogPanel) showLogExplorer() {
@@ -802,11 +750,3 @@ func ternary(condition bool, trueVal, falseVal string) string {
 	return falseVal
 }
 
-func (lp *LogPanel) SetFocusByLabel(form *tview.Form, label string) {
-	for i := 0; i < form.GetFormItemCount(); i++ {
-		if form.GetFormItem(i).GetLabel() == label {
-			form.SetFocus(i)
-			return
-		}
-	}
-}
