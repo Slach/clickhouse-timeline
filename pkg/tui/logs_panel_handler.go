@@ -3,6 +3,7 @@ package tui
 import (
 	"database/sql"
 	"fmt"
+	"github.com/Slach/clickhouse-timeline/pkg/types"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rs/zerolog/log"
 	"strconv"
@@ -179,7 +180,7 @@ func (lp *LogPanel) createForm() *tview.Form {
 	form.AddInputField("Window Size (rows)", fmt.Sprint(lp.windowSize), 10,
 		func(text string, lastRune rune) bool { return unicode.IsDigit(lastRune) },
 		func(text string) { lp.windowSize, _ = strconv.Atoi(text) })
-	
+
 	// If all required fields are set via CLI, auto-submit the form
 	if lp.database != "" && lp.table != "" && lp.messageField != "" && lp.timeField != "" {
 		go func() {
