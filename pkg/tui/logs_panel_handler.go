@@ -31,6 +31,7 @@ type LogPanel struct {
 	overview       *tview.TextView
 	databases      []string
 	tables         []string
+	cliParams      *types.CLI
 }
 
 type LogFilter struct {
@@ -55,6 +56,35 @@ func (a *App) ShowLogsPanel() {
 	lp := &LogPanel{
 		app:        a,
 		windowSize: 1000,
+		cliParams:  a.cli,
+	}
+
+	// Apply CLI params if available
+	if a.cli != nil {
+		if a.cli.Database != "" {
+			lp.database = a.cli.Database
+		}
+		if a.cli.Table != "" {
+			lp.table = a.cli.Table
+		}
+		if a.cli.Message != "" {
+			lp.messageField = a.cli.Message
+		}
+		if a.cli.Time != "" {
+			lp.timeField = a.cli.Time
+		}
+		if a.cli.TimeMs != "" {
+			lp.timeMsField = a.cli.TimeMs
+		}
+		if a.cli.Date != "" {
+			lp.dateField = a.cli.Date
+		}
+		if a.cli.Level != "" {
+			lp.levelField = a.cli.Level
+		}
+		if a.cli.Window > 0 {
+			lp.windowSize = a.cli.Window
+		}
 	}
 
 	// Query ClickHouse for available databases
@@ -94,39 +124,71 @@ func (lp *LogPanel) createForm() *tview.Form {
 	form := tview.NewForm()
 	form.SetBorder(true).SetTitle("Log Explorer")
 
-	// Database dropdown
-	form.AddDropDown("Database", lp.databases, 0, func(db string, index int) {
+	// Database dropdown - preselect if CLI param exists
+	dbIndex := 0
+	if lp.database != "" {
+		for i, db := range lp.databases {
+			if db == lp.database {
+				dbIndex = i
+				break
+			}
+		}
+	}
+	form.AddDropDown("Database", lp.databases, dbIndex, func(db string, index int) {
 		lp.database = db
 		lp.updateTableDropdown(form)
 	})
 
-	// Table dropdown
-	form.AddDropDown("Table", []string{}, 0, func(table string, index int) {
+	// Table dropdown - preselect if CLI param exists
+	tableIndex := 0
+	if lp.table != "" {
+		for i, table := range lp.tables {
+			if table == lp.table {
+				tableIndex = i
+				break
+			}
+		}
+	}
+	form.AddDropDown("Table", []string{}, tableIndex, func(table string, index int) {
 		lp.table = table
 		lp.updateFieldDropdowns(form)
 	})
 
-	// Field dropdowns
+	// Field dropdowns - preselect if CLI params exist
 	form.AddDropDown("Message Field", []string{}, 0, func(field string, index int) {
 		lp.messageField = field
-	})
+	}).SetText(lp.messageField)
+
 	form.AddDropDown("Time Field", []string{}, 0, func(field string, index int) {
 		lp.timeField = field
-	})
+	}).SetText(lp.timeField)
+
 	form.AddDropDown("TimeMs Field (optional)", []string{}, 0, func(field string, index int) {
 		lp.timeMsField = field
-	})
+	}).SetText(lp.timeMsField)
+
 	form.AddDropDown("Date Field (optional)", []string{}, 0, func(field string, index int) {
 		lp.dateField = field
-	})
+	}).SetText(lp.dateField)
+
 	form.AddDropDown("Level Field (optional)", []string{}, 0, func(field string, index int) {
 		lp.levelField = field
-	})
+	}).SetText(lp.levelField)
 
-	// Window size input
+	// Window size input - use CLI param if available
 	form.AddInputField("Window Size (rows)", fmt.Sprint(lp.windowSize), 10,
 		func(text string, lastRune rune) bool { return unicode.IsDigit(lastRune) },
 		func(text string) { lp.windowSize, _ = strconv.Atoi(text) })
+	
+	// If all required fields are set via CLI, auto-submit the form
+	if lp.database != "" && lp.table != "" && lp.messageField != "" && lp.timeField != "" {
+		go func() {
+			time.Sleep(500 * time.Millisecond) // Small delay to let UI render
+			lp.app.tviewApp.QueueUpdateDraw(func() {
+				lp.showLogExplorer()
+			})
+		}()
+	}
 
 	// Buttons
 	form.AddButton("Explore Logs", func() { lp.showLogExplorer() })
