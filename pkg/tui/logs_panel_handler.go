@@ -630,24 +630,22 @@ func (lp *LogPanel) processRows(rows *sql.Rows) ([]LogEntry, error) {
 		var entry LogEntry
 		// Initialize scan args based on column types
 		for i, col := range colTypes {
-			switch col.DatabaseTypeName() {
-			case "DateTime", "DateTime64":
+			fieldName := col.Name()
+			fieldType := col.DatabaseTypeName()
+			
+			// Check if this is a time-related field
+			if fieldName == lp.timeField && (fieldType == "DateTime" || fieldType == "Nullable(DateTime)" || strings.HasPrefix(fieldType, "DateTime(") || strings.HasPrefix(fieldType, "Nullable(DateTime(")) {
 				scanArgs[i] = &entry.Time
-			case "UInt64", "Int64":
+			} else if fieldName == lp.timeMsField && (fieldType == "DateTime64" || strings.HasPrefix(fieldType, "DateTime64(")) {
 				scanArgs[i] = &entry.TimeMs
-			case "String", "Enum":
-				switch col.Name() {
-				case lp.messageField:
-					scanArgs[i] = &entry.Message
-				case lp.levelField:
-					scanArgs[i] = &entry.Level
-				case lp.dateField:
-					scanArgs[i] = &entry.Date
-				default:
-					var dummy string
-					scanArgs[i] = &dummy
-				}
-			default:
+			} else if fieldName == lp.dateField && (fieldType == "Date" || fieldType == "Date32" || strings.HasPrefix(fieldType, "Date(") || strings.HasPrefix(fieldType, "Date32(") || strings.HasPrefix(fieldType, "Nullable(Date)") || strings.HasPrefix(fieldType, "Nullable(Date(") || strings.HasPrefix(fieldType, "Nullable(Date32")) {
+				scanArgs[i] = &entry.Date
+			} else if fieldName == lp.messageField {
+				scanArgs[i] = &entry.Message
+			} else if fieldName == lp.levelField {
+				scanArgs[i] = &entry.Level
+			} else {
+				// For any other field, use a dummy variable
 				var dummy interface{}
 				scanArgs[i] = &dummy
 			}
