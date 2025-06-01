@@ -67,7 +67,7 @@ func (a *App) ShowLogsPanel() {
 		}
 	}()
 
-	lp.databases = []string{}
+	lp.databases = []string{""}
 	for rows.Next() {
 		var db string
 		if scanErr := rows.Scan(&db); scanErr != nil {
@@ -151,7 +151,7 @@ func (lp *LogPanel) updateTableDropdown(form *tview.Form) {
 		}
 	}()
 
-	lp.tables = []string{}
+	lp.tables = []string{""}
 	for rows.Next() {
 		var table string
 		if scanErr := rows.Scan(&table); scanErr != nil {
