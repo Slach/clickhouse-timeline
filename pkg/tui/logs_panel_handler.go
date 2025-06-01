@@ -666,8 +666,11 @@ func (lp *LogPanel) buildQuery(whereClause, orderBy string) string {
 }
 
 func (lp *LogPanel) streamRowsToTable(rows *sql.Rows, clearFirst bool) {
-	// Batch size for updates - tune this based on performance
-	const batchSize = 100
+	// Calculate dynamic batch size based on windowSize
+	batchSize := lp.windowSize / 10
+	if batchSize < 100 {
+		batchSize = 100 // Minimum batch size
+	}
 
 	lp.app.tviewApp.QueueUpdateDraw(func() {
 		if clearFirst {
