@@ -171,13 +171,13 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 			log.Error().Err(scanErr).Msg("can't scan columns in updateFieldDropdowns")
 			continue
 		}
-		if !strings.Contains(fieldType, "Date") && !strings.Contains(fieldType, "Array") && !strings.Contains(fieldType, "Tuple") {
+		if !strings.Contains(fieldType, "Date") && !strings.Contains(fieldType, "Array") && !strings.Contains(fieldType, "Tuple") && !strings.Contains(fieldType, "Map") {
 			columns = append(columns, fieldName)
 		}
-		if fieldType == "Date" || fieldType == "Date32" || strings.HasPrefix(fieldType, "Date(") || strings.HasPrefix(fieldType, "Date32(") {
+		if fieldType == "Date" || fieldType == "Date32" || strings.HasPrefix(fieldType, "Date(") || strings.HasPrefix(fieldType, "Date32(") || strings.HasPrefix(fieldType, "Nullable(Date)") || strings.HasPrefix(fieldType, "Nullable(Date(") || strings.HasPrefix(fieldType, "Nullable(Date32") {
 			dateColumns = append(dateColumns, fieldName)
 		}
-		if fieldType == "DateTime" || strings.HasPrefix(fieldType, "DateTime(") {
+		if fieldType == "DateTime" || fieldType == "Nullable(DateTime)" || strings.HasPrefix(fieldType, "DateTime(") || strings.HasPrefix(fieldType, "Nullable(DateTime(") {
 			timeColumns = append(timeColumns, fieldName)
 		}
 		if fieldType == "DateTime64" || strings.HasPrefix(fieldType, "DateTime64(") {
@@ -404,7 +404,7 @@ func (lp *LogPanel) loadLogs() {
 				scanArgs[i] = &entry.Time
 			case "UInt64", "Int64":
 				scanArgs[i] = &entry.TimeMs
-			case "String":
+			case "String", "Enum":
 				switch col.Name() {
 				case lp.messageField:
 					scanArgs[i] = &entry.Message
