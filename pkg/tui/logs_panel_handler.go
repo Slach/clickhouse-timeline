@@ -31,6 +31,7 @@ type LogPanel struct {
 	logDetails     *tview.Table
 	overview       *tview.TextView
 	filterPanel    *tview.Flex
+	mainFlex       *tview.Flex // Reference to the main flex container for resizing
 	databases      []string
 	tables         []string
 	allFields      []string // Stores all field names from current table
@@ -339,7 +340,8 @@ func (lp *LogPanel) updateDropdownOptions(form *tview.Form, label string, option
 
 func (lp *LogPanel) showLogExplorer() {
 	// Create main layout with 3 panels
-	mainFlex := tview.NewFlex().SetDirection(tview.FlexRow)
+	// Store mainFlex in LogPanel struct for later access (e.g., resizing children)
+	lp.mainFlex = tview.NewFlex().SetDirection(tview.FlexRow)
 
 	// 1. AdHoc Filter Panel (1 line height)
 	lp.filterPanel = tview.NewFlex().SetDirection(tview.FlexRow)
@@ -380,14 +382,17 @@ func (lp *LogPanel) showLogExplorer() {
 
 	// Ensure filterFlex (input row) is 1 row high, and does not take proportional space.
 	lp.filterPanel.AddItem(filterFlex, 1, 0, true)
-	lp.updateFilterDisplay(lp.filterPanel)
-	// Increase fixed height of the filter panel from 3 to 5 rows.
-	mainFlex.AddItem(lp.filterPanel, 5, 1, true)
+	lp.updateFilterDisplay(lp.filterPanel) // Populates filters, but doesn't resize in mainFlex yet
+
+	// Add filterPanel to mainFlex. Height = 1 (input row) + num_filters + 2 (panel border).
+	// Proportion is 1, consistent with other elements.
+	initialFilterPanelHeight := 1 + len(lp.filters) + 2
+	lp.mainFlex.AddItem(lp.filterPanel, initialFilterPanelHeight, 1, true)
 
 	// 2. Overview Panel (20% height)
 	lp.overview = tview.NewTextView().SetDynamicColors(true)
 	lp.overview.SetBorder(true).SetTitle("Overview")
-	mainFlex.AddItem(lp.overview, 3, 1, false)
+	lp.mainFlex.AddItem(lp.overview, 3, 1, false)
 
 	// 3. Log Details Panel (60% height)
 	lp.logDetails = tview.NewTable().
@@ -415,12 +420,12 @@ func (lp *LogPanel) showLogExplorer() {
 		return event
 	})
 
-	mainFlex.AddItem(lp.logDetails, 0, 1, true)
+	lp.mainFlex.AddItem(lp.logDetails, 0, 1, true)
 
 	// Execute initial query
 	go lp.loadLogs()
 
-	lp.app.pages.AddPage("logExplorer", mainFlex, true, true)
+	lp.app.pages.AddPage("logExplorer", lp.mainFlex, true, true)
 	lp.app.pages.SwitchToPage("logExplorer")
 }
 
@@ -464,9 +469,10 @@ func (lp *LogPanel) getAvailableFilterFields() []string {
 }
 
 func (lp *LogPanel) updateFilterDisplay(panel *tview.Flex) {
-	// Clear existing filter displays
-	for i := 1; i < panel.GetItemCount(); i++ {
-		panel.RemoveItem(panel.GetItem(i))
+	// Clear existing filter displays (buttons), keeping the first item (filterFlex)
+	// The first item (index 0) is filterFlex, which should not be removed.
+	for panel.GetItemCount() > 1 {
+		panel.RemoveItem(panel.GetItem(1)) // Repeatedly remove the item at index 1
 	}
 
 	// Add current filters
@@ -488,6 +494,16 @@ func (lp *LogPanel) updateFilterDisplay(panel *tview.Flex) {
 			SetActivatedStyle(tcell.StyleDefault.Background(tcell.ColorRed))
 		// Ensure filterBtn is 1 row high, and does not take proportional space.
 		panel.AddItem(filterBtn, 1, 0, true)
+	}
+
+	// Dynamically adjust the height of the filterPanel in mainFlex
+	// Height = 1 (for filterFlex row) + number of filters + 2 (for filterPanel's border)
+	newHeight := 1 + len(lp.filters) + 2
+	if lp.mainFlex != nil && lp.filterPanel != nil {
+		lp.app.tviewApp.QueueUpdateDraw(func() {
+			// Use proportion 1, consistent with how it was added initially and with other items.
+			lp.mainFlex.ResizeItem(lp.filterPanel, newHeight, 1)
+		})
 	}
 }
 
