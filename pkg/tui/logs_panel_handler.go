@@ -419,6 +419,8 @@ func (lp *LogPanel) loadLogs() {
 		return
 	}
 
+	lp.overview.SetText(fmt.Sprintf("Loading %d log rows", lp.windowSize))
+
 	// Build WHERE clause with filters
 	timeCondition := fmt.Sprintf("%s >= ?", lp.timeField)
 	whereClause, queryArgs := lp.buildWhereClause(timeCondition, []interface{}{lp.app.fromTime})
