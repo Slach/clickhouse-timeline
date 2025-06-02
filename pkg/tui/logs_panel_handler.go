@@ -482,7 +482,7 @@ func (lp *LogPanel) updateFilterDisplay(panel *tview.Flex) {
 				lp.updateFilterDisplay(panel)
 				go lp.loadLogs()
 			}).
-			SetStyle(tcell.StyleDefault.Background(tcell.ColorDarkBlue).
+			SetStyle(tcell.StyleDefault.Background(tcell.ColorDarkBlue)).
 			SetStyleActivated(tcell.StyleDefault.Background(tcell.ColorRed))
 		panel.AddItem(filterBtn, 0, 1, false)
 	}
