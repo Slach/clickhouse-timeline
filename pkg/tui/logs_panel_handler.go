@@ -483,7 +483,7 @@ func (lp *LogPanel) updateFilterDisplay(panel *tview.Flex) {
 				go lp.loadLogs()
 			}).
 			SetStyle(tcell.StyleDefault.Background(tcell.ColorDarkBlue)).
-			SetStyleActivated(tcell.StyleDefault.Background(tcell.ColorRed))
+			SetActivatedStyle(tcell.StyleDefault.Background(tcell.ColorRed))
 		panel.AddItem(filterBtn, 0, 1, false)
 	}
 }
