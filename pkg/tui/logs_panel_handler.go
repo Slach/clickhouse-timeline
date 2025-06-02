@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rs/zerolog/log"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -45,6 +46,7 @@ type LogEntry struct {
 	Date    string
 	Level   string
 	Message string
+	AllFields map[string]interface{} // Stores all fields not in the main display
 }
 
 func (lp *LogPanel) Show() {
@@ -685,8 +687,10 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 		SetWordWrap(true)
 	headerText.SetBorder(true).SetTitle("Log Entry Info")
 
-	// Build header content
+	// Build header content with all fields
 	var headerBuilder strings.Builder
+	
+	// First show the standard fields
 	if !entry.Time.IsZero() {
 		headerBuilder.WriteString(fmt.Sprintf("[yellow]%s:[-] %s\n", lp.timeField, entry.Time.Format("2006-01-02 15:04:05 MST")))
 	}
@@ -707,6 +711,38 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 			levelColor = "[green]"
 		}
 		headerBuilder.WriteString(fmt.Sprintf("[yellow]%s:[-] %s%s[-]\n", lp.levelField, levelColor, entry.Level))
+	}
+
+	// Then show all other fields
+	if len(entry.AllFields) > 0 {
+		headerBuilder.WriteString("\n[::b]Additional Fields::-]\n")
+		
+		// Sort field names for consistent display
+		fields := make([]string, 0, len(entry.AllFields))
+		for field := range entry.AllFields {
+			fields = append(fields, field)
+		}
+		sort.Strings(fields)
+
+		for _, field := range fields {
+			value := entry.AllFields[field]
+			var valueStr string
+			
+			// Handle different ClickHouse types
+			switch v := value.(type) {
+			case []byte:
+				// Handle JSON, Array, Tuple, Map etc.
+				valueStr = string(v)
+			case time.Time:
+				valueStr = v.Format(time.RFC3339)
+			case nil:
+				valueStr = "NULL"
+			default:
+				valueStr = fmt.Sprintf("%v", v)
+			}
+
+			headerBuilder.WriteString(fmt.Sprintf("[yellow]%s:[-] %s\n", field, valueStr))
+		}
 	}
 	headerText.SetText(headerBuilder.String())
 
@@ -795,12 +831,11 @@ func (lp *LogPanel) buildWhereClause(timeCondition string, args []interface{}) (
 
 func (lp *LogPanel) buildQuery(whereClause, orderBy string) string {
 	return fmt.Sprintf(`
-		SELECT %s
+		SELECT *
 		FROM `+"`%s`.`%s`"+`
 		WHERE %s
 		ORDER BY %s
 		LIMIT ?`,
-		strings.Join(lp.getSelectedFields(), ", "),
 		lp.database,
 		lp.table,
 		whereClause,
@@ -835,7 +870,9 @@ func (lp *LogPanel) streamRowsToTable(rows *sql.Rows, clearFirst bool) {
 	for rows.Next() {
 		var entry LogEntry
 
-		// Initialize scan args
+		// Initialize scan args and field storage
+		entry.AllFields = make(map[string]interface{})
+		fieldValues := make([]interface{}, len(colTypes))
 		for i, col := range colTypes {
 			fieldName := col.Name()
 			switch fieldName {
@@ -850,14 +887,30 @@ func (lp *LogPanel) streamRowsToTable(rows *sql.Rows, clearFirst bool) {
 			case lp.levelField:
 				scanArgs[i] = &entry.Level
 			default:
-				var dummy interface{}
-				scanArgs[i] = &dummy
+				// Store all other fields in AllFields map
+				var val interface{}
+				fieldValues[i] = &val
+				scanArgs[i] = fieldValues[i]
 			}
 		}
 
 		if err := rows.Scan(scanArgs...); err != nil {
 			log.Error().Err(err).Send()
 			continue
+		}
+
+		// Store all additional fields
+		for i, col := range colTypes {
+			fieldName := col.Name()
+			switch fieldName {
+			case lp.timeField, lp.timeMsField, lp.dateField, lp.messageField, lp.levelField:
+				// Skip fields we already handle specially
+			default:
+				if fieldValues[i] != nil {
+					val := *fieldValues[i].(*interface{})
+					entry.AllFields[fieldName] = val
+				}
+			}
 		}
 
 		// Track time bounds for pagination
