@@ -378,9 +378,11 @@ func (lp *LogPanel) showLogExplorer() {
 		AddItem(filterValue, 0, 1, true).
 		AddItem(addFilterBtn, 10, 1, true)
 
-	lp.filterPanel.AddItem(filterFlex, 1, 1, true)
+	// Ensure filterFlex (input row) is 1 row high, and does not take proportional space.
+	lp.filterPanel.AddItem(filterFlex, 1, 0, true)
 	lp.updateFilterDisplay(lp.filterPanel)
-	mainFlex.AddItem(lp.filterPanel, 3, 1, true)
+	// Increase fixed height of the filter panel from 3 to 5 rows.
+	mainFlex.AddItem(lp.filterPanel, 5, 1, true)
 
 	// 2. Overview Panel (20% height)
 	lp.overview = tview.NewTextView().SetDynamicColors(true)
@@ -484,7 +486,8 @@ func (lp *LogPanel) updateFilterDisplay(panel *tview.Flex) {
 			}).
 			SetStyle(tcell.StyleDefault.Background(tcell.ColorDarkBlue)).
 			SetActivatedStyle(tcell.StyleDefault.Background(tcell.ColorRed))
-		panel.AddItem(filterBtn, len(filterText), 1, true)
+		// Ensure filterBtn is 1 row high, and does not take proportional space.
+		panel.AddItem(filterBtn, 1, 0, true)
 	}
 }
 
