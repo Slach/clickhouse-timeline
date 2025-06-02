@@ -380,7 +380,7 @@ func (lp *LogPanel) showLogExplorer() {
 
 	lp.filterPanel.AddItem(filterFlex, 1, 1, true)
 	lp.updateFilterDisplay(lp.filterPanel)
-	mainFlex.AddItem(lp.filterPanel, 1, 1, true)
+	mainFlex.AddItem(lp.filterPanel, 3, 1, true)
 
 	// 2. Overview Panel (20% height)
 	lp.overview = tview.NewTextView().SetDynamicColors(true)
