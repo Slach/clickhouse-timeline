@@ -32,6 +32,7 @@ type LogPanel struct {
 	overview       *tview.TextView
 	databases      []string
 	tables         []string
+	allFields      []string // Stores all field names from current table
 }
 
 type LogFilter struct {
@@ -259,12 +260,16 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 	}()
 
 	var columns, timeMsColumns, timeColumns, dateColumns []string
+	lp.allFields = []string{} // Reset stored fields
 	for rows.Next() {
 		var fieldName, fieldType string
 		if scanErr := rows.Scan(&fieldName, &fieldType); scanErr != nil {
 			log.Error().Err(scanErr).Msg("can't scan columns in updateFieldDropdowns")
 			continue
 		}
+		// Store all field names
+		lp.allFields = append(lp.allFields, fieldName)
+		
 		if !strings.Contains(fieldType, "Date") && !strings.Contains(fieldType, "Array") && !strings.Contains(fieldType, "Tuple") && !strings.Contains(fieldType, "Map") {
 			columns = append(columns, fieldName)
 		}
@@ -447,30 +452,12 @@ func (lp *LogPanel) loadLogs() {
 }
 
 func (lp *LogPanel) getAvailableFilterFields() []string {
-	// Query ClickHouse for columns in selected table
-	query := fmt.Sprintf("SELECT name FROM system.columns WHERE database='%s' AND table='%s'", lp.database, lp.table)
-	rows, err := lp.app.clickHouse.Query(query)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to get available filter fields")
-		return []string{lp.messageField, lp.timeField} // Fallback to basic fields
+	// Return stored fields if we have them
+	if len(lp.allFields) > 0 {
+		return lp.allFields
 	}
-	defer rows.Close()
-
-	var fields []string
-	for rows.Next() {
-		var fieldName string
-		if err := rows.Scan(&fieldName); err != nil {
-			log.Error().Err(err).Msg("Failed to scan column name")
-			continue
-		}
-		fields = append(fields, fieldName)
-	}
-
-	// Ensure we always have at least the basic fields
-	if len(fields) == 0 {
-		fields = []string{lp.messageField, lp.timeField}
-	}
-	return fields
+	// Fallback to basic fields if no fields stored yet
+	return []string{lp.messageField, lp.timeField}
 }
 
 func (lp *LogPanel) updateFilterDisplay(panel *tview.Flex) {
