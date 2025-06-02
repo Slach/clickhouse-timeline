@@ -447,15 +447,28 @@ func (lp *LogPanel) loadLogs() {
 }
 
 func (lp *LogPanel) getAvailableFilterFields() []string {
-	fields := []string{lp.messageField, lp.timeField}
-	if lp.timeMsField != "" {
-		fields = append(fields, lp.timeMsField)
+	// Query ClickHouse for columns in selected table
+	query := fmt.Sprintf("SELECT name FROM system.columns WHERE database='%s' AND table='%s'", lp.database, lp.table)
+	rows, err := lp.app.clickHouse.Query(query)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to get available filter fields")
+		return []string{lp.messageField, lp.timeField} // Fallback to basic fields
 	}
-	if lp.dateField != "" {
-		fields = append(fields, lp.dateField)
+	defer rows.Close()
+
+	var fields []string
+	for rows.Next() {
+		var fieldName string
+		if err := rows.Scan(&fieldName); err != nil {
+			log.Error().Err(err).Msg("Failed to scan column name")
+			continue
+		}
+		fields = append(fields, fieldName)
 	}
-	if lp.levelField != "" {
-		fields = append(fields, lp.levelField)
+
+	// Ensure we always have at least the basic fields
+	if len(fields) == 0 {
+		fields = []string{lp.messageField, lp.timeField}
 	}
 	return fields
 }
