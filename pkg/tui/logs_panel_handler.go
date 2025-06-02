@@ -30,6 +30,7 @@ type LogPanel struct {
 	totalRows      int
 	logDetails     *tview.Table
 	overview       *tview.TextView
+	filterPanel    *tview.Flex
 	databases      []string
 	tables         []string
 	allFields      []string // Stores all field names from current table
@@ -340,9 +341,9 @@ func (lp *LogPanel) showLogExplorer() {
 	// Create main layout with 3 panels
 	mainFlex := tview.NewFlex().SetDirection(tview.FlexRow)
 
-	// 1. AdHoc Filter Panel (20% height)
-	filterPanel := tview.NewFlex().SetDirection(tview.FlexRow)
-	filterPanel.SetBorder(true).SetTitle("Filters")
+	// 1. AdHoc Filter Panel (1 line height)
+	lp.filterPanel = tview.NewFlex().SetDirection(tview.FlexRow)
+	lp.filterPanel.SetBorder(true).SetTitle("Filters")
 
 	// Filter input components
 	filterField := tview.NewDropDown().
@@ -366,7 +367,7 @@ func (lp *LogPanel) showLogExplorer() {
 					Operator: op,
 					Value:    value,
 				})
-				lp.updateFilterDisplay(filterPanel)
+				lp.updateFilterDisplay(lp.filterPanel)
 				go lp.loadLogs()
 			}
 		})
@@ -375,11 +376,11 @@ func (lp *LogPanel) showLogExplorer() {
 		AddItem(filterField, 0, 1, false).
 		AddItem(filterOp, 0, 1, false).
 		AddItem(filterValue, 0, 1, false).
-		AddItem(addFilterBtn, 10, 1, false)
+		AddItem(addFilterBtn, 0, 1, false) // No fixed width
 
-	filterPanel.AddItem(filterFlex, 1, 1, false)
-	lp.updateFilterDisplay(filterPanel)
-	mainFlex.AddItem(filterPanel, 3, 1, false)
+	lp.filterPanel.AddItem(filterFlex, 1, 1, false)
+	lp.updateFilterDisplay(lp.filterPanel)
+	mainFlex.AddItem(lp.filterPanel, 1, 1, false) // Only 1 line height
 
 	// 2. Overview Panel (20% height)
 	lp.overview = tview.NewTextView().SetDynamicColors(true)
