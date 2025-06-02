@@ -41,11 +41,11 @@ type LogFilter struct {
 }
 
 type LogEntry struct {
-	Time    time.Time
-	TimeMs  time.Time
-	Date    string
-	Level   string
-	Message string
+	Time      time.Time
+	TimeMs    time.Time
+	Date      string
+	Level     string
+	Message   string
 	AllFields map[string]interface{} // Stores all fields not in the main display
 }
 
@@ -684,7 +684,7 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 
 	// Build header content with all fields
 	var headerBuilder strings.Builder
-	
+
 	// First show the standard fields
 	if !entry.Time.IsZero() {
 		headerBuilder.WriteString(fmt.Sprintf("[yellow]%s:[-] %s\n", lp.timeField, entry.Time.Format("2006-01-02 15:04:05 MST")))
@@ -710,8 +710,8 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 
 	// Then show all other fields
 	if len(entry.AllFields) > 0 {
-		headerBuilder.WriteString("\n[::b]Additional Fields::-]\n")
-		
+		headerBuilder.WriteString("\n[green]Additional Fields[-]\n")
+
 		// Sort field names for consistent display
 		fields := make([]string, 0, len(entry.AllFields))
 		for field := range entry.AllFields {
@@ -722,14 +722,14 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 		for _, field := range fields {
 			value := entry.AllFields[field]
 			var valueStr string
-			
+
 			// Handle different ClickHouse types
 			switch v := value.(type) {
 			case []byte:
 				// Handle JSON, Array, Tuple, Map etc.
 				valueStr = string(v)
 			case time.Time:
-				valueStr = v.Format(time.RFC3339)
+				valueStr = v.Format("2006-01-02 15:04:05.000 MST")
 			case nil:
 				valueStr = "NULL"
 			default:
@@ -959,7 +959,7 @@ func (lp *LogPanel) processBatch(batch []LogEntry, startRow int) {
 			timeCell := tview.NewTableCell(timeStr)
 			timeCell.SetReference(entry)
 			lp.logDetails.SetCell(row, 0, timeCell)
-			
+
 			messageCell := tview.NewTableCell(entry.Message)
 
 			// Color by level
