@@ -355,7 +355,7 @@ func (lp *LogPanel) showLogExplorer() {
 	filterValue := tview.NewInputField().
 		SetLabel("Value: ")
 
-	addFilterBtn := tview.NewButton("Add Filter").
+	addFilterBtn := tview.NewButton("+ Add").
 		SetSelectedFunc(func() {
 			_, field := filterField.GetCurrentOption()
 			_, op := filterOp.GetCurrentOption()
@@ -376,11 +376,11 @@ func (lp *LogPanel) showLogExplorer() {
 		AddItem(filterField, 0, 1, true).
 		AddItem(filterOp, 0, 1, true).
 		AddItem(filterValue, 0, 1, true).
-		AddItem(addFilterBtn, 10, 1, true)
+		AddItem(addFilterBtn, 8, 1, true) // Reduced button width
 
 	lp.filterPanel.AddItem(filterFlex, 1, 1, true)
 	lp.updateFilterDisplay(lp.filterPanel)
-	mainFlex.AddItem(lp.filterPanel, 3, 1, true)
+	mainFlex.AddItem(lp.filterPanel, 4, 1, true) // Increased height slightly
 
 	// 2. Overview Panel (20% height)
 	lp.overview = tview.NewTextView().SetDynamicColors(true)
