@@ -380,7 +380,7 @@ func (lp *LogPanel) showLogExplorer() {
 
 	lp.filterPanel.AddItem(filterFlex, 1, 1, true)
 	lp.updateFilterDisplay(lp.filterPanel)
-	mainFlex.AddItem(lp.filterPanel, 3, 1, true)
+	mainFlex.AddItem(lp.filterPanel, 1, 1, true)
 
 	// 2. Overview Panel (20% height)
 	lp.overview = tview.NewTextView().SetDynamicColors(true)
@@ -481,8 +481,10 @@ func (lp *LogPanel) updateFilterDisplay(panel *tview.Flex) {
 				}
 				lp.updateFilterDisplay(panel)
 				go lp.loadLogs()
-			})
-		panel.AddItem(filterBtn, len(filterText)+4, 1, false)
+			}).
+			SetStyle(tcell.StyleDefault.Background(tcell.ColorDarkBlue).
+			SetStyleActivated(tcell.StyleDefault.Background(tcell.ColorRed))
+		panel.AddItem(filterBtn, 0, 1, false)
 	}
 }
 
