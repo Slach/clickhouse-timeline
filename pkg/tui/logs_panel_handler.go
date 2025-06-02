@@ -270,7 +270,7 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 		}
 		// Store all field names
 		lp.allFields = append(lp.allFields, fieldName)
-		
+
 		if !strings.Contains(fieldType, "Date") && !strings.Contains(fieldType, "Array") && !strings.Contains(fieldType, "Tuple") && !strings.Contains(fieldType, "Map") {
 			columns = append(columns, fieldName)
 		}
@@ -427,7 +427,7 @@ func (lp *LogPanel) loadLogs() {
 		return
 	}
 
-	lp.overview.SetText(fmt.Sprintf("Loading %d log rows", lp.windowSize))
+	lp.overview.SetText(fmt.Sprintf("Loading %d log rows from `%s`.`%s`...", lp.windowSize, lp.database, lp.table))
 
 	// Build WHERE clause with filters
 	timeCondition := fmt.Sprintf("%s >= ?", lp.timeField)
