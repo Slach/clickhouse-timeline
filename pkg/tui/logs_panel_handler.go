@@ -93,7 +93,7 @@ func (lp *LogPanel) Show() {
 		}
 	}()
 
-	lp.databases = []string{""}
+	lp.databases = []string{lp.database}
 	for rows.Next() {
 		var db string
 		if scanErr := rows.Scan(&db); scanErr != nil {
@@ -135,15 +135,7 @@ func (lp *LogPanel) createForm() *tview.Form {
 
 	// Table dropdown - preselect if CLI param exists
 	tableIndex := 0
-	if lp.table != "" {
-		for i, table := range lp.tables {
-			if table == lp.table {
-				tableIndex = i
-				break
-			}
-		}
-	}
-	form.AddDropDown("Table", []string{}, tableIndex, func(table string, index int) {
+	form.AddDropDown("Table", []string{lp.table}, tableIndex, func(table string, index int) {
 		lp.table = table
 		lp.updateFieldDropdowns(form)
 	})
@@ -152,35 +144,35 @@ func (lp *LogPanel) createForm() *tview.Form {
 	// Create dropdowns for each log field type
 	messageFieldDropdown := tview.NewDropDown().
 		SetLabel("Message Field: ").
-		SetOptions([]string{}, func(field string, index int) {
+		SetOptions([]string{lp.messageField}, func(field string, index int) {
 			lp.messageField = field
 		})
 	form.AddFormItem(messageFieldDropdown)
 
 	timeFieldDropdown := tview.NewDropDown().
 		SetLabel("Time Field: ").
-		SetOptions([]string{}, func(field string, index int) {
+		SetOptions([]string{lp.timeField}, func(field string, index int) {
 			lp.timeField = field
 		})
 	form.AddFormItem(timeFieldDropdown)
 
 	timeMsFieldDropdown := tview.NewDropDown().
 		SetLabel("TimeMs Field (optional): ").
-		SetOptions([]string{}, func(field string, index int) {
+		SetOptions([]string{lp.timeMsField}, func(field string, index int) {
 			lp.timeMsField = field
 		})
 	form.AddFormItem(timeMsFieldDropdown)
 
 	dateFieldDropdown := tview.NewDropDown().
 		SetLabel("Date Field (optional): ").
-		SetOptions([]string{}, func(field string, index int) {
+		SetOptions([]string{lp.dateField}, func(field string, index int) {
 			lp.dateField = field
 		})
 	form.AddFormItem(dateFieldDropdown)
 
 	levelFieldDropdown := tview.NewDropDown().
 		SetLabel("Level Field (optional): ").
-		SetOptions([]string{}, func(field string, index int) {
+		SetOptions([]string{lp.levelField}, func(field string, index int) {
 			lp.levelField = field
 		})
 	form.AddFormItem(levelFieldDropdown)
@@ -309,7 +301,7 @@ func (lp *LogPanel) updateDropdownOptions(form *tview.Form, label string, option
 		item := form.GetFormItem(i)
 		if dropdown, ok := item.(*tview.DropDown); ok && dropdown.GetLabel() == label+": " {
 			dropdown.SetOptions(options, selectedFunc)
-			
+
 			// Get current value for this field type
 			var currentValue string
 			switch label {
@@ -324,7 +316,7 @@ func (lp *LogPanel) updateDropdownOptions(form *tview.Form, label string, option
 			case "Level Field (optional)":
 				currentValue = lp.levelField
 			}
-			
+
 			// Select matching option if current value exists
 			for idx, opt := range options {
 				if opt == currentValue {
