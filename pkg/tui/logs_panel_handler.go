@@ -442,7 +442,7 @@ func (lp *LogPanel) loadLogs() {
 		}
 	}()
 
-	// Stream directly to table
+	// Stream directly to table while storing full entry data
 	lp.streamRowsToTable(rows, true)
 }
 
@@ -661,20 +661,15 @@ func (lp *LogPanel) showLogDetailsModal(rowIndex int) {
 		return
 	}
 
-	// Get data from table cells
-	timeCell := lp.logDetails.GetCell(rowIndex, 0)
-	messageCell := lp.logDetails.GetCell(rowIndex, 1)
-
-	if timeCell == nil || messageCell == nil {
+	// Get the stored LogEntry from the row's reference
+	cell := lp.logDetails.GetCell(rowIndex, 0)
+	if cell == nil || cell.Reference == nil {
 		return
 	}
 
-	// Create entry from table data
-	entry := LogEntry{
-		Message: messageCell.Text,
+	if entry, ok := cell.Reference.(LogEntry); ok {
+		lp.showLogDetailsModalWithEntry(entry)
 	}
-
-	lp.showLogDetailsModalWithEntry(entry)
 }
 
 func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
@@ -960,7 +955,11 @@ func (lp *LogPanel) processBatch(batch []LogEntry, startRow int) {
 			row := startRow + i + 1 // +1 for header row
 			timeStr := lp.formatTimeForDisplay(entry)
 
-			lp.logDetails.SetCell(row, 0, tview.NewTableCell(timeStr))
+			// Store full entry in first cell's reference
+			timeCell := tview.NewTableCell(timeStr)
+			timeCell.SetReference(entry)
+			lp.logDetails.SetCell(row, 0, timeCell)
+			
 			messageCell := tview.NewTableCell(entry.Message)
 
 			// Color by level
