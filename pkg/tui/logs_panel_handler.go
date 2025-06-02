@@ -373,14 +373,14 @@ func (lp *LogPanel) showLogExplorer() {
 		})
 
 	filterFlex := tview.NewFlex().
-		AddItem(filterField, 0, 1, false).
-		AddItem(filterOp, 0, 1, false).
-		AddItem(filterValue, 0, 1, false).
-		AddItem(addFilterBtn, 0, 1, false) // No fixed width
+		AddItem(filterField, 0, 1, true).
+		AddItem(filterOp, 0, 1, true).
+		AddItem(filterValue, 0, 1, true).
+		AddItem(addFilterBtn, 10, 1, true)
 
-	lp.filterPanel.AddItem(filterFlex, 1, 1, false)
+	lp.filterPanel.AddItem(filterFlex, 1, 1, true)
 	lp.updateFilterDisplay(lp.filterPanel)
-	mainFlex.AddItem(lp.filterPanel, 1, 1, false) // Only 1 line height
+	mainFlex.AddItem(lp.filterPanel, 3, 1, true)
 
 	// 2. Overview Panel (20% height)
 	lp.overview = tview.NewTextView().SetDynamicColors(true)
