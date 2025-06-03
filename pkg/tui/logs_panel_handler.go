@@ -14,105 +14,6 @@ import (
 	"github.com/rivo/tview"
 )
 
-// WrappingButtonFormItem is a custom tview.FormItem that acts like a button
-// but uses a TextView to allow text wrapping and scrolling.
-type WrappingButtonFormItem struct {
-	*tview.TextView               // The TextView primitive to display content
-	form          *tview.Form     // The form this item belongs to
-	finished      func(key tcell.Key) // Callback when the item is "finished" (e.g., Nav keys)
-	selected      func()          // Callback when the item is "selected" (e.g., Enter key)
-	label         string          // The label of the form item (usually empty for buttons)
-	height        int             // Stored height for the field
-}
-
-// NewWrappingButtonFormItem creates a new WrappingButtonFormItem.
-func NewWrappingButtonFormItem(text string, selected func()) *WrappingButtonFormItem {
-	textView := tview.NewTextView().
-		SetDynamicColors(true).
-		SetWordWrap(true).
-		SetScrollable(true).
-		SetTextAlign(tview.AlignLeft). // Left align for better readability with wrapped text
-		SetText(text)
-
-	// Style the TextView to look like a button and indicate focus
-	textView.SetBorder(true)
-	textView.SetBorderColor(tcell.ColorDarkGray) // Initial border color
-
-	item := &WrappingButtonFormItem{
-		TextView: textView,
-		selected: selected,
-		label:    "", // Buttons typically don't have a separate side-label in a form
-		height:   3,  // Default height
-	}
-
-	textView.SetFocusFunc(func() {
-		item.TextView.SetBorderColor(tcell.ColorYellow) // Highlight border on focus
-	})
-	textView.SetBlurFunc(func() {
-		item.TextView.SetBorderColor(tcell.ColorDarkGray) // Revert border on blur
-		item.TextView.ScrollToBeginning()                 // Reset scroll position when blurred
-	})
-
-	// Handle input: Enter for action, Tab/Esc for navigation via the form.
-	textView.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Key() == tcell.KeyEnter {
-			if item.selected != nil {
-				item.selected()
-			}
-			return nil // Consume the Enter key
-		}
-
-		// If Tab, Backtab, or Escape are pressed, let the form handle navigation.
-		if event.Key() == tcell.KeyTab || event.Key() == tcell.KeyEscape || event.Key() == tcell.KeyBacktab {
-			if item.finished != nil {
-				item.finished(event.Key())
-				return nil // Event handled by form navigation
-			}
-		}
-		// For other keys (e.g., scrolling keys for TextView), let the TextView's default handler process them.
-		return event
-	})
-
-	return item
-}
-
-// GetLabel returns the label of this form item.
-func (w *WrappingButtonFormItem) GetLabel() string { return w.label }
-
-// SetLabel sets the label of this form item.
-func (w *WrappingButtonFormItem) SetLabel(label string) tview.FormItem { w.label = label; return w }
-
-// GetFieldWidth returns the width of the field. For a button-like item, 0 means it spans the available width.
-func (w *WrappingButtonFormItem) GetFieldWidth() int { return 0 }
-
-// GetFieldHeight returns the height of the field.
-func (w *WrappingButtonFormItem) GetFieldHeight() int {
-	if w.height > 0 {
-		return w.height
-	}
-	return 3 // Default height
-}
-
-// SetFieldHeight sets the height of the field.
-func (w *WrappingButtonFormItem) SetFieldHeight(height int) {
-	// Ensure minimum height of 1 line
-	if height < 1 {
-		height = 1
-	}
-	w.height = height
-}
-
-// SetForm sets the form to which this item belongs.
-func (w *WrappingButtonFormItem) SetForm(form *tview.Form) tview.FormItem {
-	w.form = form
-	return w
-}
-
-// SetFinishedFunc sets a function that is called when the user is done with this form item.
-func (w *WrappingButtonFormItem) SetFinishedFunc(handler func(key tcell.Key)) tview.FormItem {
-	w.finished = handler
-	return w
-}
 
 type LogPanel struct {
 	app            *App
@@ -837,13 +738,19 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 	}
 	headerText.SetText(headerBuilder.String())
 
-	// Create a form for additional fields
-	fieldsForm := tview.NewForm()
-	fieldsForm.SetBorder(true).
+	// Create a list for additional fields
+	fieldsList := tview.NewList()
+	fieldsList.SetBorder(true).
 		SetTitle("Additional Fields (press Enter to filter)")
-	formPrimitive := fieldsForm // Store as primitive for navigation
+	fieldsList.ShowSecondaryText(false)
 
-	// Add all additional fields as buttons
+	// Store field data for filtering
+	var fieldData []struct {
+		field string
+		value string
+	}
+
+	// Add all additional fields to the list
 	if len(entry.AllFields) > 0 {
 		// Sort field names for consistent display
 		fields := make([]string, 0, len(entry.AllFields))
@@ -851,10 +758,6 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 			fields = append(fields, field)
 		}
 		sort.Strings(fields)
-
-		// Get available width for buttons
-		_, _, width, _ := fieldsForm.GetRect()
-		maxButtonWidth := width - 4 // Account for borders and padding
 
 		for _, field := range fields {
 			value := entry.AllFields[field]
@@ -871,51 +774,37 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 				valueStr = fmt.Sprintf("%v", v)
 			}
 
-			// Capture current field and value for the closure
-			currentField := field
-			currentValue := valueStr
+			// Store field data
+			fieldData = append(fieldData, struct {
+				field string
+				value string
+			}{field, valueStr})
 
-			actionFunc := func() {
-				// Add this field/value pair as a filter
-				lp.filters = append(lp.filters, LogFilter{
-					Field:    currentField,
-					Operator: "=",
-					Value:    currentValue,
-				})
-				lp.updateFilterDisplay(lp.filterPanel)
-				lp.app.pages.RemovePage("logDetails")
-				lp.app.pages.SwitchToPage("logExplorer")
-				go lp.loadLogs()
-			}
-
-			// Create button with wrapped text
-			buttonText := fmt.Sprintf("[yellow]%s:[-] %s", currentField, currentValue)
-			buttonItem := NewWrappingButtonFormItem(buttonText, actionFunc)
-			
-			// Calculate button height based on content length and available width
-			// Account for field name, value, and formatting characters
-			textLength := len(currentField) + len(currentValue) + 10 // +10 for formatting and padding
-			
-			// Estimate available width (accounting for borders and padding)
-			availableWidth := maxButtonWidth - 4 // Account for borders
-			if availableWidth < 20 {
-				availableWidth = 20 // Minimum width
-			}
-			
-			// Calculate lines needed for wrapping
-			linesNeeded := (textLength / availableWidth) + 1
-			if linesNeeded < 2 {
-				linesNeeded = 2 // Minimum 2 lines for readability
-			}
-			if linesNeeded > 5 {
-				linesNeeded = 5 // Maximum 5 lines to prevent excessive height
-			}
-			
-			buttonItem.SetFieldHeight(linesNeeded)
-			
-			fieldsForm.AddFormItem(buttonItem)
+			// Add to list with formatted text
+			listText := fmt.Sprintf("[yellow]%s:[-] %s", field, valueStr)
+			fieldsList.AddItem(listText, "", 0, nil)
 		}
 	}
+
+	// Set up list selection handler
+	fieldsList.SetSelectedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
+		if index >= 0 && index < len(fieldData) {
+			selectedField := fieldData[index]
+			
+			// Add this field/value pair as a filter
+			lp.filters = append(lp.filters, LogFilter{
+				Field:    selectedField.field,
+				Operator: "=",
+				Value:    selectedField.value,
+			})
+			lp.updateFilterDisplay(lp.filterPanel)
+			lp.app.pages.RemovePage("logDetails")
+			lp.app.pages.SwitchToPage("logExplorer")
+			go lp.loadLogs()
+		}
+	})
+
+	formPrimitive := fieldsList // Store as primitive for navigation
 
 	// Message section with scrolling
 	messageText := tview.NewTextView().
@@ -933,7 +822,7 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 
 	// Add components to flex layout
 	detailsFlex.AddItem(headerText, 0, 1, false)       // Header takes minimum space needed
-	detailsFlex.AddItem(fieldsForm, 0, 1, false)       // Fields form
+	detailsFlex.AddItem(fieldsList, 0, 1, false)       // Fields list
 	detailsFlex.AddItem(messageText, 0, 3, true)       // Message takes most space
 	detailsFlex.AddItem(instructionsText, 1, 0, false) // Instructions take 1 line
 
@@ -961,8 +850,8 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 		return event
 	})
 
-	// Set initial focus to fields form
-	lp.app.tviewApp.SetFocus(fieldsForm)
+	// Set initial focus to fields list
+	lp.app.tviewApp.SetFocus(fieldsList)
 
 	lp.app.pages.AddPage("logDetails", detailsFlex, true, true)
 	lp.app.pages.SwitchToPage("logDetails")
