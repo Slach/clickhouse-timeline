@@ -838,6 +838,10 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 		}
 		sort.Strings(fields)
 
+		// Get available width for buttons
+		_, _, width, _ := fieldsForm.GetRect()
+		maxButtonWidth := width - 4 // Account for borders and padding
+
 		for _, field := range fields {
 			value := entry.AllFields[field]
 			var valueStr string
@@ -854,8 +858,8 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 			}
 
 			// Capture current field and value for the closure
-			currentField := field // Capture loop variable for the closure
-			currentValue := valueStr // Capture loop variable for the closure
+			currentField := field
+			currentValue := valueStr
 
 			actionFunc := func() {
 				// Add this field/value pair as a filter
@@ -870,7 +874,18 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 				go lp.loadLogs()
 			}
 
-			buttonItem := NewWrappingButtonFormItem(fmt.Sprintf("[yellow]%s:[-] %s", currentField, currentValue), actionFunc)
+			// Create button with wrapped text
+			buttonText := fmt.Sprintf("[yellow]%s:[-] %s", currentField, currentValue)
+			buttonItem := NewWrappingButtonFormItem(buttonText, actionFunc)
+			
+			// Set button height based on content length and available width
+			textLength := len(currentField) + len(currentValue) + 5 // +5 for formatting
+			linesNeeded := (textLength / maxButtonWidth) + 1
+			if linesNeeded < 1 {
+				linesNeeded = 1
+			}
+			buttonItem.SetFieldHeight(linesNeeded)
+			
 			fieldsForm.AddFormItem(buttonItem)
 		}
 	}
