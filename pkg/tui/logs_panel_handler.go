@@ -974,6 +974,8 @@ func (lp *LogPanel) streamRowsToTable(rows *sql.Rows, clearFirst bool) {
 	// Update overview with collected statistics
 	lp.app.tviewApp.QueueUpdateDraw(func() {
 		lp.updateOverviewWithStats(levelCounts, lp.totalRows)
+		// Set focus to logDetails table after logs are loaded
+		lp.app.tviewApp.SetFocus(lp.logDetails)
 	})
 }
 
