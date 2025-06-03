@@ -779,7 +779,7 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 	// Instructions
 	instructionsText := tview.NewTextView().
 		SetDynamicColors(true).
-		SetText("[yellow]Navigation:[-] ↑/↓ or j/k to scroll, [yellow]Esc[-] to close")
+		SetText("[yellow]Navigation:[-] ↑/↓ or j/k to scroll, [yellow]Esc[-] to close\n[yellow]Load More:[-] Ctrl+PageUp (older) / Ctrl+PageDn (newer)")
 	instructionsText.SetTextAlign(tview.AlignCenter)
 
 	// Add components to flex layout
