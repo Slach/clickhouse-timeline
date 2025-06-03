@@ -898,6 +898,7 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 			if linesNeeded < 1 {
 				linesNeeded = 1
 			}
+			buttonItem.TextView.SetText(buttonText) // Ensure text is set before height calculation
 			buttonItem.SetFieldHeight(linesNeeded)
 			
 			fieldsForm.AddFormItem(buttonItem)
