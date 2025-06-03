@@ -1063,8 +1063,8 @@ func (lp *LogPanel) processBatch(batch []LogEntry, startRow int) {
 				messageCell.SetTextColor(lp.getColorForLevel(entry.Level))
 			}
 
-			// Add row to filtered table
-			lp.logDetails.AddRow([]*tview.TableCell{timeCell, messageCell})
+			// Set row in filtered table
+			lp.logDetails.SetRow(row, []*tview.TableCell{timeCell, messageCell})
 		}
 	})
 }

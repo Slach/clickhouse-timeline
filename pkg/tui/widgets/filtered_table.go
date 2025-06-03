@@ -34,12 +34,20 @@ func (ft *FilteredTable) SetupHeaders(headers []string) {
 
 func (ft *FilteredTable) AddRow(cells []*tview.TableCell) {
 	row := ft.Table.GetRowCount()
+	ft.SetRow(row, cells)
+}
+
+func (ft *FilteredTable) SetRow(row int, cells []*tview.TableCell) {
 	for col, cell := range cells {
 		if col < len(ft.Headers) {
 			ft.Table.SetCell(row, col, cell)
 		}
 	}
-	ft.OriginalRows = append(ft.OriginalRows, cells)
+	// Ensure we have enough capacity in OriginalRows
+	for len(ft.OriginalRows) <= row {
+		ft.OriginalRows = append(ft.OriginalRows, nil)
+	}
+	ft.OriginalRows[row] = cells
 }
 
 func (ft *FilteredTable) FilterTable(filter string) {
