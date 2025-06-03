@@ -1069,7 +1069,7 @@ func (lp *LogPanel) setupTabNavigation(filterField *tview.DropDown, filterOp *tv
 			// If we have filters, focus the last one added
 			if len(lp.filters) > 0 {
 				if filterFlex := lp.filterPanel.GetItem(0); filterFlex != nil {
-					if flex, ok := filterFlex.(*tview.Flex); ok {
+					if _, ok := filterFlex.(*tview.Flex); ok {
 						// The last filter button is at index len(lp.filters) in filterPanel
 						lastFilterIndex := len(lp.filters)
 						if lastFilterIndex < lp.filterPanel.GetItemCount() {
