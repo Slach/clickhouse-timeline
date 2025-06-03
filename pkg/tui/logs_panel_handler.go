@@ -743,7 +743,6 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 		SetTitle("Additional Fields (press Enter to filter)")
 	fieldsList.ShowSecondaryText(false)
 	fieldsList.SetSelectedBackgroundColor(tcell.ColorBlue)
-	fieldsList.SetSelectedTextColor(tcell.ColorBlack)
 
 	// Store field data for filtering
 	var fieldData []struct {
