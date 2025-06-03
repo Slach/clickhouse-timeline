@@ -14,6 +14,92 @@ import (
 	"github.com/rivo/tview"
 )
 
+// WrappingButtonFormItem is a custom tview.FormItem that acts like a button
+// but uses a TextView to allow text wrapping and scrolling.
+type WrappingButtonFormItem struct {
+	*tview.TextView               // The TextView primitive to display content
+	form          *tview.Form     // The form this item belongs to
+	finished      func(key tcell.Key) // Callback when the item is "finished" (e.g., Nav keys)
+	selected      func()          // Callback when the item is "selected" (e.g., Enter key)
+	label         string          // The label of the form item (usually empty for buttons)
+}
+
+// NewWrappingButtonFormItem creates a new WrappingButtonFormItem.
+func NewWrappingButtonFormItem(text string, selected func()) *WrappingButtonFormItem {
+	textView := tview.NewTextView().
+		SetDynamicColors(true).
+		SetWordWrap(true).
+		SetScrollable(true).
+		SetTextAlign(tview.AlignCenter). // Or tview.AlignLeft if preferred for multi-line text
+		SetText(text)
+
+	// Style the TextView to look like a button and indicate focus
+	textView.SetBorder(true)
+	textView.SetBorderColor(tcell.ColorDarkGray) // Initial border color
+
+	item := &WrappingButtonFormItem{
+		TextView: textView,
+		selected: selected,
+		label:    "", // Buttons typically don't have a separate side-label in a form
+	}
+
+	textView.SetFocusFunc(func() {
+		item.TextView.SetBorderColor(tcell.ColorYellow) // Highlight border on focus
+	})
+	textView.SetBlurFunc(func() {
+		item.TextView.SetBorderColor(tcell.ColorDarkGray) // Revert border on blur
+		item.TextView.ScrollToBeginning()                 // Reset scroll position when blurred
+	})
+
+	// Handle input: Enter for action, Tab/Esc for navigation via the form.
+	textView.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEnter {
+			if item.selected != nil {
+				item.selected()
+			}
+			return nil // Consume the Enter key
+		}
+
+		// If Tab, Backtab, or Escape are pressed, let the form handle navigation.
+		if event.Key() == tcell.KeyTab || event.Key() == tcell.KeyEscape || event.Key() == tcell.KeyBacktab {
+			if item.finished != nil {
+				item.finished(event.Key())
+				return nil // Event handled by form navigation
+			}
+		}
+		// For other keys (e.g., scrolling keys for TextView), let the TextView's default handler process them.
+		return event
+	})
+
+	return item
+}
+
+// GetLabel returns the label of this form item.
+func (w *WrappingButtonFormItem) GetLabel() string { return w.label }
+
+// SetLabel sets the label of this form item.
+func (w *WrappingButtonFormItem) SetLabel(label string) tview.FormItem { w.label = label; return w }
+
+// GetFieldWidth returns the width of the field. For a button-like item, 0 means it spans the available width.
+func (w *WrappingButtonFormItem) GetFieldWidth() int { return 0 }
+
+// GetFieldHeight returns the height of the field.
+func (w *WrappingButtonFormItem) GetFieldHeight() int {
+	return 3 // Allocate 3 lines for this item. Text will wrap and scroll within this height.
+}
+
+// SetForm sets the form to which this item belongs.
+func (w *WrappingButtonFormItem) SetForm(form *tview.Form) tview.FormItem {
+	w.form = form
+	return w
+}
+
+// SetFinishedFunc sets a function that is called when the user is done with this form item.
+func (w *WrappingButtonFormItem) SetFinishedFunc(handler func(key tcell.Key)) tview.FormItem {
+	w.finished = handler
+	return w
+}
+
 type LogPanel struct {
 	app            *App
 	database       string
@@ -768,21 +854,24 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 			}
 
 			// Capture current field and value for the closure
-			fieldName := field
-			fieldValue := valueStr
+			currentField := field // Capture loop variable for the closure
+			currentValue := valueStr // Capture loop variable for the closure
 
-			fieldsForm.AddButton(fmt.Sprintf("[yellow]%s:[-] %s", fieldName, fieldValue), func() {
+			actionFunc := func() {
 				// Add this field/value pair as a filter
 				lp.filters = append(lp.filters, LogFilter{
-					Field:    fieldName,
+					Field:    currentField,
 					Operator: "=",
-					Value:    fieldValue,
+					Value:    currentValue,
 				})
 				lp.updateFilterDisplay(lp.filterPanel)
 				lp.app.pages.RemovePage("logDetails")
 				lp.app.pages.SwitchToPage("logExplorer")
 				go lp.loadLogs()
-			})
+			}
+
+			buttonItem := NewWrappingButtonFormItem(fmt.Sprintf("[yellow]%s:[-] %s", currentField, currentValue), actionFunc)
+			fieldsForm.AddFormItem(buttonItem)
 		}
 	}
 
