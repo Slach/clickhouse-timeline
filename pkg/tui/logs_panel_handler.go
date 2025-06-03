@@ -394,6 +394,11 @@ func (lp *LogPanel) showLogExplorer() {
 	// Handle keyboard navigation by combining table's input capture with filtered table's
 	existingHandler := lp.logDetails.GetInputCapture(lp.app.tviewApp, lp.app.pages)
 	lp.logDetails.Table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		// Let filtered table handle its own keybindings first (like / for filter)
+		if result := existingHandler(event); result == nil {
+			return nil // Event was handled by filtered table
+		}
+
 		rowNumber, _ := lp.logDetails.Table.GetSelection()
 		if event.Key() == tcell.KeyEnter {
 			if rowNumber > 0 && rowNumber <= lp.totalRows {
@@ -405,10 +410,6 @@ func (lp *LogPanel) showLogExplorer() {
 			go lp.loadMoreLogs(true) // Load newer logs
 		}
 
-		// Let filtered table handle its own keybindings (like / for filter)
-		if result := existingHandler(event); result != nil {
-			return result
-		}
 		return event
 	})
 
@@ -1154,7 +1155,9 @@ func (lp *LogPanel) setupTabNavigation(filterField *tview.DropDown, filterOp *tv
 		}
 		// Pass to existing handler if not tab navigation
 		if existingHandler != nil {
-			return existingHandler(event)
+			if result := existingHandler(event); result == nil {
+				return nil // Event was handled
+			}
 		}
 		return event
 	})
