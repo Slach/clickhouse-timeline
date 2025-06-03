@@ -371,12 +371,7 @@ func (lp *LogPanel) showLogExplorer() {
 	initialFilterPanelHeight := 1 + len(lp.filters) + 2
 	lp.mainFlex.AddItem(lp.filterPanel, initialFilterPanelHeight, 1, false)
 
-	// 2. Overview Panel (20% height)
-	lp.overview = tview.NewTextView().SetDynamicColors(true)
-	lp.overview.SetBorder(true).SetTitle("Overview")
-	lp.mainFlex.AddItem(lp.overview, 3, 1, false)
-
-	// 3. Log Details Panel (60% height)
+	// 2. Log Details Panel (60% height)
 	lp.logDetails = tview.NewTable().
 		SetBorders(false).
 		SetSelectable(true, false).
@@ -406,6 +401,11 @@ func (lp *LogPanel) showLogExplorer() {
 	})
 
 	lp.mainFlex.AddItem(lp.logDetails, 0, 1, false)
+
+	// 3. Overview Panel (20% height)
+	lp.overview = tview.NewTextView().SetDynamicColors(true)
+	lp.overview.SetBorder(true).SetTitle("Overview")
+	lp.mainFlex.AddItem(lp.overview, 3, 1, false)
 
 	// Set up tab navigation between all components
 	lp.setupTabNavigation(filterField, filterOp, filterValue, addFilterBtn)
