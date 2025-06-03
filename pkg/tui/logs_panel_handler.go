@@ -22,6 +22,7 @@ type WrappingButtonFormItem struct {
 	finished      func(key tcell.Key) // Callback when the item is "finished" (e.g., Nav keys)
 	selected      func()          // Callback when the item is "selected" (e.g., Enter key)
 	label         string          // The label of the form item (usually empty for buttons)
+	height        int             // Stored height for the field
 }
 
 // NewWrappingButtonFormItem creates a new WrappingButtonFormItem.
@@ -30,7 +31,7 @@ func NewWrappingButtonFormItem(text string, selected func()) *WrappingButtonForm
 		SetDynamicColors(true).
 		SetWordWrap(true).
 		SetScrollable(true).
-		SetTextAlign(tview.AlignCenter). // Or tview.AlignLeft if preferred for multi-line text
+		SetTextAlign(tview.AlignLeft). // Left align for better readability with wrapped text
 		SetText(text)
 
 	// Style the TextView to look like a button and indicate focus
@@ -41,6 +42,7 @@ func NewWrappingButtonFormItem(text string, selected func()) *WrappingButtonForm
 		TextView: textView,
 		selected: selected,
 		label:    "", // Buttons typically don't have a separate side-label in a form
+		height:   3,  // Default height
 	}
 
 	textView.SetFocusFunc(func() {
@@ -85,11 +87,10 @@ func (w *WrappingButtonFormItem) GetFieldWidth() int { return 0 }
 
 // GetFieldHeight returns the height of the field.
 func (w *WrappingButtonFormItem) GetFieldHeight() int {
-	// Return stored height if set, otherwise default to 3 lines
-	if w.TextView.GetLineCount() > 0 {
-		return w.TextView.GetLineCount()
+	if w.height > 0 {
+		return w.height
 	}
-	return 3
+	return 3 // Default height
 }
 
 // SetFieldHeight sets the height of the field.
@@ -98,8 +99,7 @@ func (w *WrappingButtonFormItem) SetFieldHeight(height int) {
 	if height < 1 {
 		height = 1
 	}
-	// Set the TextView's height to match
-	w.TextView.SetText(w.TextView.GetText(true)) // Refresh text with new height
+	w.height = height
 }
 
 // SetForm sets the form to which this item belongs.
@@ -892,13 +892,25 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 			buttonText := fmt.Sprintf("[yellow]%s:[-] %s", currentField, currentValue)
 			buttonItem := NewWrappingButtonFormItem(buttonText, actionFunc)
 			
-			// Set button height based on content length and available width
-			textLength := len(currentField) + len(currentValue) + 5 // +5 for formatting
-			linesNeeded := (textLength / maxButtonWidth) + 1
-			if linesNeeded < 1 {
-				linesNeeded = 1
+			// Calculate button height based on content length and available width
+			// Account for field name, value, and formatting characters
+			textLength := len(currentField) + len(currentValue) + 10 // +10 for formatting and padding
+			
+			// Estimate available width (accounting for borders and padding)
+			availableWidth := maxButtonWidth - 4 // Account for borders
+			if availableWidth < 20 {
+				availableWidth = 20 // Minimum width
 			}
-			buttonItem.TextView.SetText(buttonText) // Ensure text is set before height calculation
+			
+			// Calculate lines needed for wrapping
+			linesNeeded := (textLength / availableWidth) + 1
+			if linesNeeded < 2 {
+				linesNeeded = 2 // Minimum 2 lines for readability
+			}
+			if linesNeeded > 5 {
+				linesNeeded = 5 // Maximum 5 lines to prevent excessive height
+			}
+			
 			buttonItem.SetFieldHeight(linesNeeded)
 			
 			fieldsForm.AddFormItem(buttonItem)
