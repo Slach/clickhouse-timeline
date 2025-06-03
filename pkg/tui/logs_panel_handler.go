@@ -357,11 +357,11 @@ func (lp *LogPanel) showLogExplorer() {
 			}
 		})
 
-	filterFlex := tview.NewFlex().
+	filterFlex := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(filterField, 0, 1, true).
 		AddItem(filterOp, 0, 1, true).
 		AddItem(filterValue, 0, 1, true).
-		AddItem(addFilterBtn, 10, 1, true)
+		AddItem(addFilterBtn, 10, 0, true)
 
 	// Ensure filterFlex (input row) is 1 row high, and does not take proportional space.
 	lp.filterPanel.AddItem(filterFlex, 1, 0, true)
