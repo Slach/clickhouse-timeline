@@ -192,6 +192,7 @@ func (a *App) SetConnectByName(contextName string) bool {
 	return found
 }
 
+// executeCommand return message if something wrong, return empty string if all OK
 func (a *App) executeCommand(commandName string) string {
 	// Check prerequisites for commands that need them
 	if commandName == CmdHeatmap || commandName == CmdFlamegraph ||

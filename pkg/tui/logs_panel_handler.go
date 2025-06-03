@@ -117,6 +117,16 @@ func (lp *LogPanel) Show() {
 
 	lp.app.pages.AddPage("logs", logsFlex, true, true)
 	lp.app.pages.SwitchToPage("logs")
+
+	// If all required fields are set via CLI, auto-submit the form
+	if lp.database != "" && lp.table != "" && lp.messageField != "" && lp.timeField != "" {
+		go func() {
+			time.Sleep(500 * time.Millisecond) // Small delay to let UI render
+			lp.app.tviewApp.QueueUpdateDraw(func() {
+				lp.showLogExplorer()
+			})
+		}()
+	}
 }
 
 func (lp *LogPanel) createForm() *tview.Form {
@@ -139,63 +149,37 @@ func (lp *LogPanel) createForm() *tview.Form {
 	})
 
 	// Table dropdown - preselect if CLI param exists
-	tableIndex := 0
-	form.AddDropDown("Table", []string{lp.table}, tableIndex, func(table string, index int) {
+	form.AddDropDown("Table", []string{lp.table}, 0, func(table string, index int) {
 		lp.table = table
 		lp.updateFieldDropdowns(form)
 	})
 
 	// Field dropdowns - preselect if CLI params exist
 	// Create dropdowns for each log field type
-	messageFieldDropdown := tview.NewDropDown().
-		SetLabel("Message Field: ").
-		SetOptions([]string{lp.messageField}, func(field string, index int) {
-			lp.messageField = field
-		})
-	form.AddFormItem(messageFieldDropdown)
+	form.AddDropDown("Message Field: ", []string{lp.messageField}, 0, func(field string, index int) {
+		lp.messageField = field
+	})
 
-	timeFieldDropdown := tview.NewDropDown().
-		SetLabel("Time Field: ").
-		SetOptions([]string{lp.timeField}, func(field string, index int) {
-			lp.timeField = field
-		})
-	form.AddFormItem(timeFieldDropdown)
+	form.AddDropDown("Time Field: ", []string{lp.timeField}, 0, func(field string, index int) {
+		lp.timeField = field
+	})
 
-	timeMsFieldDropdown := tview.NewDropDown().
-		SetLabel("TimeMs Field (optional): ").
-		SetOptions([]string{lp.timeMsField}, func(field string, index int) {
-			lp.timeMsField = field
-		})
-	form.AddFormItem(timeMsFieldDropdown)
+	form.AddDropDown("TimeMs Field (optional): ", []string{lp.timeMsField}, 0, func(field string, index int) {
+		lp.timeMsField = field
+	})
 
-	dateFieldDropdown := tview.NewDropDown().
-		SetLabel("Date Field (optional): ").
-		SetOptions([]string{lp.dateField}, func(field string, index int) {
-			lp.dateField = field
-		})
-	form.AddFormItem(dateFieldDropdown)
+	form.AddDropDown("Date Field (optional): ", []string{lp.dateField}, 0, func(field string, index int) {
+		lp.dateField = field
+	})
 
-	levelFieldDropdown := tview.NewDropDown().
-		SetLabel("Level Field (optional): ").
-		SetOptions([]string{lp.levelField}, func(field string, index int) {
-			lp.levelField = field
-		})
-	form.AddFormItem(levelFieldDropdown)
+	form.AddDropDown("Level Field (optional): ", []string{lp.levelField}, 0, func(field string, index int) {
+		lp.levelField = field
+	})
 
 	// Window size input - use CLI param if available
 	form.AddInputField("Window Size (rows)", fmt.Sprint(lp.windowSize), 10,
 		func(text string, lastRune rune) bool { return unicode.IsDigit(lastRune) },
 		func(text string) { lp.windowSize, _ = strconv.Atoi(text) })
-
-	// If all required fields are set via CLI, auto-submit the form
-	if lp.database != "" && lp.table != "" && lp.messageField != "" && lp.timeField != "" {
-		go func() {
-			time.Sleep(500 * time.Millisecond) // Small delay to let UI render
-			lp.app.tviewApp.QueueUpdateDraw(func() {
-				lp.showLogExplorer()
-			})
-		}()
-	}
 
 	// Buttons
 	form.AddButton("Explore Logs", func() { lp.showLogExplorer() })
@@ -232,7 +216,7 @@ func (lp *LogPanel) updateTableDropdown(form *tview.Form) {
 		lp.tables = append(lp.tables, table)
 	}
 
-	// Update the table dropdown
+	// Update the table dropdown if exists
 	if tableItem := form.GetFormItemByLabel("Table"); tableItem != nil {
 		if tableDropdown, ok := tableItem.(*tview.DropDown); ok {
 			tableDropdown.SetOptions(lp.tables, func(table string, index int) {
@@ -381,7 +365,6 @@ func (lp *LogPanel) showLogExplorer() {
 
 	// Ensure filterFlex (input row) is 1 row high, and does not take proportional space.
 	lp.filterPanel.AddItem(filterFlex, 1, 0, true)
-	lp.updateFilterDisplay(lp.filterPanel) // Populates filters, but doesn't resize in mainFlex yet
 
 	// Add filterPanel to mainFlex. Height = 1 (input row) + num_filters + 2 (panel border).
 	// Proportion is 1, consistent with other elements.
@@ -421,11 +404,12 @@ func (lp *LogPanel) showLogExplorer() {
 
 	lp.mainFlex.AddItem(lp.logDetails, 0, 1, true)
 
+	lp.app.pages.AddPage("logExplorer", lp.mainFlex, true, true)
+	lp.app.pages.SwitchToPage("logExplorer")
+
 	// Execute initial query
 	go lp.loadLogs()
 
-	lp.app.pages.AddPage("logExplorer", lp.mainFlex, true, true)
-	lp.app.pages.SwitchToPage("logExplorer")
 }
 
 func (lp *LogPanel) loadLogs() {
@@ -656,7 +640,7 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 		whereClause = builtWhereClause
 	}
 
-	// Build query with appropriate ordering
+	// Build query with appropriate time range
 	query := lp.buildQuery(whereClause, lp.timeField)
 	queryArgs = append(queryArgs, lp.windowSize)
 
