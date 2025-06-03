@@ -455,23 +455,19 @@ func (lp *LogPanel) getAvailableFilterFields() []string {
 }
 
 func (lp *LogPanel) updateFilterDisplay(panel *tview.Flex) {
-	log.Info().Msg("SUKA1")
 	// Clear existing filter displays (buttons), keeping the first item (filterFlex)
 	// The first item (index 0) is filterFlex, which should not be removed.
 	for panel.GetItemCount() > 1 {
-		log.Info().Msg("SUKA2")
 		panel.RemoveItem(panel.GetItem(1)) // Repeatedly remove the item at index 1
 	}
 
 	// Add current filters
 	for _, filter := range lp.filters {
-		log.Info().Msg("SUKA3")
 		filterText := fmt.Sprintf("%s %s %s", filter.Field, filter.Operator, filter.Value)
 		// Capture the filter value to avoid closure issues
 		currentFilter := filter
 		filterBtn := tview.NewButton(filterText).
 			SetSelectedFunc(func() {
-				log.Info().Msg("SUKA4")
 				// Remove this specific filter by value comparison
 				for i, f := range lp.filters {
 					if f.Field == currentFilter.Field && f.Operator == currentFilter.Operator && f.Value == currentFilter.Value {
@@ -487,7 +483,6 @@ func (lp *LogPanel) updateFilterDisplay(panel *tview.Flex) {
 
 		// Add tab navigation for filter buttons
 		filterBtn.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-			log.Info().Msg("SUKA5")
 			if event.Key() == tcell.KeyTab {
 				lp.app.tviewApp.SetFocus(lp.logDetails)
 				return nil
@@ -506,19 +501,15 @@ func (lp *LogPanel) updateFilterDisplay(panel *tview.Flex) {
 		// Ensure filterBtn is 1 row high, and does not take proportional space.
 		panel.AddItem(filterBtn, 1, 0, false)
 		lp.app.tviewApp.SetFocus(filterBtn)
-		log.Info().Msgf("SUKA6 = %v", lp.filters)
 	}
-	log.Info().Msgf("SUKA7 = %v", lp.filters)
 
 	// Dynamically adjust the height of the filterPanel in mainFlex
 	// Height = 1 (for filterFlex row) + number of filters + 2 (for filterPanel's border)
 	newHeight := 1 + len(lp.filters) + 2
 	if lp.mainFlex != nil && lp.filterPanel != nil {
-		log.Info().Msg("SUKA8")
 		// Use proportion 1, consistent with how it was added initially and with other items.
 		lp.mainFlex.ResizeItem(lp.filterPanel, newHeight, 1)
 	}
-	log.Info().Msg("SUKA9")
 }
 
 func (lp *LogPanel) updateOverviewWithStats(levelCounts map[string]int, totalItems int) {
