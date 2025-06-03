@@ -14,7 +14,6 @@ import (
 	"github.com/rivo/tview"
 )
 
-
 type LogPanel struct {
 	app            *App
 	database       string
@@ -790,7 +789,7 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 	fieldsList.SetSelectedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
 		if index >= 0 && index < len(fieldData) {
 			selectedField := fieldData[index]
-			
+
 			// Add this field/value pair as a filter
 			lp.filters = append(lp.filters, LogFilter{
 				Field:    selectedField.field,
@@ -822,8 +821,8 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 
 	// Add components to flex layout
 	detailsFlex.AddItem(headerText, 0, 1, false)       // Header takes minimum space needed
-	detailsFlex.AddItem(fieldsList, 0, 1, false)       // Fields list
-	detailsFlex.AddItem(messageText, 0, 3, true)       // Message takes most space
+	detailsFlex.AddItem(fieldsList, 0, 2, false)       // Fields list
+	detailsFlex.AddItem(messageText, 0, 6, true)       // Message takes most space
 	detailsFlex.AddItem(instructionsText, 1, 0, false) // Instructions take 1 line
 
 	// Setup tab navigation between form and message
