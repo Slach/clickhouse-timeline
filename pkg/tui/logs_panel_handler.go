@@ -706,16 +706,17 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 	// Create a flex layout for the details window
 	detailsFlex := tview.NewFlex().SetDirection(tview.FlexRow)
 
+	// Create a list to hold all focusable components
+	var focusableItems []tview.Primitive
+
 	// Header section with time and level info
 	headerText := tview.NewTextView().
 		SetDynamicColors(true).
 		SetWordWrap(true)
 	headerText.SetBorder(true).SetTitle("Log Entry Info")
 
-	// Build header content with all fields
+	// Build header content with standard fields
 	var headerBuilder strings.Builder
-
-	// First show the standard fields
 	if !entry.Time.IsZero() {
 		headerBuilder.WriteString(fmt.Sprintf("[yellow]%s:[-] %s\n", lp.timeField, entry.Time.Format("2006-01-02 15:04:05 MST")))
 	}
@@ -737,11 +738,16 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 		}
 		headerBuilder.WriteString(fmt.Sprintf("[yellow]%s:[-] %s%s[-]\n", lp.levelField, levelColor, entry.Level))
 	}
+	headerText.SetText(headerBuilder.String())
 
-	// Then show all other fields
+	// Create a form for additional fields
+	fieldsForm := tview.NewForm().
+		SetBorder(true).
+		SetTitle("Additional Fields (press Enter to filter)").
+		SetTitleAlign(tview.AlignLeft)
+
+	// Add all additional fields as buttons
 	if len(entry.AllFields) > 0 {
-		headerBuilder.WriteString("\n[green]Additional Fields[-]\n")
-
 		// Sort field names for consistent display
 		fields := make([]string, 0, len(entry.AllFields))
 		for field := range entry.AllFields {
@@ -753,10 +759,8 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 			value := entry.AllFields[field]
 			var valueStr string
 
-			// Handle different ClickHouse types
 			switch v := value.(type) {
 			case []byte:
-				// Handle JSON, Array, Tuple, Map etc.
 				valueStr = string(v)
 			case time.Time:
 				valueStr = v.Format("2006-01-02 15:04:05.000 MST")
@@ -766,10 +770,23 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 				valueStr = fmt.Sprintf("%v", v)
 			}
 
-			headerBuilder.WriteString(fmt.Sprintf("[yellow]%s:[-] %s\n", field, valueStr))
+			// Capture current field and value for the closure
+			fieldName := field
+			fieldValue := valueStr
+
+			fieldsForm.AddButton(fmt.Sprintf("[yellow]%s:[-] %s", fieldName, fieldValue), func() {
+				// Add this field/value pair as a filter
+				lp.filters = append(lp.filters, LogFilter{
+					Field:    fieldName,
+					Operator: "=",
+					Value:    fieldValue,
+				})
+				lp.updateFilterDisplay(lp.filterPanel)
+				lp.app.pages.RemovePage("logDetails")
+				go lp.loadLogs()
+			})
 		}
 	}
-	headerText.SetText(headerBuilder.String())
 
 	// Message section with scrolling
 	messageText := tview.NewTextView().
@@ -782,29 +799,41 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 	// Instructions
 	instructionsText := tview.NewTextView().
 		SetDynamicColors(true).
-		SetText("[yellow]Navigation:[-] ↑/↓ or j/k to scroll, [yellow]Esc[-] to close")
+		SetText("[yellow]Navigation:[-] Tab/Shift+Tab to move, Enter to filter, Esc to close")
 	instructionsText.SetTextAlign(tview.AlignCenter)
 
 	// Add components to flex layout
 	detailsFlex.AddItem(headerText, 0, 1, false)       // Header takes minimum space needed
-	detailsFlex.AddItem(messageText, 0, 3, true)       // Message takes most space and is focusable
+	detailsFlex.AddItem(fieldsForm, 0, 1, false)       // Fields form
+	detailsFlex.AddItem(messageText, 0, 3, true)       // Message takes most space
 	detailsFlex.AddItem(instructionsText, 1, 0, false) // Instructions take 1 line
 
-	// Handle keyboard input
-	detailsFlex.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Key() == tcell.KeyEscape {
-			lp.app.pages.RemovePage("logDetails")
-			return nil
-		}
-		if event.Key() == tcell.KeyRune {
-			switch event.Rune() {
-			case 'q', 'Q':
-				lp.app.pages.RemovePage("logDetails")
-				return nil
+	// Collect focusable items for tab navigation
+	focusableItems = append(focusableItems, fieldsForm, messageText)
+
+	// Setup tab navigation
+	for i, item := range focusableItems {
+		item.SetInputCapture(func(idx int) func(*tcell.EventKey) *tcell.EventKey {
+			return func(event *tcell.EventKey) *tcell.EventKey {
+				if event.Key() == tcell.KeyTab {
+					nextIdx := (idx + 1) % len(focusableItems)
+					lp.app.tviewApp.SetFocus(focusableItems[nextIdx])
+					return nil
+				} else if event.Key() == tcell.KeyBacktab {
+					prevIdx := (idx - 1 + len(focusableItems)) % len(focusableItems)
+					lp.app.tviewApp.SetFocus(focusableItems[prevIdx])
+					return nil
+				} else if event.Key() == tcell.KeyEscape {
+					lp.app.pages.RemovePage("logDetails")
+					return nil
+				}
+				return event
 			}
-		}
-		return event
-	})
+		}(i))
+	}
+
+	// Set initial focus to fields form
+	lp.app.tviewApp.SetFocus(fieldsForm)
 
 	lp.app.pages.AddPage("logDetails", detailsFlex, true, true)
 	lp.app.pages.SwitchToPage("logDetails")
