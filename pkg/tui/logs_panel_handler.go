@@ -788,6 +788,9 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 		}
 	}
 
+	// Convert form to primitive for tab navigation
+	formPrimitive := fieldsForm
+
 	// Message section with scrolling
 	messageText := tview.NewTextView().
 		SetDynamicColors(true).
@@ -809,28 +812,30 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 	detailsFlex.AddItem(instructionsText, 1, 0, false) // Instructions take 1 line
 
 	// Collect focusable items for tab navigation
-	focusableItems = append(focusableItems, fieldsForm, messageText)
+	focusableItems = []tview.Primitive{formPrimitive, messageText}
 
-	// Setup tab navigation
-	for i, item := range focusableItems {
-		item.SetInputCapture(func(idx int) func(*tcell.EventKey) *tcell.EventKey {
-			return func(event *tcell.EventKey) *tcell.EventKey {
-				if event.Key() == tcell.KeyTab {
-					nextIdx := (idx + 1) % len(focusableItems)
-					lp.app.tviewApp.SetFocus(focusableItems[nextIdx])
-					return nil
-				} else if event.Key() == tcell.KeyBacktab {
-					prevIdx := (idx - 1 + len(focusableItems)) % len(focusableItems)
-					lp.app.tviewApp.SetFocus(focusableItems[prevIdx])
-					return nil
-				} else if event.Key() == tcell.KeyEscape {
-					lp.app.pages.RemovePage("logDetails")
-					return nil
-				}
-				return event
-			}
-		}(i))
-	}
+	// Setup tab navigation between form and message
+	formPrimitive.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyTab {
+			lp.app.tviewApp.SetFocus(messageText)
+			return nil
+		} else if event.Key() == tcell.KeyEscape {
+			lp.app.pages.RemovePage("logDetails")
+			return nil
+		}
+		return event
+	})
+
+	messageText.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyTab || event.Key() == tcell.KeyBacktab {
+			lp.app.tviewApp.SetFocus(formPrimitive)
+			return nil
+		} else if event.Key() == tcell.KeyEscape {
+			lp.app.pages.RemovePage("logDetails")
+			return nil
+		}
+		return event
+	})
 
 	// Set initial focus to fields form
 	lp.app.tviewApp.SetFocus(fieldsForm)
