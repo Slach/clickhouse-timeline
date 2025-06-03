@@ -3,6 +3,7 @@ package tui
 import (
 	"database/sql"
 	"fmt"
+	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rs/zerolog/log"
 	"sort"
@@ -28,7 +29,7 @@ type LogPanel struct {
 	firstEntryTime time.Time
 	lastEntryTime  time.Time
 	totalRows      int
-	logDetails     *tview.Table
+	logDetails     *widgets.FilteredTable
 	overview       *tview.TextView
 	filterPanel    *tview.Flex
 	mainFlex       *tview.Flex // Reference to the main flex container for resizing
@@ -403,7 +404,7 @@ func (lp *LogPanel) showLogExplorer() {
 		} else if event.Key() == tcell.KeyPgDn && event.Modifiers()&tcell.ModCtrl != 0 {
 			go lp.loadMoreLogs(true) // Load newer logs
 		}
-		
+
 		// Let filtered table handle its own keybindings (like / for filter)
 		if result := existingHandler(event); result != nil {
 			return result
@@ -411,7 +412,7 @@ func (lp *LogPanel) showLogExplorer() {
 		return event
 	})
 
-	lp.mainFlex.AddItem(lp.logDetails, 0, 1, false)
+	lp.mainFlex.AddItem(lp.logDetails.Table, 0, 1, false)
 
 	// Set up tab navigation between all components
 	lp.setupTabNavigation(filterField, filterOp, filterValue, addFilterBtn)
@@ -493,7 +494,7 @@ func (lp *LogPanel) updateFilterDisplay(panel *tview.Flex) {
 		// Add tab navigation for filter buttons
 		filterBtn.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 			if event.Key() == tcell.KeyTab {
-				lp.app.tviewApp.SetFocus(lp.logDetails)
+				lp.app.tviewApp.SetFocus(lp.logDetails.Table)
 				return nil
 			} else if event.Key() == tcell.KeyBacktab {
 				// Focus back to the filter input area
@@ -698,7 +699,7 @@ func (lp *LogPanel) showLogDetailsModal(rowIndex int) {
 	}
 
 	// Get the stored LogEntry from the row's reference
-	cell := lp.logDetails.GetCell(rowIndex, 0)
+	cell := lp.logDetails.Table.GetCell(rowIndex, 0)
 	if cell == nil || cell.Reference == nil {
 		return
 	}
@@ -1018,7 +1019,7 @@ func (lp *LogPanel) streamRowsToTable(rows *sql.Rows, clearFirst bool) {
 
 			// Update title with current time range
 			lp.app.tviewApp.QueueUpdateDraw(func() {
-				lp.logDetails.SetTitle(fmt.Sprintf("Log Entries [yellow](Ctrl+PageUp/Ctlr+PageDown to load more)[-] | From: %s To: %s",
+				lp.logDetails.Table.SetTitle(fmt.Sprintf("Log Entries [yellow](Ctrl+PageUp/Ctlr+PageDown to load more)[-] | From: %s To: %s",
 					lp.firstEntryTime.Format("2006-01-02 15:04:05.000 MST"),
 					lp.lastEntryTime.Format("2006-01-02 15:04:05.000 MST")))
 			})
@@ -1031,7 +1032,7 @@ func (lp *LogPanel) streamRowsToTable(rows *sql.Rows, clearFirst bool) {
 
 		// Update title with final time range
 		lp.app.tviewApp.QueueUpdateDraw(func() {
-			lp.logDetails.SetTitle(fmt.Sprintf("Log Entries [yellow](Ctrl+PageUp/Ctlr+PageDown to load more)[-] | From: %s To: %s",
+			lp.logDetails.Table.SetTitle(fmt.Sprintf("Log Entries [yellow](Ctrl+PageUp/Ctlr+PageDown to load more)[-] | From: %s To: %s",
 				lp.firstEntryTime.Format("2006-01-02 15:04:05.000 MST"),
 				lp.lastEntryTime.Format("2006-01-02 15:04:05.000 MST")))
 		})
@@ -1043,7 +1044,7 @@ func (lp *LogPanel) streamRowsToTable(rows *sql.Rows, clearFirst bool) {
 	lp.app.tviewApp.QueueUpdateDraw(func() {
 		lp.updateOverviewWithStats(levelCounts, lp.totalRows)
 		// Set focus to logDetails table after logs are loaded
-		lp.app.tviewApp.SetFocus(lp.logDetails)
+		lp.app.tviewApp.SetFocus(lp.logDetails.Table)
 	})
 }
 
@@ -1061,7 +1062,7 @@ func (lp *LogPanel) processBatch(batch []LogEntry, startRow int) {
 			if entry.Level != "" {
 				messageCell.SetTextColor(lp.getColorForLevel(entry.Level))
 			}
-			
+
 			// Add row to filtered table
 			lp.logDetails.AddRow([]*tview.TableCell{timeCell, messageCell})
 		}
@@ -1099,7 +1100,7 @@ func (lp *LogPanel) setupTabNavigation(filterField *tview.DropDown, filterOp *tv
 		filterOp,
 		filterValue,
 		addFilterBtn,
-		lp.logDetails,
+		lp.logDetails.Table,
 	}
 
 	// Helper function to create tab navigation handler
@@ -1127,8 +1128,8 @@ func (lp *LogPanel) setupTabNavigation(filterField *tview.DropDown, filterOp *tv
 	addFilterBtn.SetInputCapture(createTabHandler(3))
 
 	// For logDetails, we need to preserve existing input capture and add tab navigation
-	existingHandler := lp.logDetails.GetInputCapture()
-	lp.logDetails.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+	existingHandler := lp.logDetails.Table.GetInputCapture()
+	lp.logDetails.Table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		// Handle tab navigation first
 		if event.Key() == tcell.KeyTab {
 			lp.app.tviewApp.SetFocus(focusableItems[0]) // Go back to first component
