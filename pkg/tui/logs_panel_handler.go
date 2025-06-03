@@ -88,6 +88,12 @@ func (w *WrappingButtonFormItem) GetFieldHeight() int {
 	return 3 // Allocate 3 lines for this item. Text will wrap and scroll within this height.
 }
 
+// SetFieldHeight sets the height of the field.
+func (w *WrappingButtonFormItem) SetFieldHeight(height int) {
+	// This is a no-op since the height is determined by content
+	// The actual height is controlled by GetFieldHeight()
+}
+
 // SetForm sets the form to which this item belongs.
 func (w *WrappingButtonFormItem) SetForm(form *tview.Form) tview.FormItem {
 	w.form = form
