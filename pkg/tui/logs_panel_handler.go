@@ -382,7 +382,9 @@ func (lp *LogPanel) showLogExplorer() {
 		SetSelectable(true, false).
 		SetFixed(1, 0)
 	lp.logDetails.SetBorder(true).SetTitleAlign(tview.AlignLeft).
-		SetTitle(fmt.Sprintf("Log Entries [yellow](Ctrl+PageUp/Ctlr+PageDown to load more)[-]"))
+		SetTitle(fmt.Sprintf("Log Entries [yellow](Ctrl+PageUp/Ctlr+PageDown to load more)[-] | From: %s To: %s", 
+			lp.firstEntryTime.Format("2006-01-02 15:04:05.000 MST"),
+			lp.lastEntryTime.Format("2006-01-02 15:04:05.000 MST")))
 
 	// Add column headers
 	lp.logDetails.SetCell(0, 0, tview.NewTableCell("Time").SetTextColor(tcell.ColorYellow))
