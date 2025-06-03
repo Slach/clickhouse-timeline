@@ -377,22 +377,23 @@ func (lp *LogPanel) showLogExplorer() {
 	lp.mainFlex.AddItem(lp.overview, 3, 1, false)
 
 	// 3. Log Details Panel (60% height)
-	lp.logDetails = tview.NewTable().
-		SetBorders(false).
+	// Create filtered table with Time and Message columns
+	lp.logDetails = widgets.NewFilteredTable()
+	lp.logDetails.Table.SetBorders(false).
 		SetSelectable(true, false).
 		SetFixed(1, 0)
-	lp.logDetails.SetBorder(true).SetTitleAlign(tview.AlignLeft).
+	lp.logDetails.Table.SetBorder(true).SetTitleAlign(tview.AlignLeft).
 		SetTitle(fmt.Sprintf("Log Entries [yellow](Ctrl+PageUp/Ctlr+PageDown to load more)[-] | From: %s To: %s",
 			lp.firstEntryTime.Format("2006-01-02 15:04:05.000 MST"),
 			lp.lastEntryTime.Format("2006-01-02 15:04:05.000 MST")))
 
-	// Add column headers
-	lp.logDetails.SetCell(0, 0, tview.NewTableCell("Time").SetTextColor(tcell.ColorYellow))
-	lp.logDetails.SetCell(0, 1, tview.NewTableCell("Message").SetTextColor(tcell.ColorYellow))
+	// Setup headers
+	lp.logDetails.SetupHeaders([]string{"Time", "Message"})
 
-	// Handle keyboard navigation
-	lp.logDetails.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		rowNumber, _ := lp.logDetails.GetSelection()
+	// Handle keyboard navigation by combining table's input capture with filtered table's
+	existingHandler := lp.logDetails.GetInputCapture(lp.app.tviewApp, lp.app.pages)
+	lp.logDetails.Table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		rowNumber, _ := lp.logDetails.Table.GetSelection()
 		if event.Key() == tcell.KeyEnter {
 			if rowNumber > 0 && rowNumber <= lp.totalRows {
 				lp.showLogDetailsModal(rowNumber)
@@ -401,6 +402,11 @@ func (lp *LogPanel) showLogExplorer() {
 			go lp.loadMoreLogs(false) // Load older logs
 		} else if event.Key() == tcell.KeyPgDn && event.Modifiers()&tcell.ModCtrl != 0 {
 			go lp.loadMoreLogs(true) // Load newer logs
+		}
+		
+		// Let filtered table handle its own keybindings (like / for filter)
+		if result := existingHandler(event); result != nil {
+			return result
 		}
 		return event
 	})
@@ -923,10 +929,9 @@ func (lp *LogPanel) streamRowsToTable(rows *sql.Rows, clearFirst bool) {
 
 	lp.app.tviewApp.QueueUpdateDraw(func() {
 		if clearFirst {
-			lp.logDetails.Clear()
+			lp.logDetails.Table.Clear()
 			// Re-add headers
-			lp.logDetails.SetCell(0, 0, tview.NewTableCell("Time").SetTextColor(tcell.ColorYellow))
-			lp.logDetails.SetCell(0, 1, tview.NewTableCell("Message").SetTextColor(tcell.ColorYellow))
+			lp.logDetails.SetupHeaders([]string{"Time", "Message"})
 			lp.totalRows = 0
 		}
 	})
@@ -1049,17 +1054,16 @@ func (lp *LogPanel) processBatch(batch []LogEntry, startRow int) {
 			timeStr := lp.formatTimeForDisplay(entry)
 
 			// Store full entry in first cell's reference
-			timeCell := tview.NewTableCell(timeStr)
-			timeCell.SetReference(entry)
-			lp.logDetails.SetCell(row, 0, timeCell)
-
+			// Create cells with proper styling
+			timeCell := tview.NewTableCell(timeStr).
+				SetReference(entry)
 			messageCell := tview.NewTableCell(entry.Message)
-
-			// Color by level
 			if entry.Level != "" {
 				messageCell.SetTextColor(lp.getColorForLevel(entry.Level))
 			}
-			lp.logDetails.SetCell(row, 1, messageCell)
+			
+			// Add row to filtered table
+			lp.logDetails.AddRow([]*tview.TableCell{timeCell, messageCell})
 		}
 	})
 }
