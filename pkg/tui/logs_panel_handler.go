@@ -963,12 +963,26 @@ func (lp *LogPanel) streamRowsToTable(rows *sql.Rows, clearFirst bool) {
 		if len(batch) >= batchSize {
 			lp.processBatch(batch, rowIndex-len(batch))
 			batch = batch[:0] // Clear batch while keeping capacity
+			
+			// Update title with current time range
+			lp.app.tviewApp.QueueUpdateDraw(func() {
+				lp.logDetails.SetTitle(fmt.Sprintf("Log Entries [yellow](Ctrl+PageUp/Ctlr+PageDown to load more)[-] | From: %s To: %s", 
+					lp.firstEntryTime.Format("2006-01-02 15:04:05.000 MST"),
+					lp.lastEntryTime.Format("2006-01-02 15:04:05.000 MST")))
+			})
 		}
 	}
 
 	// Process any remaining entries in the batch
 	if len(batch) > 0 {
 		lp.processBatch(batch, rowIndex-len(batch))
+		
+		// Update title with final time range
+		lp.app.tviewApp.QueueUpdateDraw(func() {
+			lp.logDetails.SetTitle(fmt.Sprintf("Log Entries [yellow](Ctrl+PageUp/Ctlr+PageDown to load more)[-] | From: %s To: %s", 
+				lp.firstEntryTime.Format("2006-01-02 15:04:05.000 MST"),
+				lp.lastEntryTime.Format("2006-01-02 15:04:05.000 MST")))
+		})
 	}
 
 	lp.totalRows = rowIndex
