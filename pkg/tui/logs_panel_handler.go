@@ -462,19 +462,18 @@ func (lp *LogPanel) updateFilterDisplay(panel *tview.Flex) {
 	}
 
 	// Add current filters
-	for _, filter := range lp.filters {
+	for i, filter := range lp.filters {
 		filterText := fmt.Sprintf("%s %s %s", filter.Field, filter.Operator, filter.Value)
+		// Capture the index to avoid closure issues
+		filterIndex := i
 		filterBtn := tview.NewButton(filterText).
 			SetSelectedFunc(func() {
-				// Remove this filter
-				for i, f := range lp.filters {
-					if f == filter {
-						lp.filters = append(lp.filters[:i], lp.filters[i+1:]...)
-						break
-					}
+				// Remove this filter by index
+				if filterIndex < len(lp.filters) {
+					lp.filters = append(lp.filters[:filterIndex], lp.filters[filterIndex+1:]...)
+					lp.updateFilterDisplay(panel)
+					go lp.loadLogs()
 				}
-				lp.updateFilterDisplay(panel)
-				go lp.loadLogs()
 			}).
 			SetStyle(tcell.StyleDefault.Background(tcell.ColorDarkBlue)).
 			SetActivatedStyle(tcell.StyleDefault.Background(tcell.ColorRed))
