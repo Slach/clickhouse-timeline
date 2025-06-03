@@ -1066,7 +1066,21 @@ func (lp *LogPanel) setupTabNavigation(filterField *tview.DropDown, filterOp *tv
 			lp.app.tviewApp.SetFocus(focusableItems[0]) // Go back to first component
 			return nil
 		} else if event.Key() == tcell.KeyBacktab {
-			lp.app.tviewApp.SetFocus(focusableItems[3]) // Go to add button
+			// If we have filters, focus the last one added
+			if len(lp.filters) > 0 {
+				if filterFlex := lp.filterPanel.GetItem(0); filterFlex != nil {
+					if flex, ok := filterFlex.(*tview.Flex); ok {
+						// The last filter button is at index len(lp.filters) in filterPanel
+						lastFilterIndex := len(lp.filters)
+						if lastFilterIndex < lp.filterPanel.GetItemCount() {
+							lp.app.tviewApp.SetFocus(lp.filterPanel.GetItem(lastFilterIndex))
+						}
+					}
+				}
+			} else {
+				// No filters, focus the filter field
+				lp.app.tviewApp.SetFocus(filterField)
+			}
 			return nil
 		}
 		// Pass to existing handler if not tab navigation
