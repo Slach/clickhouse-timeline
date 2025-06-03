@@ -281,12 +281,11 @@ func (lp *LogPanel) updateFieldDropdowns(form *tview.Form) {
 		if fieldType == "DateTime" || fieldType == "Nullable(DateTime)" || strings.HasPrefix(fieldType, "DateTime(") || strings.HasPrefix(fieldType, "Nullable(DateTime(") {
 			timeColumns = append(timeColumns, fieldName)
 		}
-		if fieldType == "DateTime64" || strings.HasPrefix(fieldType, "DateTime64(") {
+		if fieldType == "DateTime64" || strings.HasPrefix(fieldType, "DateTime64(") || strings.HasPrefix(fieldType, "Nullable(DateTime64") {
 			timeMsColumns = append(timeMsColumns, fieldName)
 		}
 	}
 
-	// Update field dropdowns
 	lp.updateDropdownOptions(form, "Message Field", columns, func(field string, index int) {
 		lp.messageField = field
 	})
@@ -376,9 +375,9 @@ func (lp *LogPanel) showLogExplorer() {
 
 	filterFlex := tview.NewFlex().
 		AddItem(filterField, 0, 1, true).
-		AddItem(filterOp, 0, 1, true).
-		AddItem(filterValue, 0, 1, true).
-		AddItem(addFilterBtn, 10, 1, true)
+		AddItem(filterOp, 0, 1, false).
+		AddItem(filterValue, 0, 1, false).
+		AddItem(addFilterBtn, 10, 1, false)
 
 	// Ensure filterFlex (input row) is 1 row high, and does not take proportional space.
 	lp.filterPanel.AddItem(filterFlex, 1, 0, true)
