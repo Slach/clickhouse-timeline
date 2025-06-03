@@ -359,9 +359,9 @@ func (lp *LogPanel) showLogExplorer() {
 
 	filterFlex := tview.NewFlex().
 		AddItem(filterField, 0, 1, true).
-		AddItem(filterOp, 0, 1, false).
-		AddItem(filterValue, 0, 1, false).
-		AddItem(addFilterBtn, 10, 1, false)
+		AddItem(filterOp, 0, 1, true).
+		AddItem(filterValue, 0, 1, true).
+		AddItem(addFilterBtn, 10, 1, true)
 
 	// Ensure filterFlex (input row) is 1 row high, and does not take proportional space.
 	lp.filterPanel.AddItem(filterFlex, 1, 0, true)
