@@ -381,9 +381,8 @@ func (lp *LogPanel) showLogExplorer() {
 		SetBorders(false).
 		SetSelectable(true, false).
 		SetFixed(1, 0)
-	lp.logDetails.SetBorder(true).SetTitle("Log Entries").
-		SetTitleAlign(tview.AlignLeft).
-		SetTitle(fmt.Sprintf("Log Entries [yellow](Ctrl+PageUp/Down to load more)"))
+	lp.logDetails.SetBorder(true).SetTitleAlign(tview.AlignLeft).
+		SetTitle(fmt.Sprintf("Log Entries [yellow](Ctrl+PageUp/Ctlr+PageDown to load more)[-]"))
 
 	// Add column headers
 	lp.logDetails.SetCell(0, 0, tview.NewTableCell("Time").SetTextColor(tcell.ColorYellow))
