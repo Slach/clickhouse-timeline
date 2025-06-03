@@ -780,6 +780,7 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 				})
 				lp.updateFilterDisplay(lp.filterPanel)
 				lp.app.pages.RemovePage("logDetails")
+				lp.app.pages.SwitchToPage("logExplorer")
 				go lp.loadLogs()
 			})
 		}
@@ -806,14 +807,13 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 	detailsFlex.AddItem(instructionsText, 1, 0, false) // Instructions take 1 line
 
 	// Setup tab navigation between form and message
-
-	// Setup tab navigation between form and message
 	formPrimitive.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Key() == tcell.KeyTab {
 			lp.app.tviewApp.SetFocus(messageText)
 			return nil
 		} else if event.Key() == tcell.KeyEscape {
 			lp.app.pages.RemovePage("logDetails")
+			lp.app.pages.SwitchToPage("logExplorer")
 			return nil
 		}
 		return event
