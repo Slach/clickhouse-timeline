@@ -371,13 +371,18 @@ func (lp *LogPanel) showLogExplorer() {
 	initialFilterPanelHeight := 1 + len(lp.filters) + 2
 	lp.mainFlex.AddItem(lp.filterPanel, initialFilterPanelHeight, 1, false)
 
-	// 2. Log Details Panel (60% height)
+	// 2. Overview Panel (20% height)
+	lp.overview = tview.NewTextView().SetDynamicColors(true)
+	lp.overview.SetBorder(true).SetTitle("Overview").SetTitleAlign(tview.AlignLeft)
+	lp.mainFlex.AddItem(lp.overview, 3, 1, false)
+
+	// 3. Log Details Panel (60% height)
 	lp.logDetails = tview.NewTable().
 		SetBorders(false).
 		SetSelectable(true, false).
 		SetFixed(1, 0)
 	lp.logDetails.SetBorder(true).SetTitleAlign(tview.AlignLeft).
-		SetTitle(fmt.Sprintf("Log Entries [yellow](Ctrl+PageUp/Ctlr+PageDown to load more)[-] | From: %s To: %s", 
+		SetTitle(fmt.Sprintf("Log Entries [yellow](Ctrl+PageUp/Ctlr+PageDown to load more)[-] | From: %s To: %s",
 			lp.firstEntryTime.Format("2006-01-02 15:04:05.000 MST"),
 			lp.lastEntryTime.Format("2006-01-02 15:04:05.000 MST")))
 
@@ -401,11 +406,6 @@ func (lp *LogPanel) showLogExplorer() {
 	})
 
 	lp.mainFlex.AddItem(lp.logDetails, 0, 1, false)
-
-	// 3. Overview Panel (20% height)
-	lp.overview = tview.NewTextView().SetDynamicColors(true)
-	lp.overview.SetBorder(true).SetTitle("Overview").SetTitleAlign(tview.AlignLeft)
-	lp.mainFlex.AddItem(lp.overview, 3, 1, false)
 
 	// Set up tab navigation between all components
 	lp.setupTabNavigation(filterField, filterOp, filterValue, addFilterBtn)
@@ -706,7 +706,6 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 	// Create a flex layout for the details window
 	detailsFlex := tview.NewFlex().SetDirection(tview.FlexRow)
 
-
 	// Header section with time and level info
 	headerText := tview.NewTextView().
 		SetDynamicColors(true).
@@ -741,8 +740,7 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 	// Create a form for additional fields
 	fieldsForm := tview.NewForm()
 	fieldsForm.SetBorder(true).
-		SetTitle("Additional Fields (press Enter to filter)").
-		SetTitleAlign(tview.AlignLeft)
+		SetTitle("Additional Fields (press Enter to filter)")
 	formPrimitive := fieldsForm // Store as primitive for navigation
 
 	// Add all additional fields as buttons
@@ -786,7 +784,6 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 			})
 		}
 	}
-
 
 	// Message section with scrolling
 	messageText := tview.NewTextView().
@@ -993,10 +990,10 @@ func (lp *LogPanel) streamRowsToTable(rows *sql.Rows, clearFirst bool) {
 		if len(batch) >= batchSize {
 			lp.processBatch(batch, rowIndex-len(batch))
 			batch = batch[:0] // Clear batch while keeping capacity
-			
+
 			// Update title with current time range
 			lp.app.tviewApp.QueueUpdateDraw(func() {
-				lp.logDetails.SetTitle(fmt.Sprintf("Log Entries [yellow](Ctrl+PageUp/Ctlr+PageDown to load more)[-] | From: %s To: %s", 
+				lp.logDetails.SetTitle(fmt.Sprintf("Log Entries [yellow](Ctrl+PageUp/Ctlr+PageDown to load more)[-] | From: %s To: %s",
 					lp.firstEntryTime.Format("2006-01-02 15:04:05.000 MST"),
 					lp.lastEntryTime.Format("2006-01-02 15:04:05.000 MST")))
 			})
@@ -1006,10 +1003,10 @@ func (lp *LogPanel) streamRowsToTable(rows *sql.Rows, clearFirst bool) {
 	// Process any remaining entries in the batch
 	if len(batch) > 0 {
 		lp.processBatch(batch, rowIndex-len(batch))
-		
+
 		// Update title with final time range
 		lp.app.tviewApp.QueueUpdateDraw(func() {
-			lp.logDetails.SetTitle(fmt.Sprintf("Log Entries [yellow](Ctrl+PageUp/Ctlr+PageDown to load more)[-] | From: %s To: %s", 
+			lp.logDetails.SetTitle(fmt.Sprintf("Log Entries [yellow](Ctrl+PageUp/Ctlr+PageDown to load more)[-] | From: %s To: %s",
 				lp.firstEntryTime.Format("2006-01-02 15:04:05.000 MST"),
 				lp.lastEntryTime.Format("2006-01-02 15:04:05.000 MST")))
 		})
