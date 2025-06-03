@@ -85,13 +85,21 @@ func (w *WrappingButtonFormItem) GetFieldWidth() int { return 0 }
 
 // GetFieldHeight returns the height of the field.
 func (w *WrappingButtonFormItem) GetFieldHeight() int {
-	return 3 // Allocate 3 lines for this item. Text will wrap and scroll within this height.
+	// Return stored height if set, otherwise default to 3 lines
+	if w.TextView.GetLineCount() > 0 {
+		return w.TextView.GetLineCount()
+	}
+	return 3
 }
 
 // SetFieldHeight sets the height of the field.
 func (w *WrappingButtonFormItem) SetFieldHeight(height int) {
-	// This is a no-op since the height is determined by content
-	// The actual height is controlled by GetFieldHeight()
+	// Ensure minimum height of 1 line
+	if height < 1 {
+		height = 1
+	}
+	// Set the TextView's height to match
+	w.TextView.SetText(w.TextView.GetText(true)) // Refresh text with new height
 }
 
 // SetForm sets the form to which this item belongs.
