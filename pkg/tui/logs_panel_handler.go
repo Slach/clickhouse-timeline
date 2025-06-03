@@ -739,8 +739,8 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 	headerText.SetText(headerBuilder.String())
 
 	// Create a form for additional fields
-	fieldsForm := tview.NewForm().
-		SetBorder(true).
+	fieldsForm := tview.NewForm()
+	fieldsForm.SetBorder(true).
 		SetTitle("Additional Fields (press Enter to filter)").
 		SetTitleAlign(tview.AlignLeft)
 	formPrimitive := fieldsForm // Store as primitive for navigation
