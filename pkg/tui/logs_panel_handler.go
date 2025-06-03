@@ -1031,10 +1031,9 @@ func (lp *LogPanel) setupTabNavigation(filterField *tview.DropDown, filterOp *tv
 		lp.logDetails,
 	}
 
-	// Set up tab navigation
-	for i, component := range focusables {
-		currentIndex := i
-		component.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+	// Helper function to create tab navigation handler
+	createTabHandler := func(currentIndex int) func(event *tcell.EventKey) *tcell.EventKey {
+		return func(event *tcell.EventKey) *tcell.EventKey {
 			if event.Key() == tcell.KeyTab {
 				// Move to next component
 				nextIndex := (currentIndex + 1) % len(focusables)
@@ -1047,8 +1046,32 @@ func (lp *LogPanel) setupTabNavigation(filterField *tview.DropDown, filterOp *tv
 				return nil
 			}
 			return event
-		})
+		}
 	}
+
+	// Set up tab navigation for each component type
+	filterField.SetInputCapture(createTabHandler(0))
+	filterOp.SetInputCapture(createTabHandler(1))
+	filterValue.SetInputCapture(createTabHandler(2))
+	addFilterBtn.SetInputCapture(createTabHandler(3))
+	
+	// For logDetails, we need to preserve existing input capture and add tab navigation
+	existingHandler := lp.logDetails.GetInputCapture()
+	lp.logDetails.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		// Handle tab navigation first
+		if event.Key() == tcell.KeyTab {
+			lp.app.tviewApp.SetFocus(focusables[0]) // Go back to first component
+			return nil
+		} else if event.Key() == tcell.KeyBacktab {
+			lp.app.tviewApp.SetFocus(focusables[3]) // Go to add button
+			return nil
+		}
+		// Pass to existing handler if not tab navigation
+		if existingHandler != nil {
+			return existingHandler(event)
+		}
+		return event
+	})
 
 	// Set initial focus to the first filter field
 	lp.app.tviewApp.SetFocus(filterField)
