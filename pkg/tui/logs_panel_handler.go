@@ -358,18 +358,18 @@ func (lp *LogPanel) showLogExplorer() {
 		})
 
 	filterFlex := tview.NewFlex().
-		AddItem(filterField, 0, 1, true).
-		AddItem(filterOp, 0, 1, true).
-		AddItem(filterValue, 0, 1, true).
-		AddItem(addFilterBtn, 10, 1, true)
+		AddItem(filterField, 0, 1, false).
+		AddItem(filterOp, 0, 1, false).
+		AddItem(filterValue, 0, 1, false).
+		AddItem(addFilterBtn, 10, 1, false)
 
 	// Ensure filterFlex (input row) is 1 row high, and does not take proportional space.
-	lp.filterPanel.AddItem(filterFlex, 1, 0, true)
+	lp.filterPanel.AddItem(filterFlex, 1, 0, false)
 
 	// Add filterPanel to mainFlex. Height = 1 (input row) + num_filters + 2 (panel border).
 	// Proportion is 1, consistent with other elements.
 	initialFilterPanelHeight := 1 + len(lp.filters) + 2
-	lp.mainFlex.AddItem(lp.filterPanel, initialFilterPanelHeight, 1, true)
+	lp.mainFlex.AddItem(lp.filterPanel, initialFilterPanelHeight, 1, false)
 
 	// 2. Overview Panel (20% height)
 	lp.overview = tview.NewTextView().SetDynamicColors(true)
@@ -402,7 +402,10 @@ func (lp *LogPanel) showLogExplorer() {
 		return event
 	})
 
-	lp.mainFlex.AddItem(lp.logDetails, 0, 1, true)
+	lp.mainFlex.AddItem(lp.logDetails, 0, 1, false)
+
+	// Set up tab navigation between all components
+	lp.setupTabNavigation(filterField, filterOp, filterValue, addFilterBtn)
 
 	lp.app.pages.AddPage("logExplorer", lp.mainFlex, true, true)
 	lp.app.pages.SwitchToPage("logExplorer")
@@ -475,8 +478,26 @@ func (lp *LogPanel) updateFilterDisplay(panel *tview.Flex) {
 			}).
 			SetStyle(tcell.StyleDefault.Background(tcell.ColorDarkBlue)).
 			SetActivatedStyle(tcell.StyleDefault.Background(tcell.ColorRed))
+
+		// Add tab navigation for filter buttons
+		filterBtn.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+			if event.Key() == tcell.KeyTab {
+				lp.app.tviewApp.SetFocus(lp.logDetails)
+				return nil
+			} else if event.Key() == tcell.KeyBacktab {
+				// Focus back to the filter input area
+				if filterFlex := panel.GetItem(0); filterFlex != nil {
+					if flex, ok := filterFlex.(*tview.Flex); ok && flex.GetItemCount() > 0 {
+						lp.app.tviewApp.SetFocus(flex.GetItem(0))
+					}
+				}
+				return nil
+			}
+			return event
+		})
+
 		// Ensure filterBtn is 1 row high, and does not take proportional space.
-		panel.AddItem(filterBtn, 1, 0, true)
+		panel.AddItem(filterBtn, 1, 0, false)
 	}
 
 	// Dynamically adjust the height of the filterPanel in mainFlex
@@ -998,6 +1019,39 @@ func (lp *LogPanel) getColorForLevel(level string) tcell.Color {
 	default:
 		return tcell.ColorWhite
 	}
+}
+
+func (lp *LogPanel) setupTabNavigation(filterField *tview.DropDown, filterOp *tview.DropDown, filterValue *tview.InputField, addFilterBtn *tview.Button) {
+	// Create a list of all focusable components in order
+	focusables := []tview.Primitive{
+		filterField,
+		filterOp,
+		filterValue,
+		addFilterBtn,
+		lp.logDetails,
+	}
+
+	// Set up tab navigation
+	for i, component := range focusables {
+		currentIndex := i
+		component.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+			if event.Key() == tcell.KeyTab {
+				// Move to next component
+				nextIndex := (currentIndex + 1) % len(focusables)
+				lp.app.tviewApp.SetFocus(focusables[nextIndex])
+				return nil
+			} else if event.Key() == tcell.KeyBacktab {
+				// Move to previous component
+				prevIndex := (currentIndex - 1 + len(focusables)) % len(focusables)
+				lp.app.tviewApp.SetFocus(focusables[prevIndex])
+				return nil
+			}
+			return event
+		})
+	}
+
+	// Set initial focus to the first filter field
+	lp.app.tviewApp.SetFocus(filterField)
 }
 
 func ternary(condition bool, trueVal, falseVal string) string {
