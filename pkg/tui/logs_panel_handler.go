@@ -328,7 +328,7 @@ func (lp *LogPanel) showLogExplorer() {
 
 	// 1. AdHoc Filter Panel (1 line height)
 	lp.filterPanel = tview.NewFlex().SetDirection(tview.FlexRow)
-	lp.filterPanel.SetBorder(true).SetTitle("Filters")
+	lp.filterPanel.SetBorder(true).SetTitle("Filters").SetTitleAlign(tview.AlignLeft)
 
 	// Filter input components
 	filterField := tview.NewDropDown().
@@ -404,7 +404,7 @@ func (lp *LogPanel) showLogExplorer() {
 
 	// 3. Overview Panel (20% height)
 	lp.overview = tview.NewTextView().SetDynamicColors(true)
-	lp.overview.SetBorder(true).SetTitle("Overview")
+	lp.overview.SetBorder(true).SetTitle("Overview").SetTitleAlign(tview.AlignLeft)
 	lp.mainFlex.AddItem(lp.overview, 3, 1, false)
 
 	// Set up tab navigation between all components
