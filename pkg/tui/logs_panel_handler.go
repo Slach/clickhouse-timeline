@@ -706,8 +706,6 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 	// Create a flex layout for the details window
 	detailsFlex := tview.NewFlex().SetDirection(tview.FlexRow)
 
-	// Create a list to hold all focusable components
-	var focusableItems []tview.Primitive
 
 	// Header section with time and level info
 	headerText := tview.NewTextView().
@@ -745,6 +743,7 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 		SetBorder(true).
 		SetTitle("Additional Fields (press Enter to filter)").
 		SetTitleAlign(tview.AlignLeft)
+	formPrimitive := fieldsForm // Store as primitive for navigation
 
 	// Add all additional fields as buttons
 	if len(entry.AllFields) > 0 {
@@ -788,8 +787,6 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 		}
 	}
 
-	// Convert form to primitive for tab navigation
-	formPrimitive := fieldsForm
 
 	// Message section with scrolling
 	messageText := tview.NewTextView().
@@ -811,8 +808,7 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 	detailsFlex.AddItem(messageText, 0, 3, true)       // Message takes most space
 	detailsFlex.AddItem(instructionsText, 1, 0, false) // Instructions take 1 line
 
-	// Collect focusable items for tab navigation
-	focusableItems = []tview.Primitive{formPrimitive, messageText}
+	// Setup tab navigation between form and message
 
 	// Setup tab navigation between form and message
 	formPrimitive.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
