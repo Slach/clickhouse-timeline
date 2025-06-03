@@ -779,8 +779,8 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 				value string
 			}{field, valueStr})
 
-			// Add to list with formatted text
-			listText := fmt.Sprintf("[yellow]%s:[-] %s", field, valueStr)
+			// Add to list with formatted text and blue background
+			listText := fmt.Sprintf("[black:blue] %s: %s ", field, valueStr)
 			fieldsList.AddItem(listText, "", 0, nil)
 		}
 	}
