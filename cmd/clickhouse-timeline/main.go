@@ -18,16 +18,6 @@ func main() {
 	cliInstance := &types.CLI{}
 	rootCmd := cli.NewRootCommand(cliInstance, version)
 
-	// Setup profiling if enabled
-	if cliInstance.Pprof {
-		if err := pprof.Setup(cliInstance.PprofPath); err != nil {
-			log.Error().Msgf("Failed to setup profiling: %v", err)
-			fmt.Printf("Failed to setup profiling: %v\n", err)
-			os.Exit(1)
-		}
-		defer pprof.Stop(cliInstance.PprofPath)
-	}
-
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)

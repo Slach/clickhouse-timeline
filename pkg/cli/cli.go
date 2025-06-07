@@ -8,6 +8,7 @@ import (
 
 	"github.com/Slach/clickhouse-timeline/pkg/config"
 	"github.com/Slach/clickhouse-timeline/pkg/logging"
+	"github.com/Slach/clickhouse-timeline/pkg/pprof"
 	"github.com/rs/zerolog/log"
 
 	"github.com/Slach/clickhouse-timeline/pkg/tui"
@@ -124,6 +125,16 @@ func RunRootCommand(cliInstance *types.CLI, version string, cmd *cobra.Command, 
 	// Set default pprof path if not provided and profiling is enabled
 	if cliInstance.Pprof && cliInstance.PprofPath == "" {
 		cliInstance.PprofPath = home
+	}
+
+	// Setup profiling if enabled
+	if cliInstance.Pprof {
+		if err := pprof.Setup(cliInstance.PprofPath); err != nil {
+			log.Error().Msgf("Failed to setup profiling: %v", err)
+			fmt.Printf("Failed to setup profiling: %v\n", err)
+			os.Exit(1)
+		}
+		defer pprof.Stop(cliInstance.PprofPath)
 	}
 
 	// Initialize logging
