@@ -842,6 +842,7 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 		} else if event.Key() == tcell.KeyEscape {
 			lp.app.pages.RemovePage("logDetails")
 			lp.app.pages.SwitchToPage("logExplorer")
+			lp.app.tviewApp.SetFocus(lp.logDetails.Table)
 			return nil
 		}
 		return event
@@ -853,6 +854,8 @@ func (lp *LogPanel) showLogDetailsModalWithEntry(entry LogEntry) {
 			return nil
 		} else if event.Key() == tcell.KeyEscape {
 			lp.app.pages.RemovePage("logDetails")
+			lp.app.pages.SwitchToPage("logExplorer")
+			lp.app.tviewApp.SetFocus(lp.logDetails.Table)
 			return nil
 		}
 		return event
