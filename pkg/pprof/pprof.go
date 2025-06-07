@@ -6,11 +6,18 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/pprof"
+	"time"
 
 	"github.com/rs/zerolog/log"
 )
 
-// Setup starts CPU profiling if pprofPath is provided
+var (
+	memProfileFile *os.File
+	memProfileTicker *time.Ticker
+	memProfileDone chan bool
+)
+
+// Setup starts CPU and memory profiling if pprofPath is provided
 func Setup(pprofPath string) error {
 	if pprofPath == "" {
 		return nil // No profiling requested
@@ -43,10 +50,17 @@ func Setup(pprofPath string) error {
 	}
 
 	log.Info().Str("path", cpuFile).Msg("CPU profiling started")
+
+	// Start continuous memory profiling
+	if err := startMemoryProfiling(pprofPath); err != nil {
+		log.Error().Err(err).Msg("Failed to start memory profiling")
+		// Don't fail the entire setup if memory profiling fails
+	}
+
 	return nil
 }
 
-// Stop stops CPU profiling and writes memory profile
+// Stop stops CPU and memory profiling
 func Stop(pprofPath string) {
 	if pprofPath == "" {
 		return // No profiling was started
@@ -55,7 +69,10 @@ func Stop(pprofPath string) {
 	// Stop CPU profiling
 	pprof.StopCPUProfile()
 
-	// Write memory profile
+	// Stop continuous memory profiling
+	stopMemoryProfiling()
+
+	// Write final memory profile
 	memFile := filepath.Join(pprofPath, "memory.pprof")
 	f, err := os.Create(memFile)
 	if err != nil {
@@ -71,4 +88,56 @@ func Stop(pprofPath string) {
 	}
 
 	log.Info().Str("path", memFile).Msg("Memory profile written")
+}
+
+// startMemoryProfiling starts continuous memory profiling
+func startMemoryProfiling(pprofPath string) error {
+	// Create memory profile file for continuous profiling
+	memFile := filepath.Join(pprofPath, "memory_continuous.pprof")
+	f, err := os.Create(memFile)
+	if err != nil {
+		return fmt.Errorf("could not create continuous memory profile file: %w", err)
+	}
+
+	memProfileFile = f
+	memProfileDone = make(chan bool)
+	memProfileTicker = time.NewTicker(30 * time.Second) // Sample every 30 seconds
+
+	// Start goroutine for continuous memory profiling
+	go func() {
+		defer memProfileFile.Close()
+		
+		for {
+			select {
+			case <-memProfileTicker.C:
+				// Write memory profile sample
+				runtime.GC() // Force GC to get accurate stats
+				if err := pprof.WriteHeapProfile(memProfileFile); err != nil {
+					log.Error().Err(err).Msg("Failed to write memory profile sample")
+				}
+				// Add separator for multiple samples in same file
+				memProfileFile.WriteString("\n--- Memory Sample ---\n")
+				
+			case <-memProfileDone:
+				return
+			}
+		}
+	}()
+
+	log.Info().Str("path", memFile).Msg("Continuous memory profiling started (30s intervals)")
+	return nil
+}
+
+// stopMemoryProfiling stops continuous memory profiling
+func stopMemoryProfiling() {
+	if memProfileTicker != nil {
+		memProfileTicker.Stop()
+	}
+	if memProfileDone != nil {
+		close(memProfileDone)
+	}
+	if memProfileFile != nil {
+		memProfileFile.Close()
+	}
+	log.Info().Msg("Continuous memory profiling stopped")
 }
