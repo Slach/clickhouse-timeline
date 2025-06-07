@@ -13,15 +13,24 @@ type FilteredTable struct {
 	Headers      []string
 	OriginalRows [][]*tview.TableCell
 	maxCellWidth int // Maximum width for cell content to prevent excessive Unicode processing
+	filterInput  *tview.InputField
+	currentFilter string
 }
 
 func NewFilteredTable() *FilteredTable {
-	return &FilteredTable{
+	ft := &FilteredTable{
 		Table: tview.NewTable().
 			SetBorders(false).
 			SetSelectable(true, true),
 		maxCellWidth: 200, // Default max width to limit Unicode processing
 	}
+	
+	// Create persistent filter input
+	ft.filterInput = tview.NewInputField().
+		SetLabel("/").
+		SetFieldWidth(30)
+	
+	return ft
 }
 
 func (ft *FilteredTable) SetupHeaders(headers []string) {
@@ -91,16 +100,21 @@ func (ft *FilteredTable) FilterTable(filter string) {
 func (ft *FilteredTable) GetInputCapture(app *tview.Application, pages *tview.Pages) func(event *tcell.EventKey) *tcell.EventKey {
 	return func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Rune() == '/' {
-			// Show filter input for table content
-			filterInput := tview.NewInputField().
-				SetLabel("/").
-				SetFieldWidth(30).
-				SetChangedFunc(func(text string) {
-					ft.FilterTable(text)
-				})
-
-			filterInput.SetDoneFunc(func(key tcell.Key) {
-				if key == tcell.KeyEscape || key == tcell.KeyEnter {
+			// Set current filter value in the persistent input
+			ft.filterInput.SetText(ft.currentFilter)
+			
+			// Set up the input handlers
+			ft.filterInput.SetDoneFunc(func(key tcell.Key) {
+				if key == tcell.KeyEscape {
+					// Restore previous filter value and close
+					ft.filterInput.SetText(ft.currentFilter)
+					pages.RemovePage("table_filter")
+					app.SetFocus(ft.Table)
+				} else if key == tcell.KeyEnter {
+					// Apply the filter and close
+					newFilter := ft.filterInput.GetText()
+					ft.currentFilter = newFilter
+					ft.FilterTable(newFilter)
 					pages.RemovePage("table_filter")
 					app.SetFocus(ft.Table)
 				}
@@ -108,11 +122,11 @@ func (ft *FilteredTable) GetInputCapture(app *tview.Application, pages *tview.Pa
 
 			filterModal := tview.NewFlex().
 				SetDirection(tview.FlexRow).
-				AddItem(filterInput, 1, 0, true).
+				AddItem(ft.filterInput, 1, 0, true).
 				AddItem(ft.Table, 0, 1, false)
 
 			pages.AddPage("table_filter", filterModal, true, true)
-			app.SetFocus(filterInput)
+			app.SetFocus(ft.filterInput)
 			return nil
 		}
 		// Return the event so the table can handle navigation keys
