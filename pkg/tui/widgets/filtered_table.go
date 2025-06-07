@@ -20,7 +20,7 @@ func NewFilteredTable() *FilteredTable {
 		Table: tview.NewTable().
 			SetBorders(false).
 			SetSelectable(true, true),
-		maxCellWidth: 100, // Default max width to limit Unicode processing
+		maxCellWidth: 200, // Default max width to limit Unicode processing
 	}
 }
 
@@ -48,13 +48,13 @@ func (ft *FilteredTable) SetRow(row int, cells []*tview.TableCell) {
 			optimizedCells[i] = ft.optimizeCell(cell)
 		}
 	}
-	
+
 	for col, cell := range optimizedCells {
 		if col < len(ft.Headers) && cell != nil {
 			ft.Table.SetCell(row, col, cell)
 		}
 	}
-	
+
 	// Ensure we have enough capacity in OriginalRows
 	for len(ft.OriginalRows) <= row {
 		ft.OriginalRows = append(ft.OriginalRows, nil)
@@ -65,10 +65,10 @@ func (ft *FilteredTable) SetRow(row int, cells []*tview.TableCell) {
 func (ft *FilteredTable) FilterTable(filter string) {
 	// Store current selection to restore later
 	currentRow, currentCol := ft.Table.GetSelection()
-	
+
 	// Clear all rows at once by setting row count to 1 (keep headers)
 	ft.Table.Clear()
-	
+
 	// Re-add headers efficiently
 	ft.addHeadersOptimized()
 
@@ -79,7 +79,7 @@ func (ft *FilteredTable) FilterTable(filter string) {
 		// Apply filter with optimized matching
 		ft.applyFilterOptimized(filter)
 	}
-	
+
 	// Restore selection if possible
 	if currentRow > 0 && currentRow < ft.Table.GetRowCount() {
 		ft.Table.Select(currentRow, currentCol)
@@ -124,12 +124,12 @@ func (ft *FilteredTable) optimizeCell(cell *tview.TableCell) *tview.TableCell {
 	if cell == nil {
 		return cell
 	}
-	
+
 	text := cell.Text
 	if text == "" {
 		return cell
 	}
-	
+
 	// Truncate text to prevent excessive Unicode processing
 	if utf8.RuneCountInString(text) > ft.maxCellWidth {
 		runes := []rune(text)
@@ -137,7 +137,7 @@ func (ft *FilteredTable) optimizeCell(cell *tview.TableCell) *tview.TableCell {
 			text = string(runes[:ft.maxCellWidth-3]) + "..."
 		}
 	}
-	
+
 	// Create new cell with optimized text, preserving other properties
 	newCell := tview.NewTableCell(text).
 		SetTextColor(cell.Color).
@@ -145,7 +145,7 @@ func (ft *FilteredTable) optimizeCell(cell *tview.TableCell) *tview.TableCell {
 		SetAlign(cell.Align).
 		SetReference(cell.Reference).
 		SetExpansion(cell.Expansion)
-	
+
 	return newCell
 }
 
@@ -177,12 +177,12 @@ func (ft *FilteredTable) restoreAllRows() {
 func (ft *FilteredTable) applyFilterOptimized(filter string) {
 	filter = strings.ToLower(filter)
 	displayRow := 1 // Start after header
-	
+
 	for _, row := range ft.OriginalRows {
 		if row == nil {
 			continue
 		}
-		
+
 		// Optimized matching - check only visible columns and use simple string contains
 		match := false
 		for col, cell := range row {
@@ -208,9 +208,4 @@ func (ft *FilteredTable) applyFilterOptimized(filter string) {
 			displayRow++
 		}
 	}
-}
-
-// SetMaxCellWidth allows configuring the maximum cell width to control Unicode processing overhead
-func (ft *FilteredTable) SetMaxCellWidth(width int) {
-	ft.maxCellWidth = width
 }
