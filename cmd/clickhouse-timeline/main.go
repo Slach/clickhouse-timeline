@@ -2,12 +2,10 @@ package main
 
 import (
 	"fmt"
-	"github.com/rs/zerolog/log"
 	"os"
 
 	"github.com/Slach/clickhouse-timeline/pkg/cli"
 	"github.com/Slach/clickhouse-timeline/pkg/logging"
-	"github.com/Slach/clickhouse-timeline/pkg/pprof"
 	"github.com/Slach/clickhouse-timeline/pkg/types"
 )
 

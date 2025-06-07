@@ -12,9 +12,9 @@ import (
 )
 
 var (
-	memProfileFile *os.File
+	memProfileFile   *os.File
 	memProfileTicker *time.Ticker
-	memProfileDone chan bool
+	memProfileDone   chan bool
 )
 
 // Setup starts CPU and memory profiling
@@ -40,9 +40,11 @@ func Setup(pprofPath string) error {
 		return fmt.Errorf("could not create CPU profile file: %w", err)
 	}
 
-	if err := pprof.StartCPUProfile(f); err != nil {
-		f.Close()
-		return fmt.Errorf("could not start CPU profile: %w", err)
+	if startCPUErr := pprof.StartCPUProfile(f); startCPUErr != nil {
+		if closeErr := f.Close(); closeErr != nil {
+			log.Error().Err(closeErr).Msgf("can't close %s", cpuFile)
+		}
+		return fmt.Errorf("could not start CPU profile: %w", startCPUErr)
 	}
 
 	log.Info().Str("path", cpuFile).Msg("CPU profiling started")
@@ -108,7 +110,7 @@ func startMemoryProfiling(pprofPath string) error {
 	// Start goroutine for continuous memory profiling
 	go func() {
 		defer memProfileFile.Close()
-		
+
 		for {
 			select {
 			case <-memProfileTicker.C:
@@ -119,7 +121,7 @@ func startMemoryProfiling(pprofPath string) error {
 				}
 				// Add separator for multiple samples in same file
 				memProfileFile.WriteString("\n--- Memory Sample ---\n")
-				
+
 			case <-memProfileDone:
 				return
 			}
