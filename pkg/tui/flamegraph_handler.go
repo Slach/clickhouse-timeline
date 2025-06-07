@@ -371,7 +371,7 @@ func (a *App) ShowFlamegraphForm(params ...FlamegraphParams) {
 	// Define generate function
 	generateFunc := func() {
 		if (categoryType != "" && categoryValue == "") || traceType == "" {
-			a.mainView.SetText("Error: Category Value and Trace Type are required")
+			a.SwitchToMainPage("Error: Category Value and Trace Type are required")
 			return
 		}
 		// Clear the main view, switch to main page, and then generate flamegraph

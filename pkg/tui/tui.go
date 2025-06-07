@@ -172,10 +172,8 @@ func (a *App) ApplyCLIParameters(c *types.CLI, commandName string) {
 
 	if mainMsg != "" {
 		mainMsg += "Press ':' to continue"
-	} else {
-		mainMsg = logo + "\nWelcome to ClickHouse Timeline\nPress ':' to enter command mode"
+		a.mainView.SetText(mainMsg)
 	}
-	a.mainView.SetText(mainMsg)
 }
 
 func (a *App) SetFromTime(t time.Time) {
