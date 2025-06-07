@@ -139,6 +139,11 @@ func (ft *FilteredTable) optimizeCell(cell *tview.TableCell) *tview.TableCell {
 		}
 	}
 
+	// If text wasn't changed, return original cell to preserve all properties
+	if text == cell.Text {
+		return cell
+	}
+
 	// Create new cell with optimized text, preserving other properties
 	newCell := tview.NewTableCell(text).
 		SetTextColor(cell.Color).
