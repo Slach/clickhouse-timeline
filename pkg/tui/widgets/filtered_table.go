@@ -147,9 +147,10 @@ func (ft *FilteredTable) optimizeCell(cell *tview.TableCell) *tview.TableCell {
 	// Create new cell with optimized text, preserving other properties
 	newCell := tview.NewTableCell(text).
 		SetTextColor(cell.Color).
-		SetSelectable(true).
-		SetSelectedStyle(cell.SelectedStyle).
 		SetBackgroundColor(cell.BackgroundColor).
+		SetSelectable(!cell.NotSelectable).
+		SetStyle(cell.Style).
+		SetSelectedStyle(cell.SelectedStyle).
 		SetAlign(cell.Align).
 		SetReference(cell.Reference).
 		SetExpansion(cell.Expansion)
