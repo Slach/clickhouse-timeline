@@ -27,6 +27,7 @@ func NewRootCommand(cli *types.CLI, version string) *cobra.Command {
 	// Add global flags
 	rootCmd.PersistentFlags().StringVar(&cli.ConfigPath, "config", "", "Path to config file (default: ~/.clickhouse-timeline/clickhouse-timeline.yml)")
 	rootCmd.PersistentFlags().StringVar(&cli.LogPath, "log", "", "Path to log file (default: ~/.clickhouse-timeline/clickhouse-timeline.log)")
+	rootCmd.PersistentFlags().StringVar(&cli.PprofPath, "pprof", "", "Path to store pprof files (default: ~/.clickhouse-timeline/)")
 	rootCmd.PersistentFlags().StringVar(&cli.FromTime, "from", "", "Start time (in any parsable format, see https://github.com/araddon/dateparse)")
 	rootCmd.PersistentFlags().StringVar(&cli.ToTime, "to", "", "End time (in any parsable format, see https://github.com/araddon/dateparse)")
 	rootCmd.PersistentFlags().StringVar(&cli.RangeOption, "range", "", "Predefined time range (e.g. 1h, 24h, 7d)")
@@ -118,6 +119,11 @@ func RunRootCommand(cliInstance *types.CLI, version string, cmd *cobra.Command, 
 		log.Fatal().Stack().Err(homeErr).Msg("failed to get user home directory")
 	}
 	home = filepath.Join(home, ".clickhouse-timeline")
+
+	// Set default pprof path if not provided
+	if cliInstance.PprofPath == "" {
+		cliInstance.PprofPath = home
+	}
 
 	// Initialize logging
 	if initLogErr := logging.InitLogFile(cliInstance, version); initLogErr != nil {
