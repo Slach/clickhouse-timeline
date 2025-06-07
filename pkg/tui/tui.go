@@ -287,9 +287,22 @@ func (a *App) ApplyPredefinedRange(rangeOption string) {
 
 func (a *App) setupUI() {
 	a.pages = tview.NewPages()
+	
+	// ClickHouse ASCII logo
+	logo := `
+   _____ _ _      _    _    _                        
+  / ____| (_)    | |  | |  | |                       
+ | |    | |_  ___| | _| |__| | ___  _   _ ___  ___    
+ | |    | | |/ __| |/ /  __  |/ _ \| | | / __|/ _ \   
+ | |____| | | (__|   <| |  | | (_) | |_| \__ \  __/   
+  \_____|_|_|\___|_|\_\_|  |_|\___/ \__,_|___/\___|   
+                                                      
+                 Timeline Analysis Tool              
+`
+	
 	a.mainView = tview.NewTextView().
 		SetTextAlign(tview.AlignLeft).
-		SetText("Welcome to ClickHouse Timeline\nPress ':' to enter command mode")
+		SetText(logo + "\nWelcome to ClickHouse Timeline\nPress ':' to enter command mode")
 
 	a.connectList = tview.NewList()
 	a.connectList.SetMainTextColor(tcell.ColorWhite)
