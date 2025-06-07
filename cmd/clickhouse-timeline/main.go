@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/rs/zerolog/log"
 	"os"
 
 	"github.com/Slach/clickhouse-timeline/pkg/cli"
@@ -20,6 +21,7 @@ func main() {
 	// Setup profiling if enabled
 	if cliInstance.Pprof {
 		if err := pprof.Setup(cliInstance.PprofPath); err != nil {
+			log.Error().Msgf("Failed to setup profiling: %v", err)
 			fmt.Printf("Failed to setup profiling: %v\n", err)
 			os.Exit(1)
 		}
