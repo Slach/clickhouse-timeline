@@ -178,3 +178,90 @@ func TestFilteredTable_Performance(t *testing.T) {
 		})
 	}
 }
+
+// BenchmarkFilteredTable_RealWorldSlowNavigation reproduces the exact issue from manual testing
+// This simulates: load 5000 rows, press "/", enter "NULL", then navigate with up/down keys
+func BenchmarkFilteredTable_RealWorldSlowNavigation(b *testing.B) {
+	b.Run("simulate_manual_test_scenario", func(b *testing.B) {
+		ft := NewFilteredTable()
+		ft.SetupHeaders([]string{"Time", "Message", "Level"})
+		
+		// Populate with 5000 rows like in manual test (--window 5000)
+		for i := 0; i < 5000; i++ {
+			cells := []*tview.TableCell{
+				tview.NewTableCell(fmt.Sprintf("2024-01-01 10:%02d:%02d.%03d", i/60, i%60, i%1000)),
+				tview.NewTableCell(fmt.Sprintf("Log message %d with NULL values and other content", i)),
+				tview.NewTableCell([]string{"INFO", "ERROR", "WARN", "DEBUG", "TRACE"}[i%5]),
+			}
+			ft.AddRow(cells)
+		}
+		
+		// Apply "NULL" filter (like pressing "/" and entering "NULL")
+		ft.FilterTable("NULL")
+		
+		b.ResetTimer()
+		
+		// Measure navigation performance after filtering
+		for i := 0; i < b.N; i++ {
+			// Simulate single up/down key press (this is where the slowness occurs)
+			row, col := ft.Table.GetSelection()
+			newRow := (row + 1) % ft.Table.GetRowCount()
+			if newRow == 0 {
+				newRow = 1 // Skip header
+			}
+			ft.Table.Select(newRow, col)
+		}
+	})
+}
+
+// TestFilteredTable_SlowNavigationAfterFilter tests the specific scenario causing slowness
+func TestFilteredTable_SlowNavigationAfterFilter(t *testing.T) {
+	ft := NewFilteredTable()
+	ft.SetupHeaders([]string{"Time", "Message", "Level"})
+	
+	// Populate with 5000 rows like in manual test
+	for i := 0; i < 5000; i++ {
+		cells := []*tview.TableCell{
+			tview.NewTableCell(fmt.Sprintf("2024-01-01 10:%02d:%02d.%03d", i/60, i%60, i%1000)),
+			tview.NewTableCell(fmt.Sprintf("Log message %d with NULL values and other content", i)),
+			tview.NewTableCell([]string{"INFO", "ERROR", "WARN", "DEBUG", "TRACE"}[i%5]),
+		}
+		ft.AddRow(cells)
+	}
+	
+	t.Logf("Initial table has %d rows", ft.Table.GetRowCount())
+	
+	// Apply "NULL" filter
+	start := time.Now()
+	ft.FilterTable("NULL")
+	filterTime := time.Since(start)
+	t.Logf("Filter 'NULL' took: %v", filterTime)
+	t.Logf("After filter table has %d rows", ft.Table.GetRowCount())
+	
+	// Test individual navigation steps (this should reveal the slowness)
+	navigationTimes := make([]time.Duration, 10)
+	for i := 0; i < 10; i++ {
+		start = time.Now()
+		row, col := ft.Table.GetSelection()
+		newRow := (row + 1) % ft.Table.GetRowCount()
+		if newRow == 0 {
+			newRow = 1
+		}
+		ft.Table.Select(newRow, col)
+		navigationTimes[i] = time.Since(start)
+		t.Logf("Navigation step %d took: %v", i+1, navigationTimes[i])
+		
+		// Flag if any single navigation step is slow
+		if navigationTimes[i] > 50*time.Millisecond {
+			t.Logf("WARNING: Single navigation step took %v (>50ms)", navigationTimes[i])
+		}
+	}
+	
+	// Calculate average
+	var total time.Duration
+	for _, dur := range navigationTimes {
+		total += dur
+	}
+	avgNavTime := total / time.Duration(len(navigationTimes))
+	t.Logf("Average navigation time per step: %v", avgNavTime)
+}
