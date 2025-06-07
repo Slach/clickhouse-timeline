@@ -51,35 +51,68 @@ func (ft *FilteredTable) SetRow(row int, cells []*tview.TableCell) {
 }
 
 func (ft *FilteredTable) FilterTable(filter string) {
-	// Clear existing rows (keep headers)
-	for r := ft.Table.GetRowCount() - 1; r > 0; r-- {
-		ft.Table.RemoveRow(r)
+	// Store current selection to restore later
+	currentRow, currentCol := ft.Table.GetSelection()
+	
+	// Clear all rows at once by setting row count to 1 (keep headers)
+	ft.Table.Clear()
+	
+	// Re-add headers
+	for col, header := range ft.Headers {
+		ft.Table.SetCell(0, col,
+			tview.NewTableCell(header).
+				SetTextColor(tcell.ColorYellow).
+				SetAlign(tview.AlignCenter),
+		)
 	}
 
-	filter = strings.ToLower(filter)
-	for _, row := range ft.OriginalRows {
-		// Check if any cell in row matches filter (case-insensitive)
-		match := false
-		for _, cell := range row {
-			if strings.Contains(strings.ToLower(cell.Text), filter) {
-				match = true
-				break
-			}
-		}
-
-		if match || filter == "" {
-			r := ft.Table.GetRowCount()
-			for c, cell := range row {
-				if c < len(ft.Headers) {
-					// Clone the original cell to preserve all attributes
-					newCell := tview.NewTableCell(cell.Text).
-						SetStyle(cell.Style).
-						SetSelectedStyle(cell.SelectedStyle).
-						SetAlign(cell.Align)
-					ft.Table.SetCell(r, c, newCell)
+	if filter == "" {
+		// No filter - restore all original rows directly
+		for rowIdx, row := range ft.OriginalRows {
+			if row != nil {
+				for col, cell := range row {
+					if col < len(ft.Headers) {
+						ft.Table.SetCell(rowIdx, col, cell)
+					}
 				}
 			}
 		}
+	} else {
+		// Apply filter
+		filter = strings.ToLower(filter)
+		displayRow := 1 // Start after header
+		
+		for _, row := range ft.OriginalRows {
+			if row == nil {
+				continue
+			}
+			
+			// Check if any cell in row matches filter (case-insensitive)
+			match := false
+			for _, cell := range row {
+				if cell != nil && strings.Contains(strings.ToLower(cell.Text), filter) {
+					match = true
+					break
+				}
+			}
+
+			if match {
+				for col, cell := range row {
+					if col < len(ft.Headers) && cell != nil {
+						// Reuse the original cell directly - no cloning needed
+						ft.Table.SetCell(displayRow, col, cell)
+					}
+				}
+				displayRow++
+			}
+		}
+	}
+	
+	// Restore selection if possible
+	if currentRow > 0 && currentRow < ft.Table.GetRowCount() {
+		ft.Table.Select(currentRow, currentCol)
+	} else if ft.Table.GetRowCount() > 1 {
+		ft.Table.Select(1, currentCol) // Select first data row
 	}
 }
 
