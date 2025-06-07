@@ -17,13 +17,9 @@ var (
 	memProfileDone chan bool
 )
 
-// Setup starts CPU and memory profiling if pprofPath is provided
+// Setup starts CPU and memory profiling
 func Setup(pprofPath string) error {
-	if pprofPath == "" {
-		return nil // No profiling requested
-	}
-
-	// Expand tilde to home directory if needed
+	// Set default path if not provided
 	if pprofPath == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -62,8 +58,14 @@ func Setup(pprofPath string) error {
 
 // Stop stops CPU and memory profiling
 func Stop(pprofPath string) {
+	// Set default path if not provided
 	if pprofPath == "" {
-		return // No profiling was started
+		home, err := os.UserHomeDir()
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to get user home directory for stopping profiling")
+			return
+		}
+		pprofPath = filepath.Join(home, ".clickhouse-timeline")
 	}
 
 	// Stop CPU profiling

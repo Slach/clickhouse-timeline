@@ -16,6 +16,7 @@ type CLI struct {
 	Category         string
 	ConfigPath       string
 	LogPath          string
+	Pprof            bool
 	PprofPath        string
 	FlamegraphNative bool
 	LogsParams       LogsParams
