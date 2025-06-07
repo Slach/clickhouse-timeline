@@ -15,6 +15,33 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+var logo = `
+[yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white]
+[yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white]
+[yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white]
+[yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white]  [yellow::b]██
+[yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white]  [yellow::b]██  
+[yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white]  [yellow::b]██  
+[yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white]  [yellow::b]██  
+[yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white]  [yellow::b]██  
+[yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white]  [yellow::b]██
+[yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white]
+[yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white]
+[yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white]
+[yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white]
+[yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white]
+[yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white]
+[yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white]
+[yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white]
+[yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white]
+[yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white]
+[yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white]
+[red::b]████[white] [yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white]  
+[red::b]████[white] [yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white]  
+[red::b]████[white] [yellow::b]████[white] [yellow::b]████[white] [yellow::b]████[white]  
+                                                      
+`
+
 type App struct {
 	cfg             *config.Config
 	clickHouse      *client.Client
@@ -88,6 +115,7 @@ func (a *App) SwitchToMainPage(mainMsg string) {
 	a.pages.SwitchToPage("main")
 	a.tviewApp.SetFocus(a.mainView)
 }
+
 func (a *App) ApplyCLIParameters(c *types.CLI, commandName string) {
 	mainMsg := ""
 	a.flamegraphNative = c.FlamegraphNative
@@ -144,6 +172,8 @@ func (a *App) ApplyCLIParameters(c *types.CLI, commandName string) {
 
 	if mainMsg != "" {
 		mainMsg += "Press ':' to continue"
+	} else {
+		mainMsg = logo + "\nWelcome to ClickHouse Timeline\nPress ':' to enter command mode"
 	}
 	a.mainView.SetText(mainMsg)
 }
@@ -287,20 +317,11 @@ func (a *App) ApplyPredefinedRange(rangeOption string) {
 
 func (a *App) setupUI() {
 	a.pages = tview.NewPages()
-	
+
 	// ClickHouse ASCII logo
-	logo := `
-   _____ _ _      _    _    _                        
-  / ____| (_)    | |  | |  | |                       
- | |    | |_  ___| | _| |__| | ___  _   _ ___  ___    
- | |    | | |/ __| |/ /  __  |/ _ \| | | / __|/ _ \   
- | |____| | | (__|   <| |  | | (_) | |_| \__ \  __/   
-  \_____|_|_|\___|_|\_\_|  |_|\___/ \__,_|___/\___|   
-                                                      
-                 Timeline Analysis Tool              
-`
-	
+
 	a.mainView = tview.NewTextView().
+		SetDynamicColors(true).
 		SetTextAlign(tview.AlignLeft).
 		SetText(logo + "\nWelcome to ClickHouse Timeline\nPress ':' to enter command mode")
 
@@ -412,7 +433,10 @@ func (a *App) setupKeybindings() {
 				case CmdScale:
 					a.showScaleSelector()
 				default:
-					a.executeCommand(cmd)
+					mainMsg := a.executeCommand(cmd)
+					if mainMsg != "" {
+						a.SwitchToMainPage(mainMsg)
+					}
 				}
 			}
 		})

@@ -88,8 +88,9 @@ const helpText = `ClickHouse Timeline Commands:
 :cluster        - Select cluster for queries
 :metric         - Select metric for heatmap visualization
 :scale          - Set scale type for heatmap (linear, log2, log10)
-:metric_log     - Show system.metric_log metrics
-:logs           - Show system logs (query_log, query_thread_log)
+:logs           - Show any table logs (text_log, query_log, query_thread_log)
+:metric_log              - Show system.metric_log metrics
+:asynchronous_metric_log - Show system.asynchronous_metric_log metrics
 
 Navigation:
 - Use arrow keys to navigate
