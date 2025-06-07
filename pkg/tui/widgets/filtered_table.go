@@ -115,6 +115,7 @@ func (ft *FilteredTable) GetInputCapture(app *tview.Application, pages *tview.Pa
 			app.SetFocus(filterInput)
 			return nil
 		}
+		// Return the event so the table can handle navigation keys
 		return event
 	}
 }
