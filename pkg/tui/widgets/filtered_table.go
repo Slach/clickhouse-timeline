@@ -171,13 +171,15 @@ func (ft *FilteredTable) addHeadersOptimized() {
 
 // restoreAllRows efficiently restores all rows without filtering
 func (ft *FilteredTable) restoreAllRows() {
-	for rowIdx, row := range ft.OriginalRows {
+	displayRow := 1 // Start after header row
+	for _, row := range ft.OriginalRows {
 		if row != nil {
 			for col, cell := range row {
 				if col < len(ft.Headers) && cell != nil {
-					ft.Table.SetCell(rowIdx, col, cell)
+					ft.Table.SetCell(displayRow, col, cell)
 				}
 			}
+			displayRow++
 		}
 	}
 }
