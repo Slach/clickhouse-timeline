@@ -143,7 +143,6 @@ func (ft *FilteredTable) optimizeCell(cell *tview.TableCell) *tview.TableCell {
 		SetTextColor(cell.Color).
 		SetBackgroundColor(cell.BackgroundColor).
 		SetAlign(cell.Align).
-		SetSelectable(cell.Selectable).
 		SetReference(cell.Reference).
 		SetExpansion(cell.Expansion)
 	
