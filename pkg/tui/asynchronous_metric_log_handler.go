@@ -106,8 +106,10 @@ GROUP BY metric`,
 					a.SwitchToMainPage("returned from :asynchronous_metric_log")
 					return nil
 				}
-				if filterHandler := filteredTable.GetInputCapture(a.tviewApp, a.pages); filterHandler(event) == nil {
-					return nil
+				if filterHandler := filteredTable.GetInputCapture(a.tviewApp, a.pages); filterHandler != nil {
+					if result := filterHandler(event); result == nil {
+						return nil
+					}
 				}
 				if event.Key() == tcell.KeyEnter {
 					currentRow, _ := filteredTable.Table.GetSelection()

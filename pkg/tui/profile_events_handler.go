@@ -169,8 +169,10 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 					}
 					return nil
 				}
-				if filterHandler := filteredTable.GetInputCapture(a.tviewApp, a.pages); filterHandler(event) == nil {
-					return nil
+				if filterHandler := filteredTable.GetInputCapture(a.tviewApp, a.pages); filterHandler != nil {
+					if result := filterHandler(event); result == nil {
+						return nil
+					}
 				}
 				if event.Key() == tcell.KeyEnter {
 					row, _ := filteredTable.Table.GetSelection()
