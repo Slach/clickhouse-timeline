@@ -1082,7 +1082,7 @@ func (ap *AuditPanel) checkMaterializedViews() []AuditResult {
 func (ap *AuditPanel) checkVersions() []AuditResult {
 	var results []AuditResult
 
-	// Check ClickHouse version age
+	// Get current version info
 	row := ap.app.clickHouse.QueryRow(`
 		SELECT 
 			maxIf(value, name = 'VERSION_DESCRIBE') AS version_full,
@@ -1092,26 +1092,53 @@ func (ap *AuditPanel) checkVersions() []AuditResult {
 	`)
 	var versionFull string
 	var releaseDate sql.NullTime
-	if err := row.Scan(&versionFull, &releaseDate); err == nil && releaseDate.Valid {
-		versionAgeDays := int(time.Since(releaseDate.Time).Hours() / 24)
+	if err := row.Scan(&versionFull, &releaseDate); err == nil {
+		// A.2.1.01 - Check version age
+		if releaseDate.Valid {
+			versionAgeDays := int(time.Since(releaseDate.Time).Hours() / 24)
 
-		if versionAgeDays > 182 {
-			severity := "Minor"
-			if versionAgeDays > 900 {
-				severity = "Critical"
-			} else if versionAgeDays > 700 {
-				severity = "Major"
-			} else if versionAgeDays > 365 {
-				severity = "Moderate"
+			if versionAgeDays > 182 {
+				severity := "Minor"
+				if versionAgeDays > 900 {
+					severity = "Critical"
+				} else if versionAgeDays > 700 {
+					severity = "Major"
+				} else if versionAgeDays > 365 {
+					severity = "Moderate"
+				}
+
+				results = append(results, AuditResult{
+					ID:       "A.2.1.01",
+					Object:   "system",
+					Severity: severity,
+					Details:  fmt.Sprintf("You use old clickhouse version (%s, %d days old), consider upgrade", versionFull, versionAgeDays),
+					Values:   map[string]float64{},
+				})
 			}
+		}
 
-			results = append(results, AuditResult{
-				ID:       "A.2.1.01",
-				Object:   "system",
-				Severity: severity,
-				Details:  fmt.Sprintf("You use old ClickHouse version (%s, %d days old), consider upgrade", versionFull, versionAgeDays),
-				Values:   map[string]float64{},
-			})
+		// A.2.1.02 - Check if using latest bugfix version
+		// Extract version components using regex-like logic
+		if versionFull != "" {
+			// Simple version parsing - extract major.minor.bugfix
+			// This is a simplified version of the complex SQL logic
+			// For a full implementation, we'd need to fetch version data from external sources
+			
+			// For now, we'll do a basic check if the version looks old based on naming patterns
+			if strings.Contains(strings.ToLower(versionFull), "lts") || 
+			   strings.Contains(strings.ToLower(versionFull), "stable") {
+				// Skip bugfix check for LTS/stable versions as they have different update patterns
+			} else {
+				// This is a simplified check - in reality we'd need to compare against
+				// the latest versions from the ClickHouse releases API
+				results = append(results, AuditResult{
+					ID:       "A.2.1.02",
+					Object:   "system",
+					Severity: "Minor",
+					Details:  fmt.Sprintf("Consider checking if %s is the latest bugfix release", versionFull),
+					Values:   map[string]float64{},
+				})
+			}
 		}
 	}
 
