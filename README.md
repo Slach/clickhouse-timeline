@@ -175,16 +175,30 @@ contexts:
 
 Once in the TUI, use these commands:
 
+- `:help` - Show this help
 - `:connect` - Connect to a ClickHouse instance
-- `:cluster <name>` - Select cluster for analysis
-- `:heatmap` - Switch to heatmap view
-- `:flamegraph` - Switch to flamegraph view
-- `:profile_events` - View profile events
-- `:metric_log` - View metric log
-- `:logs` - Browse system logs
-- `:audit` - Run system audit
-- `:help` - Show help information
 - `:quit` - Exit the application
+- `:flamegraph` - Generate a flamegraph
+- `:from` - Set the start time
+- `:to` - Set the end time
+- `:range` - Set time range with predefined options
+- `:heatmap` - Generate a heatmap visualization
+- `:profile_events` - Show profile events
+- `:category` - Set category for heatmap (query_hash, tables, hosts)
+- `:cluster` - Select cluster for queries
+- `:metric` - Select metric for heatmap visualization
+- `:scale` - Set scale type for heatmap (linear, log2, log10)
+- `:logs` - Show any table logs (text_log, query_log, query_thread_log)
+- `:metric_log` - Show system.metric_log metrics
+- `:asynchronous_metric_log` - Show system.asynchronous_metric_log metrics
+- `:audit` - Run system audit and show diagnostics and suggestions
+
+### Navigation:
+- Use arrow keys to navigate
+- Press / to filter connections list
+- Press Esc to cancel current operation
+- Press Enter in heatmap to show action menu
+- Double click in heatmap to show action menu
 
 ## Query Analysis
 
