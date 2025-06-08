@@ -284,9 +284,6 @@ func (a *App) ShowHeatmap() {
 			// Create legend
 			legend := a.generateLegend(minValue, maxValue)
 
-			// Create scrollable table container
-			tableContainer := table
-
 			// Create scroll bars with dynamic sizing
 			horizontalScroll := tview.NewTextView().
 				SetDynamicColors(true).
@@ -305,7 +302,7 @@ func (a *App) ShowHeatmap() {
 			// Create scrollable wrapper with vertical scroll
 			scrollWrapper := tview.NewFlex().
 				SetDirection(tview.FlexColumn).
-				AddItem(tableContainer, 0, 1, true).
+				AddItem(table, 0, 1, true).
 				AddItem(verticalScroll, 1, 0, false) // Fixed width
 
 			// Create main flex with horizontal scroll
