@@ -317,6 +317,9 @@ func (lp *LogPanel) updateDropdownOptions(form *tview.Form, label string, option
 					break
 				}
 			}
+			if currentValue == "" {
+				dropdown.SetCurrentOption(0)
+			}
 			break
 		}
 	}
@@ -1064,11 +1067,11 @@ func (lp *LogPanel) processBatch(batch []LogEntry, startRow int, insertAtTop boo
 				row[1] = lp.logDetails.Table.GetCell(r, 1)
 				existingRows = append(existingRows, row)
 			}
-			
+
 			// Clear table and re-add headers
 			lp.logDetails.Table.Clear()
 			lp.logDetails.SetupHeaders([]string{"Time", "Message"})
-			
+
 			// Add new batch entries first (at top)
 			for i, entry := range batch {
 				row := i + 1 // +1 for header row
@@ -1083,7 +1086,7 @@ func (lp *LogPanel) processBatch(batch []LogEntry, startRow int, insertAtTop boo
 
 				lp.logDetails.SetRow(row, []*tview.TableCell{timeCell, messageCell})
 			}
-			
+
 			// Add existing rows after the new ones
 			for i, existingRow := range existingRows {
 				row := len(batch) + i + 1 // +1 for header row
