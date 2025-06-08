@@ -3,18 +3,19 @@ package tui
 import (
 	"database/sql"
 	"fmt"
-	"github.com/rs/zerolog/log"
 	"strings"
 	"time"
 
 	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/rs/zerolog/log"
 )
 
 // AuditResult represents a single audit finding
 type AuditResult struct {
 	ID       string
+	Host     string
 	Object   string
 	Severity string
 	Details  string
@@ -52,7 +53,7 @@ func (ap *AuditPanel) setupUI() {
 	ap.table.Table.SetBorders(false).SetSelectable(true, false)
 
 	// Set headers
-	headers := []string{"ID", "Severity", "Object", "Details"}
+	headers := []string{"ID", "Host", "Severity", "Object", "Details"}
 	ap.table.SetupHeaders(headers)
 
 	// Status text
@@ -210,6 +211,7 @@ func (ap *AuditPanel) displayResults(results []AuditResult) {
 			// Create row cells
 			cells := []*tview.TableCell{
 				tview.NewTableCell(result.ID).SetTextColor(color),
+				tview.NewTableCell(result.Host).SetTextColor(color),
 				tview.NewTableCell(result.Severity).SetTextColor(color),
 				tview.NewTableCell(result.Object).SetTextColor(color),
 				tview.NewTableCell(details).SetTextColor(color),
@@ -256,13 +258,14 @@ func (ap *AuditPanel) showResultDetails() {
 	details := fmt.Sprintf(`[yellow::b]Audit Result Details[white::-]
 
 [yellow]ID:[white] %s
+[yellow]Host:[white] %s
 [yellow]Severity:[white] %s
 [yellow]Object:[white] %s
 
 [yellow]Details:[white]
 %s
 
-[yellow]Values:[white]`, result.ID, result.Severity, result.Object, result.Details)
+[yellow]Values:[white]`, result.ID, result.Host, result.Severity, result.Object, result.Details)
 
 	if len(result.Values) > 0 {
 		for key, value := range result.Values {
@@ -299,9 +302,10 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 	var results []AuditResult
 
 	// Check replicated tables count
-	row := ap.app.clickHouse.QueryRow("SELECT count() FROM system.tables WHERE engine LIKE 'Replicated%'")
+	row := ap.app.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, count() FROM cluster('%s', system.tables) WHERE engine LIKE 'Replicated%%' GROUP BY h", ap.app.cluster))
+	var host string
 	var replicatedCount int64
-	if err := row.Scan(&replicatedCount); err == nil {
+	if err := row.Scan(&host, &replicatedCount); err == nil {
 		severity := ""
 		if replicatedCount > 2000 {
 			severity = "Critical"
@@ -314,6 +318,7 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 		if severity != "" {
 			results = append(results, AuditResult{
 				ID:       "A0.1.01",
+				Host:     host,
 				Object:   "ReplicatedTables",
 				Severity: severity,
 				Details:  fmt.Sprintf("Too many replicated tables (count: %d) - background_schedule_pool_size should be tuned", replicatedCount),
@@ -324,9 +329,8 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 	}
 
 	// Check MergeTree tables count
-	row = ap.app.clickHouse.QueryRow("SELECT count() FROM system.tables WHERE engine LIKE '%MergeTree%'")
-	var mergeTreeCount int64
-	if err := row.Scan(&mergeTreeCount); err == nil {
+	row = ap.app.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, count() FROM cluster('%s', system.tables) WHERE engine LIKE '%%MergeTree%%' GROUP BY h", ap.app.cluster))
+	if err := row.Scan(&host, &mergeTreeCount); err == nil {
 		severity := ""
 		if mergeTreeCount > 10000 {
 			severity = "Critical"
@@ -338,6 +342,7 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 		if severity != "" {
 			results = append(results, AuditResult{
 				ID:       "A0.1.02",
+				Host:     host,
 				Object:   "MergeTreeTables",
 				Severity: severity,
 				Details:  fmt.Sprintf("Too many MergeTree tables (count: %d)", mergeTreeCount),
@@ -348,9 +353,8 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 	}
 
 	// Check databases count
-	row = ap.app.clickHouse.QueryRow("SELECT count() FROM system.databases")
-	var databasesCount int64
-	if err := row.Scan(&databasesCount); err == nil {
+	row = ap.app.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, count() FROM cluster('%s', system.databases) GROUP BY h", ap.app.cluster))
+	if err := row.Scan(&host, &databasesCount); err == nil {
 		severity := ""
 		if databasesCount > 1000 {
 			severity = "Critical"
@@ -363,6 +367,7 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 		if severity != "" {
 			results = append(results, AuditResult{
 				ID:       "A0.1.03",
+				Host:     host,
 				Object:   "Databases",
 				Severity: severity,
 				Details:  fmt.Sprintf("Too many databases (count: %d)", databasesCount),
@@ -372,15 +377,17 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 	}
 
 	// Check column files in parts vs inodes
-	row = ap.app.clickHouse.QueryRow(`
+	row = ap.app.clickHouse.QueryRow(fmt.Sprintf(`
 		SELECT 
-			(SELECT count() * 4 FROM system.parts_columns) as column_files_in_parts_count,
-			(SELECT min(value) FROM system.asynchronous_metrics WHERE metric='FilesystemMainPathTotalINodes') as total_inodes,
+			hostName() AS h,
+			(SELECT count() * 4 FROM cluster('%s', system.parts_columns)) as column_files_in_parts_count,
+			(SELECT min(value) FROM cluster('%s', system.asynchronous_metrics) WHERE metric='FilesystemMainPathTotalINodes') as total_inodes,
 			column_files_in_parts_count / total_inodes as ratio
-	`)
+		GROUP BY h
+	`, ap.app.cluster, ap.app.cluster))
 	var columnFilesCount, totalInodes int64
 	var inodesRatio float64
-	if err := row.Scan(&columnFilesCount, &totalInodes, &inodesRatio); err == nil && inodesRatio > 0.5 {
+	if err := row.Scan(&host, &columnFilesCount, &totalInodes, &inodesRatio); err == nil && inodesRatio > 0.5 {
 		severity := ""
 		if inodesRatio > 0.8 {
 			severity = "Critical"
@@ -393,6 +400,7 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 		if severity != "" {
 			results = append(results, AuditResult{
 				ID:       "A0.1.04",
+				Host:     host,
 				Object:   "PartsColumns",
 				Severity: severity,
 				Details:  fmt.Sprintf("Total columns files in parts too close to max inodes (column_files: %d, inodes: %d)", columnFilesCount, totalInodes),
@@ -405,9 +413,8 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 	}
 
 	// Check total parts count
-	row = ap.app.clickHouse.QueryRow("SELECT count() FROM system.parts")
-	var partsCount int64
-	if err := row.Scan(&partsCount); err == nil {
+	row = ap.app.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, count() FROM cluster('%s', system.parts) GROUP BY h", ap.app.cluster))
+	if err := row.Scan(&host, &partsCount); err == nil {
 		severity := ""
 		if partsCount > 120000 {
 			severity = "Critical"
@@ -419,6 +426,7 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 		if severity != "" {
 			results = append(results, AuditResult{
 				ID:       "A0.1.05",
+				Host:     host,
 				Object:   "Parts",
 				Severity: severity,
 				Details:  fmt.Sprintf("Too many parts (count: %d)", partsCount),
@@ -428,16 +436,17 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 	}
 
 	// Check obsolete inactive parts
-	row = ap.app.clickHouse.QueryRow(`
-		WITH (SELECT max(modification_time) FROM system.parts) AS max_ts
-		SELECT count()
-		FROM system.parts
+	row = ap.app.clickHouse.QueryRow(fmt.Sprintf(`
+		WITH (SELECT max(modification_time) FROM cluster('%s', system.parts)) AS max_ts
+		SELECT hostName() AS h, count()
+		FROM cluster('%s', system.parts)
 		WHERE NOT active
 		AND ((remove_time > 0 AND remove_time < max_ts - INTERVAL 20 MINUTE) 
 		     OR (remove_time = 0 AND modification_time < max_ts - INTERVAL 20 MINUTE))
-	`)
+		GROUP BY h
+	`, ap.app.cluster, ap.app.cluster))
 	var obsoletePartsCount int64
-	if err := row.Scan(&obsoletePartsCount); err == nil && obsoletePartsCount > 0 {
+	if err := row.Scan(&host, &obsoletePartsCount); err == nil && obsoletePartsCount > 0 {
 		severity := ""
 		if obsoletePartsCount > 5000 {
 			severity = "Critical"
@@ -450,6 +459,7 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 		if severity != "" {
 			results = append(results, AuditResult{
 				ID:       "A0.1.06",
+				Host:     host,
 				Object:   "Obsolete parts",
 				Severity: severity,
 				Details:  fmt.Sprintf("Number of inactive parts which were removed long ago (count: %d)", obsoletePartsCount),
@@ -459,25 +469,28 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 	}
 
 	// Check for too many tiny replicated tables
-	row = ap.app.clickHouse.QueryRow(`
+	row = ap.app.clickHouse.QueryRow(fmt.Sprintf(`
 		WITH
 			(total_rows < 1000000) AND (total_bytes < 10000000) AS tiny_table,
 			(total_rows < 100000000) AND (total_bytes < 1000000000) AND (NOT tiny_table) AS small_table,
 			(total_rows > 1000000000) OR (total_bytes > 100000000000) AS big_table
 		SELECT
+			hostName() AS h,
 			countIf(tiny_table) as tiny_tables_count,
 			countIf(small_table) as small_tables_count,
 			countIf((NOT big_table) AND (NOT small_table) AND (NOT tiny_table)) as medium_tables_count,
 			countIf(big_table) as big_tables_count,
 			count() AS tables_count
-		FROM system.tables
-		WHERE engine LIKE 'Replicated%MergeTree'
-	`)
+		FROM cluster('%s', system.tables)
+		WHERE engine LIKE 'Replicated%%MergeTree'
+		GROUP BY h
+	`, ap.app.cluster))
 	var tinyTablesCount, smallTablesCount, mediumTablesCount, bigTablesCount, tablesCount int64
-	if err := row.Scan(&tinyTablesCount, &smallTablesCount, &mediumTablesCount, &bigTablesCount, &tablesCount); err == nil {
+	if err := row.Scan(&host, &tinyTablesCount, &smallTablesCount, &mediumTablesCount, &bigTablesCount, &tablesCount); err == nil {
 		if ((tinyTablesCount + smallTablesCount) > int64(float64(tablesCount)*0.85)) || ((tinyTablesCount + smallTablesCount) > 100) {
 			results = append(results, AuditResult{
 				ID:       "A0.1.07",
+				Host:     host,
 				Object:   "Tables Size",
 				Severity: "Major",
 				Details:  fmt.Sprintf("Most of your Replicated tables are tiny, consider options to combine similar data together in fewer tables (tiny: %d, small: %d, medium: %d, big: %d, overall: %d)", tinyTablesCount, smallTablesCount, mediumTablesCount, bigTablesCount, tablesCount),
@@ -502,6 +515,7 @@ func (ap *AuditPanel) checkDependencies() []AuditResult {
 	// This implements the logic from dependancies_init.sql and dependancies_loop.sql
 	_, err := ap.app.clickHouse.Exec(`
 		CREATE TEMPORARY TABLE IF NOT EXISTS dependencies_temp (
+			host String,
 			parent String,
 			child String,
 			type String,
@@ -514,29 +528,31 @@ func (ap *AuditPanel) checkDependencies() []AuditResult {
 	}
 
 	// Initialize dependencies from tables (dependancies_init.sql logic)
-	_, err = ap.app.clickHouse.Exec(`
+	_, err = ap.app.clickHouse.Exec(fmt.Sprintf(`
 		INSERT INTO dependencies_temp
 		WITH d1 AS (
 			SELECT 
+				hostName() AS h,
 				format('{}.{}', database, name) AS parent,
 				arrayJoin(arrayMap(x, y -> x || '.' || y, dependencies_database, dependencies_table)) as child,
 				'table' as type
-			FROM system.tables
+			FROM cluster('%s', system.tables)
 			WHERE dependencies_table != []
 
 			UNION ALL
 
 			WITH splitByChar(' ', create_table_query) as _create_table_query
 			SELECT 
+				hostName() AS h,
 				format('{}.{}', database, name) AS parent,
 				_create_table_query[6] as child,
 				'MV' as type
-			FROM system.tables
+			FROM cluster('%s', system.tables)
 			WHERE engine = 'MaterializedView'
 			AND _create_table_query[5] = 'TO'
 		)
-		SELECT *, 0 as level FROM d1
-	`)
+		SELECT h, parent, child, type, 0 as level FROM d1
+	`, ap.app.cluster, ap.app.cluster))
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to populate initial dependencies")
 		return results
@@ -551,7 +567,7 @@ func (ap *AuditPanel) checkDependencies() []AuditResult {
 				d as (SELECT * FROM dependencies_temp WHERE level = _level)
 			SELECT count()
 			FROM d as a 
-			JOIN d as b ON a.child = b.parent
+			JOIN d as b ON a.child = b.parent AND a.host = b.host
 		`)
 		var newDepsCount int64
 		if err := row.Scan(&newDepsCount); err != nil || newDepsCount == 0 {
@@ -564,12 +580,13 @@ func (ap *AuditPanel) checkDependencies() []AuditResult {
 				(SELECT max(level) FROM dependencies_temp) as _level,
 				d as (SELECT * FROM dependencies_temp WHERE level = _level)
 			SELECT
+				a.host as host,
 				a.parent as parent,
 				b.child as child,
 				'join' as type,
 				_level + 1 as level
 			FROM d as a 
-			JOIN d as b ON a.child = b.parent
+			JOIN d as b ON a.child = b.parent AND a.host = b.host
 		`)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to add dependency level")
@@ -580,11 +597,12 @@ func (ap *AuditPanel) checkDependencies() []AuditResult {
 	// Check for tables with too many dependencies (A2.3 logic)
 	rows, err := ap.app.clickHouse.Query(`
 		SELECT 
+			host,
 			parent,
 			count() as total,
 			groupArray(child) as children
 		FROM dependencies_temp
-		GROUP BY parent
+		GROUP BY host, parent
 		HAVING total > 10
 	`)
 	if err == nil {
@@ -594,11 +612,11 @@ func (ap *AuditPanel) checkDependencies() []AuditResult {
 			}
 		}()
 		for rows.Next() {
-			var parent string
+			var host, parent string
 			var total int64
 			var children []string
 
-			if err := rows.Scan(&parent, &total, &children); err == nil {
+			if err := rows.Scan(&host, &parent, &total, &children); err == nil {
 				// Create values map from children list
 				values := make(map[string]float64)
 				for i, childName := range children {
@@ -610,6 +628,7 @@ func (ap *AuditPanel) checkDependencies() []AuditResult {
 
 				results = append(results, AuditResult{
 					ID:       "A2.3",
+					Host:     host,
 					Object:   parent,
 					Severity: "Moderate",
 					Details:  fmt.Sprintf("Too long dependencies list. count: %d", total),
@@ -632,20 +651,23 @@ func (ap *AuditPanel) checkRates() []AuditResult {
 	var results []AuditResult
 
 	// Check parts creation rate
-	row := ap.app.clickHouse.QueryRow(`
+	row := ap.app.clickHouse.QueryRow(fmt.Sprintf(`
 		WITH 
-			(SELECT max(toUInt32(value)) FROM system.merge_tree_settings WHERE name='old_parts_lifetime') as old_parts_lifetime_raw,
+			(SELECT max(toUInt32(value)) FROM cluster('%s', system.merge_tree_settings) WHERE name='old_parts_lifetime') as old_parts_lifetime_raw,
 			if(old_parts_lifetime_raw IS NULL OR old_parts_lifetime_raw = 0, 480, old_parts_lifetime_raw) as old_parts_lifetime
 		SELECT 
+			hostName() AS h,
 			count() as parts_created_count,
 			parts_created_count / old_parts_lifetime as parts_created_per_second
-		FROM system.parts 
-		WHERE modification_time > (SELECT max(modification_time) FROM system.parts) - old_parts_lifetime 
+		FROM cluster('%s', system.parts) 
+		WHERE modification_time > (SELECT max(modification_time) FROM cluster('%s', system.parts)) - old_parts_lifetime 
 		AND level = 0
-	`)
+		GROUP BY h
+	`, ap.app.cluster, ap.app.cluster, ap.app.cluster))
+	var host string
 	var partsCreatedCount int64
 	var partsCreatedPerSecond float64
-	if err := row.Scan(&partsCreatedCount, &partsCreatedPerSecond); err == nil && partsCreatedPerSecond > 5 {
+	if err := row.Scan(&host, &partsCreatedCount, &partsCreatedPerSecond); err == nil && partsCreatedPerSecond > 5 {
 		severity := "Minor"
 		if partsCreatedPerSecond > 50 {
 			severity = "Critical"
@@ -657,6 +679,7 @@ func (ap *AuditPanel) checkRates() []AuditResult {
 
 		results = append(results, AuditResult{
 			ID:       "A0.3.01",
+			Host:     host,
 			Object:   "PartsCreatedPerSecond",
 			Severity: severity,
 			Details:  fmt.Sprintf("Too many parts created per second (%.2f)", partsCreatedPerSecond),
@@ -665,21 +688,22 @@ func (ap *AuditPanel) checkRates() []AuditResult {
 	}
 
 	// Check parts creation rate per table
-	rows, err := ap.app.clickHouse.Query(`
+	rows, err := ap.app.clickHouse.Query(fmt.Sprintf(`
 		WITH 
-			(SELECT max(toUInt32(value)) FROM system.merge_tree_settings WHERE name='old_parts_lifetime') as old_parts_lifetime_raw,
+			(SELECT max(toUInt32(value)) FROM cluster('%s', system.merge_tree_settings) WHERE name='old_parts_lifetime') as old_parts_lifetime_raw,
 			if(old_parts_lifetime_raw IS NULL OR old_parts_lifetime_raw = 0, 480, old_parts_lifetime_raw) as old_parts_lifetime
 		SELECT 
+			hostName() AS h,
 			database,
 			table,
 			count() as parts_created_count,
 			parts_created_count / old_parts_lifetime as parts_created_per_second
-		FROM system.parts 
-		WHERE modification_time > (SELECT max(modification_time) FROM system.parts) - old_parts_lifetime 
+		FROM cluster('%s', system.parts) 
+		WHERE modification_time > (SELECT max(modification_time) FROM cluster('%s', system.parts)) - old_parts_lifetime 
 		AND level = 0
-		GROUP BY database, table
+		GROUP BY h, database, table
 		HAVING parts_created_per_second > 5
-	`)
+	`, ap.app.cluster, ap.app.cluster, ap.app.cluster))
 	if err == nil {
 		defer func() {
 			if closeErr := rows.Close(); closeErr != nil {
@@ -687,10 +711,10 @@ func (ap *AuditPanel) checkRates() []AuditResult {
 			}
 		}()
 		for rows.Next() {
-			var database, table string
+			var host, database, table string
 			var partsCount int64
 			var rate float64
-			if err := rows.Scan(&database, &table, &partsCount, &rate); err == nil {
+			if err := rows.Scan(&host, &database, &table, &partsCount, &rate); err == nil {
 				severity := "Minor"
 				if rate > 50 {
 					severity = "Critical"
@@ -702,6 +726,7 @@ func (ap *AuditPanel) checkRates() []AuditResult {
 
 				results = append(results, AuditResult{
 					ID:       "A0.3.02",
+					Host:     host,
 					Object:   fmt.Sprintf("%s.%s", database, table),
 					Severity: severity,
 					Details:  fmt.Sprintf("Too many parts created per second (%.2f)", rate),
@@ -718,14 +743,17 @@ func (ap *AuditPanel) checkMarksCache() []AuditResult {
 	var results []AuditResult
 
 	// Check marks cache hit ratio
-	row := ap.app.clickHouse.QueryRow(`
+	row := ap.app.clickHouse.QueryRow(fmt.Sprintf(`
 		SELECT 
-			(SELECT value FROM system.events WHERE event = 'MarkCacheHits') as hits,
-			(SELECT value FROM system.events WHERE event = 'MarkCacheMisses') as misses,
+			hostName() AS h,
+			(SELECT value FROM cluster('%s', system.events) WHERE event = 'MarkCacheHits') as hits,
+			(SELECT value FROM cluster('%s', system.events) WHERE event = 'MarkCacheMisses') as misses,
 			hits / (hits + misses) as hit_ratio
-	`)
+		GROUP BY h
+	`, ap.app.cluster, ap.app.cluster))
+	var host string
 	var hits, misses, hitRatio float64
-	if err := row.Scan(&hits, &misses, &hitRatio); err == nil && hitRatio < 0.8 {
+	if err := row.Scan(&host, &hits, &misses, &hitRatio); err == nil && hitRatio < 0.8 {
 		severity := "Minor"
 		if hitRatio < 0.3 {
 			severity = "Critical"
@@ -737,6 +765,7 @@ func (ap *AuditPanel) checkMarksCache() []AuditResult {
 
 		results = append(results, AuditResult{
 			ID:       "A1.2.02",
+			Host:     host,
 			Object:   "MarkCache",
 			Severity: severity,
 			Details:  fmt.Sprintf("Bad hit/miss ratio for marks cache (hits: %.0f, misses: %.0f, ratio: %.3f)", hits, misses, hitRatio),
@@ -849,9 +878,10 @@ func (ap *AuditPanel) checkActiveParts() []AuditResult {
 	var results []AuditResult
 
 	// Check total active parts number (A1.5.01.1)
-	row := ap.app.clickHouse.QueryRow("SELECT sum(active) AS parts FROM system.parts WHERE active")
+	row := ap.app.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, sum(active) AS parts FROM cluster('%s', system.parts) WHERE active GROUP BY h", ap.app.cluster))
+	var host string
 	var parts int64
-	if err := row.Scan(&parts); err == nil {
+	if err := row.Scan(&host, &parts); err == nil {
 		severity := ""
 		if parts > 50000 {
 			severity = "Critical"
@@ -864,6 +894,7 @@ func (ap *AuditPanel) checkActiveParts() []AuditResult {
 		if severity != "" {
 			results = append(results, AuditResult{
 				ID:       "A1.5.01.1",
+				Host:     host,
 				Object:   "Total active parts number",
 				Severity: severity,
 				Details:  fmt.Sprintf("Total active parts %d", parts),
