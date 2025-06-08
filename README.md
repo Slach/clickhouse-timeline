@@ -195,10 +195,10 @@ Once in the TUI, use these commands:
 
 ### Navigation:
 - Use arrow keys to navigate
-- Press / to filter connections list
+- Press / to filter
 - Press Esc to cancel current operation
 - Press Enter in heatmap to show action menu
-- Double click in heatmap to show action menu
+- Double-click in heatmap to show action menu
 
 ## Query Analysis
 
@@ -218,7 +218,9 @@ FORMAT TSVRaw" | clickhouse-client -mn --echo --output-format=PrettyCompactMonoB
 
 ### Generate Flamegraphs for Query IDs
 
-Create flamegraphs for the slowest queries:
+Use `:heatmap` or `:flamegraph` TUI commands.
+
+Create flamegraphs for the slowest queries with SQL:
 
 ```bash
 clickhouse-client -q "
