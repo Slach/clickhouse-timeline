@@ -218,7 +218,7 @@ FROM (
 
 ## Requirements
 
-- Go 1.19 or later
+- Go 1.24 or later
 - ClickHouse server with system tables enabled
 - Terminal with color support for best experience
 
