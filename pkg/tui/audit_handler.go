@@ -455,6 +455,40 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 		}
 	}
 
+	// Check for too many tiny replicated tables
+	row = ap.app.clickHouse.QueryRow(`
+		WITH
+			(total_rows < 1000000) AND (total_bytes < 10000000) AS tiny_table,
+			(total_rows < 100000000) AND (total_bytes < 1000000000) AND (NOT tiny_table) AS small_table,
+			(total_rows > 1000000000) OR (total_bytes > 100000000000) AS big_table
+		SELECT
+			countIf(tiny_table) as tiny_tables_count,
+			countIf(small_table) as small_tables_count,
+			countIf((NOT big_table) AND (NOT small_table) AND (NOT tiny_table)) as medium_tables_count,
+			countIf(big_table) as big_tables_count,
+			count() AS tables_count
+		FROM system.tables
+		WHERE engine LIKE 'Replicated%MergeTree'
+	`)
+	var tinyTablesCount, smallTablesCount, mediumTablesCount, bigTablesCount, tablesCount int64
+	if err := row.Scan(&tinyTablesCount, &smallTablesCount, &mediumTablesCount, &bigTablesCount, &tablesCount); err == nil {
+		if ((tinyTablesCount + smallTablesCount) > int64(float64(tablesCount)*0.85)) || ((tinyTablesCount + smallTablesCount) > 100) {
+			results = append(results, AuditResult{
+				ID:       "A0.1.07",
+				Object:   "Tables Size",
+				Severity: "Major",
+				Details:  fmt.Sprintf("Most of your Replicated tables are tiny, consider options to combine similar data together in fewer tables (tiny: %d, small: %d, medium: %d, big: %d, overall: %d)", tinyTablesCount, smallTablesCount, mediumTablesCount, bigTablesCount, tablesCount),
+				Values: map[string]float64{
+					"tiny_tables_count":   float64(tinyTablesCount),
+					"small_tables_count":  float64(smallTablesCount),
+					"medium_tables_count": float64(mediumTablesCount),
+					"big_tables_count":    float64(bigTablesCount),
+					"tables_count":        float64(tablesCount),
+				},
+			})
+		}
+	}
+
 	return results
 }
 
