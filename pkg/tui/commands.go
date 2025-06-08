@@ -18,6 +18,7 @@ const (
 	CmdMetricLog      = "metric_log"
 	CmdAsyncMetricLog = "asynchronous_metric_log"
 	CmdLogs           = "logs"
+	CmdAudit          = "audit"
 )
 
 type TraceType string
@@ -71,6 +72,7 @@ var availableCommands = []string{
 	CmdMetricLog,
 	CmdAsyncMetricLog,
 	CmdLogs,
+	CmdAudit,
 }
 
 // Help text
@@ -91,6 +93,7 @@ const helpText = `ClickHouse Timeline Commands:
 :logs           - Show any table logs (text_log, query_log, query_thread_log)
 :metric_log              - Show system.metric_log metrics
 :asynchronous_metric_log - Show system.asynchronous_metric_log metrics
+:audit          - Run system audit and show diagnostics and suggestions
 
 Navigation:
 - Use arrow keys to navigate

@@ -431,6 +431,8 @@ func (a *App) setupKeybindings() {
 					a.showMetricSelector()
 				case CmdScale:
 					a.showScaleSelector()
+				case CmdAudit:
+					a.executeCommand(CmdAudit)
 				default:
 					mainMsg := a.executeCommand(cmd)
 					if mainMsg != "" {

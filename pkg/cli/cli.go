@@ -101,6 +101,15 @@ func NewRootCommand(cli *types.CLI, version string) *cobra.Command {
 	logsCmd.Flags().IntVar(&cli.LogsParams.Window, "window", 1000, "Sliding window size in rows")
 	rootCmd.AddCommand(logsCmd)
 
+	auditCmd := &cobra.Command{
+		Use:   "audit",
+		Short: "Run system audit and show diagnostics",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return RunSubCommand(cli, version, cmd, args)
+		},
+	}
+	rootCmd.AddCommand(auditCmd)
+
 	return rootCmd
 }
 
