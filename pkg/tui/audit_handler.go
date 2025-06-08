@@ -375,6 +375,30 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 		}
 	}
 
+	// Check databases count
+	row = ap.app.clickHouse.QueryRow("SELECT count() FROM system.databases")
+	var databasesCount int64
+	if err := row.Scan(&databasesCount); err == nil {
+		severity := ""
+		if databasesCount > 1000 {
+			severity = "Critical"
+		} else if databasesCount > 300 {
+			severity = "Major"
+		} else if databasesCount > 100 {
+			severity = "Moderate"
+		}
+
+		if severity != "" {
+			results = append(results, AuditResult{
+				ID:       "A0.1.03",
+				Object:   "Databases",
+				Severity: severity,
+				Details:  fmt.Sprintf("Too many databases (count: %d)", databasesCount),
+				Values:   map[string]float64{"databases_count": float64(databasesCount)},
+			})
+		}
+	}
+
 	return results
 }
 
