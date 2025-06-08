@@ -135,6 +135,7 @@ func (ap *AuditPanel) runAudit() {
 			{"Replication Queue", ap.checkReplicationQueue},
 			{"Memory Usage", ap.checkMemoryUsage},
 			{"Disk Usage", ap.checkDiskUsage},
+			{"Primary Key Marks", ap.checkPrimaryKeyMarks},
 			{"Primary Keys", ap.checkPrimaryKeys},
 			{"Materialized Views", ap.checkMaterializedViews},
 			{"Performance Metrics", ap.checkPerformanceMetrics},
@@ -1979,7 +1980,7 @@ func (ap *AuditPanel) checkPartitions() []AuditResult {
 	return results
 }
 
-func (ap *AuditPanel) checkPrimaryKeys() []AuditResult {
+func (ap *AuditPanel) checkPrimaryKeyMarks() []AuditResult {
 	var results []AuditResult
 
 	// Check primary key size per mark
@@ -2024,6 +2025,155 @@ func (ap *AuditPanel) checkPrimaryKeys() []AuditResult {
 				})
 			}
 		}
+	}
+
+	return results
+}
+
+func (ap *AuditPanel) checkPrimaryKeys() []AuditResult {
+	var results []AuditResult
+
+	// A2.4.01: Check first column of PRIMARY KEY/ORDER BY
+	rows, err := ap.app.clickHouse.Query(`
+		WITH tables_data AS (
+			SELECT 
+				format('{}.{}', database, name) AS object,
+				splitByChar(',', primary_key)[1] as pkey,
+				total_rows
+			FROM system.tables
+			WHERE engine LIKE '%MergeTree%' AND total_rows > 1E7 AND primary_key != ''
+		),
+		columns_data AS (
+			SELECT 
+				format('{}.{}', database, table) AS object,
+				name, 
+				type, 
+				data_compressed_bytes / nullif(data_uncompressed_bytes,0) as ratio
+			FROM system.columns
+		)
+		SELECT 
+			t.object,
+			t.pkey,
+			c.type,
+			c.ratio
+		FROM tables_data t 
+		JOIN columns_data c ON t.object = c.object AND t.pkey = c.name
+		WHERE (
+			t.pkey ILIKE '%id%' OR
+			c.type IN ['UUID','ULID', 'UInt64','Int64','IPv4', 'IPv6', 'UInt32', 'Int32', 'UInt128'] OR
+			c.type LIKE 'DateTime%' OR
+			c.ratio > 0.5
+		)
+	`)
+	if err == nil {
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkPrimaryKeys A2.4.01")
+			}
+		}()
+		for rows.Next() {
+			var object, pkey, colType string
+			var ratio sql.NullFloat64 // ratio can be null if data_uncompressed_bytes is 0
+
+			if err := rows.Scan(&object, &pkey, &colType, &ratio); err == nil {
+				details := "First column of PRIMARY KEY/ORDER BY (" + pkey + ") should not"
+				issueFound := false
+				if strings.Contains(strings.ToLower(pkey), "id") {
+					details += " be some sort of id"
+					issueFound = true
+				}
+				wideTypes := []string{"UUID", "ULID", "UInt64", "Int64", "IPv4", "IPv6", "UInt32", "Int32", "UInt128"}
+				for _, wt := range wideTypes {
+					if colType == wt {
+						details += fmt.Sprintf(" use a wide datatype like (%s)", colType)
+						issueFound = true
+						break
+					}
+				}
+				if strings.HasPrefix(colType, "DateTime") {
+					details += fmt.Sprintf(" use a wide datatype like (%s)", colType)
+					issueFound = true
+				}
+				currentRatio := 0.0
+				if ratio.Valid {
+					currentRatio = ratio.Float64
+					if currentRatio > 0.5 {
+						details += fmt.Sprintf(" has non optimal compress ratio (%.2f)", currentRatio)
+						issueFound = true
+					}
+				}
+
+				if issueFound {
+					results = append(results, AuditResult{
+						ID:       "A2.4.01",
+						Object:   object,
+						Severity: "Minor",
+						Details:  details,
+						Values:   map[string]float64{"compression_ratio": currentRatio},
+					})
+				}
+			}
+		}
+	} else {
+		log.Error().Err(err).Msg("Failed to execute A2.4.01 query")
+	}
+
+	// A2.4.02: Check for too many nullable columns
+	rows, err = ap.app.clickHouse.Query(`
+		SELECT
+			format('{}.{}', database, table) AS object,
+			countIf(type LIKE '%Nullable%') as nullable_columns,
+			count() as columns
+		FROM system.columns 
+		WHERE database NOT IN ('system', 'information_schema', 'INFORMATION_SCHEMA')
+		GROUP BY database, table
+		HAVING nullable_columns > 0.1 * columns OR nullable_columns > 10
+	`)
+	if err == nil {
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkPrimaryKeys A2.4.02")
+			}
+		}()
+		for rows.Next() {
+			var object string
+			var nullableColumns, totalColumns int64
+			if err := rows.Scan(&object, &nullableColumns, &totalColumns); err == nil {
+				results = append(results, AuditResult{
+					ID:       "A2.4.02",
+					Object:   object,
+					Severity: "Minor",
+					Details:  fmt.Sprintf("Avoid nulls (%d nullable columns out of %d)", nullableColumns, totalColumns),
+					Values: map[string]float64{
+						"nullable_columns": float64(nullableColumns),
+						"columns":          float64(totalColumns),
+					},
+				})
+			}
+		}
+	} else {
+		log.Error().Err(err).Msg("Failed to execute A2.4.02 query")
+	}
+
+	// A2.4.03: Check if compression codecs are used
+	row := ap.app.clickHouse.QueryRow(`
+		SELECT count() 
+		FROM system.columns
+		WHERE compression_codec <> '' AND database NOT IN ('system', 'information_schema', 'INFORMATION_SCHEMA')
+	`)
+	var columnsWithCodecs int64
+	if err := row.Scan(&columnsWithCodecs); err == nil {
+		if columnsWithCodecs == 0 {
+			results = append(results, AuditResult{
+				ID:       "A2.4.03",
+				Object:   "Codecs",
+				Severity: "Minor",
+				Details:  "Consider using compression codecs for heavy columns (not used currently)",
+				Values:   map[string]float64{},
+			})
+		}
+	} else {
+		log.Error().Err(err).Msg("Failed to execute A2.4.03 query")
 	}
 
 	return results
