@@ -11,48 +11,25 @@ import (
 )
 
 const profileEventsQueryTemplate = `
-WITH profile_data AS (
-    SELECT
-        key AS EventName,
-        count() AS event_count,
-        quantile(0.5)(value) AS p50,
-        quantile(0.9)(value) AS p90,
-        quantile(0.99)(value) AS p99,
-        formatReadableQuantity(p50) AS p50_s,
-        formatReadableQuantity(p90) AS p90_s,
-        formatReadableQuantity(p99) AS p99_s,
-        any(normalizeQueryKeepNames(query)) AS normalized_query
-    FROM clusterAllReplicas('%s', merge(system,'^query_log'))
-    LEFT ARRAY JOIN mapKeys(ProfileEvents) AS key, mapValues(ProfileEvents) AS value
-    WHERE
-        event_date >= toDate(parseDateTimeBestEffort('%s')) AND event_date <= toDate(parseDateTimeBestEffort('%s')) AND
-        event_time >= parseDateTimeBestEffort('%s') AND event_time <= parseDateTimeBestEffort('%s')
-        AND type != 'QueryStart'
-        %s
-    GROUP BY key
-),
-query_data AS (
-    SELECT any(normalizeQueryKeepNames(query)) AS normalized_query
-    FROM clusterAllReplicas('%s', merge(system,'^query_log'))
-    WHERE
-        event_date >= toDate(parseDateTimeBestEffort('%s')) AND event_date <= toDate(parseDateTimeBestEffort('%s')) AND
-        event_time >= parseDateTimeBestEffort('%s') AND event_time <= parseDateTimeBestEffort('%s')
-        AND type != 'QueryStart'
-        %s
-)
 SELECT
-    COALESCE(pd.EventName, 'No Profile Events') AS EventName,
-    COALESCE(pd.event_count, 0) AS count,
-    COALESCE(pd.p50, 0) AS p50,
-    COALESCE(pd.p90, 0) AS p90,
-    COALESCE(pd.p99, 0) AS p99,
-    COALESCE(pd.p50_s, '0') AS p50_s,
-    COALESCE(pd.p90_s, '0') AS p90_s,
-    COALESCE(pd.p99_s, '0') AS p99_s,
-    COALESCE(pd.normalized_query, qd.normalized_query, 'No query found') AS normalized_query
-FROM profile_data pd
-FULL OUTER JOIN query_data qd ON 1=1
-ORDER BY pd.EventName
+    key AS EventName,
+    count(),
+    quantile(0.5)(value) AS p50,
+    quantile(0.9)(value) AS p90,
+    quantile(0.99)(value) AS p99,
+    formatReadableQuantity(p50) AS p50_s,
+    formatReadableQuantity(p90) AS p90_s,
+    formatReadableQuantity(p99) AS p99_s,
+    any(normalizeQueryKeepNames(query)) AS normalized_query
+FROM clusterAllReplicas('%s', merge(system,'^query_log'))
+LEFT ARRAY JOIN mapKeys(ProfileEvents) AS key, mapValues(ProfileEvents) AS value
+WHERE
+    event_date >= toDate(parseDateTimeBestEffort('%s')) AND event_date <= toDate(parseDateTimeBestEffort('%s')) AND
+    event_time >= parseDateTimeBestEffort('%s') AND event_time <= parseDateTimeBestEffort('%s')
+    AND type != 'QueryStart'
+    %s
+GROUP BY key
+ORDER BY key
 `
 
 func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string, fromTime, toTime time.Time, cluster string) {
@@ -90,9 +67,6 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 
 		query := fmt.Sprintf(
 			profileEventsQueryTemplate,
-			cluster,
-			fromStr, toStr, fromStr, toStr,
-			categoryFilter,
 			cluster,
 			fromStr, toStr, fromStr, toStr,
 			categoryFilter,
