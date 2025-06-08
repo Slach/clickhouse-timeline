@@ -347,10 +347,12 @@ func (a *App) ShowHeatmap() {
 				}
 
 				// Update vertical scroll
-				if rowsCount > 0 && scrollHeight > 0 {
-					pos := int(float64(row) / float64(rowsCount-1) * float64(scrollHeight))
+				if rowsCount > 0 && scrollHeight > 2 {
+					// Reserve space for ▲ and ▼ characters
+					availableHeight := scrollHeight - 2
+					pos := int(float64(row) / float64(rowsCount-1) * float64(availableHeight))
 					scrollText := "[red]▲[white]\n"
-					for i := 0; i < scrollHeight; i++ {
+					for i := 0; i < availableHeight; i++ {
 						if i == pos {
 							scrollText += "[red::b]●[-:-:-]\n"
 						} else {
@@ -359,6 +361,9 @@ func (a *App) ShowHeatmap() {
 					}
 					scrollText += "[red]▼[-]"
 					verticalScroll.SetText(scrollText)
+				} else if scrollHeight > 0 {
+					// Minimal scroll bar for very small heights
+					verticalScroll.SetText("[red]▲\n▼[-]")
 				}
 			})
 
