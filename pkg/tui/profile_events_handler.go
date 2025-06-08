@@ -227,7 +227,7 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 			// Update query view when selection changes
 			filteredTable.Table.SetSelectionChangedFunc(func(row, column int) {
 				if row > 0 && row <= len(filteredTable.OriginalRows) {
-					rowData := filteredTable.OriginalRows[row-1]
+					rowData := filteredTable.OriginalRows[row]
 					if len(rowData) > 5 && rowData[5] != nil {
 						if normalizedQuery := rowData[5].Text; normalizedQuery != "" {
 							queryView.SetSQL(normalizedQuery)

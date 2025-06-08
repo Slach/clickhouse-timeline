@@ -8,12 +8,12 @@ import (
 )
 
 type FilteredTable struct {
-	Table        *tview.Table
-	Title        string
-	Headers      []string
-	OriginalRows [][]*tview.TableCell
-	maxCellWidth int // Maximum width for cell content to prevent excessive Unicode processing
-	filterInput  *tview.InputField
+	Table         *tview.Table
+	Title         string
+	Headers       []string
+	OriginalRows  [][]*tview.TableCell
+	maxCellWidth  int // Maximum width for cell content to prevent excessive Unicode processing
+	filterInput   *tview.InputField
 	currentFilter string
 }
 
@@ -24,12 +24,12 @@ func NewFilteredTable() *FilteredTable {
 			SetSelectable(true, true),
 		maxCellWidth: 200, // Default max width to limit Unicode processing
 	}
-	
+
 	// Create persistent filter input
 	ft.filterInput = tview.NewInputField().
 		SetLabel("/").
 		SetFieldWidth(30)
-	
+
 	return ft
 }
 
@@ -68,7 +68,7 @@ func (ft *FilteredTable) SetRow(row int, cells []*tview.TableCell) {
 	for len(ft.OriginalRows) <= row {
 		ft.OriginalRows = append(ft.OriginalRows, nil)
 	}
-	ft.OriginalRows[row] = optimizedCells
+	ft.OriginalRows[row] = cells
 }
 
 func (ft *FilteredTable) FilterTable(filter string) {
@@ -102,7 +102,7 @@ func (ft *FilteredTable) GetInputCapture(app *tview.Application, pages *tview.Pa
 		if event.Rune() == '/' {
 			// Set current filter value in the persistent input
 			ft.filterInput.SetText(ft.currentFilter)
-			
+
 			// Set up the input handlers
 			ft.filterInput.SetDoneFunc(func(key tcell.Key) {
 				if key == tcell.KeyEscape {
