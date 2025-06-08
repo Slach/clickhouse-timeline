@@ -1205,6 +1205,60 @@ func (ap *AuditPanel) checkSystemLogs() []AuditResult {
 		}
 	}
 
+	// Check system logs disk space usage
+	rows, err = ap.app.clickHouse.Query(`
+		WITH 
+			used AS (
+				SELECT 
+					sum(bytes_on_disk) as sp, 
+					substr(path, 1, position(path, '/store/')) as path
+				FROM system.parts 
+				WHERE database='system' AND table LIKE '%_log' 
+				GROUP BY path
+			),
+			free AS (
+				SELECT 
+					least(free_space, unreserved_space) as sp,
+					path 
+				FROM system.disks
+			)
+		SELECT 
+			used.path,
+			used.sp / free.sp as ratio
+		FROM used 
+		JOIN free USING (path)
+		WHERE ratio > 0.01
+	`)
+	if err == nil {
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkSystemLogs disk space")
+			}
+		}()
+		for rows.Next() {
+			var path string
+			var ratio float64
+			if err := rows.Scan(&path, &ratio); err == nil {
+				severity := "Minor"
+				if ratio > 0.2 {
+					severity = "Critical"
+				} else if ratio > 0.1 {
+					severity = "Major"
+				} else if ratio > 0.05 {
+					severity = "Moderate"
+				}
+
+				results = append(results, AuditResult{
+					ID:       "A0.2.05",
+					Object:   "System Logs",
+					Severity: severity,
+					Details:  fmt.Sprintf("System logs take too much space on disk %s, ratio - %.3f", path, ratio),
+					Values:   map[string]float64{"ratio": ratio},
+				})
+			}
+		}
+	}
+
 	// Check for query_thread_log being enabled (should be disabled in production)
 	row = ap.app.clickHouse.QueryRow("SELECT count() FROM system.tables WHERE database='system' AND name='query_thread_log'")
 	var threadLogExists int64
