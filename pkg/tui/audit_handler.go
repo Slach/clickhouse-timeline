@@ -1268,7 +1268,7 @@ func (ap *AuditPanel) checkVersions() []AuditResult {
 			}
 
 			// Construct upgrade suggestion based on version type
-			upgradeOptions := []string{}
+			upgradeOptions := make([]string, 0)
 			if versionType.Valid {
 				switch versionType.String {
 				case "lts":
@@ -1321,7 +1321,7 @@ func (ap *AuditPanel) checkVersions() []AuditResult {
 						severity = "Moderate"
 					}
 
-					upgradeOptions := []string{}
+					upgradeOptions := make([]string, 0)
 					if versionType.Valid && versionType.String != "" {
 						upgradeOptions = append(upgradeOptions, fmt.Sprintf("latest %s bugfix", versionType.String))
 					}
@@ -2684,7 +2684,7 @@ func (ap *AuditPanel) checkPerformanceMetrics() []AuditResult {
 	if err == nil && totalMem > 0 {
 		totalUsed := totalMem - freeWithoutCached
 		usedByOtherProcesses := totalUsed - (buffersMem + cachedMem + memResident)
-		
+
 		thresholdRatio := (1.0 - maxServerMemoryUsageToRamRatioFloat) / 2.0
 		if thresholdRatio < 0 { // Ensure ratio is not negative if maxServer... > 1
 			thresholdRatio = 0
@@ -2692,12 +2692,14 @@ func (ap *AuditPanel) checkPerformanceMetrics() []AuditResult {
 		threshold := totalMem * thresholdRatio
 
 		if usedByOtherProcesses > threshold {
-			severity := "Minor" 
-            // SQL: multiIf(UsedByOtherProcesses > Total*(1-max_server_memory_usage_to_ram_ratio), 'Critical', 'Minor')
+			severity := "Minor"
+			// SQL: multiIf(UsedByOtherProcesses > Total*(1-max_server_memory_usage_to_ram_ratio), 'Critical', 'Minor')
 			// This means if UsedByOtherProcesses is greater than Total*(1-max_server_memory_usage_to_ram_ratio), it's Critical.
 			// The check itself is for UsedByOtherProcesses > Total*(1-max_server_memory_usage_to_ram_ratio) / 2
 			criticalThreshold := totalMem * (1.0 - maxServerMemoryUsageToRamRatioFloat)
-			if criticalThreshold < 0 { criticalThreshold = 0}
+			if criticalThreshold < 0 {
+				criticalThreshold = 0
+			}
 
 			if usedByOtherProcesses > criticalThreshold {
 				severity = "Critical"
