@@ -424,6 +424,37 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 		}
 	}
 
+	// Check obsolete inactive parts
+	row = ap.app.clickHouse.QueryRow(`
+		WITH (SELECT max(modification_time) FROM system.parts) AS max_ts
+		SELECT count()
+		FROM system.parts
+		WHERE NOT active
+		AND ((remove_time > 0 AND remove_time < max_ts - INTERVAL 20 MINUTE) 
+		     OR (remove_time = 0 AND modification_time < max_ts - INTERVAL 20 MINUTE))
+	`)
+	var obsoletePartsCount int64
+	if err := row.Scan(&obsoletePartsCount); err == nil && obsoletePartsCount > 0 {
+		severity := ""
+		if obsoletePartsCount > 5000 {
+			severity = "Critical"
+		} else if obsoletePartsCount > 2000 {
+			severity = "Major"
+		} else if obsoletePartsCount > 500 {
+			severity = "Moderate"
+		}
+
+		if severity != "" {
+			results = append(results, AuditResult{
+				ID:       "A0.1.06",
+				Object:   "Obsolete parts",
+				Severity: severity,
+				Details:  fmt.Sprintf("Number of inactive parts which were removed long ago (count: %d)", obsoletePartsCount),
+				Values:   map[string]float64{"parts_count": float64(obsoletePartsCount)},
+			})
+		}
+	}
+
 	return results
 }
 
