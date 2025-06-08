@@ -658,6 +658,28 @@ func (ap *AuditPanel) checkMarksCache() []AuditResult {
 		})
 	}
 
+	// Check percentage of marks in memory (A1.2.05 - duplicate check)
+	row = ap.app.clickHouse.QueryRow(`
+		SELECT 
+			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'MarkCacheBytes') as actual_mark_cache_size,
+			(SELECT sum(marks_bytes) FROM system.parts WHERE active) as overall_marks_size,
+			actual_mark_cache_size / overall_marks_size as marks_in_memory_ratio
+	`)
+	if err := row.Scan(&markCacheSize, &overallMarksSize, &marksInMemoryRatio); err == nil && marksInMemoryRatio < 0.01 {
+		severity := "Minor"
+		if marksInMemoryRatio < 0.001 {
+			severity = "Moderate"
+		}
+
+		results = append(results, AuditResult{
+			ID:       "A1.2.05",
+			Object:   "MarkCache",
+			Severity: severity,
+			Details:  fmt.Sprintf("Less than 1%% of marks loaded (marks loaded: %.0f bytes / overall: %.0f bytes)", markCacheSize, overallMarksSize),
+			Values:   map[string]float64{"overall_marks_size": overallMarksSize},
+		})
+	}
+
 	return results
 }
 
