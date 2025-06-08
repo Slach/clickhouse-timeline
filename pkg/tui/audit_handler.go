@@ -1526,6 +1526,79 @@ func (ap *AuditPanel) checkPartitions() []AuditResult {
 		}
 	}
 
+	// Check maximum partition size for special MergeTree engines (A1.1.03)
+	rows, err = ap.app.clickHouse.Query(`
+		WITH
+			(SELECT max(toUInt64(value)) FROM system.merge_tree_settings WHERE name = 'max_bytes_to_merge_at_max_space_in_pool') AS max_partition_size
+		SELECT
+			database,
+			table,
+			max(b) as max_partition_size_bytes,
+			max_partition_size
+		FROM (
+			SELECT
+				database,
+				table,
+				sum(bytes_on_disk) as b
+			FROM system.parts
+			WHERE active AND database NOT IN ('system', 'INFORMATION_SCHEMA', 'information_schema') 
+			AND (database, table) IN (
+				SELECT database, name 
+				FROM system.tables 
+				WHERE engine LIKE '%MergeTree%' 
+				AND (engine LIKE '%Aggregating%' OR engine LIKE '%Collapsing%' OR engine LIKE '%Summing%' OR engine LIKE '%Replacing%' OR engine LIKE '%Graphite%')
+			)
+			GROUP BY database, table, partition
+		) t
+		GROUP BY database, table
+		HAVING max_partition_size_bytes > max_partition_size * 0.33 AND max_partition_size_bytes > 20000000000
+		ORDER BY max_partition_size_bytes DESC
+	`)
+	if err == nil {
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkPartitions max size")
+			}
+		}()
+		for rows.Next() {
+			var database, table string
+			var maxPartitionSizeBytes, maxPartitionSize float64
+
+			if err := rows.Scan(&database, &table, &maxPartitionSizeBytes, &maxPartitionSize); err == nil {
+				severity := "Minor"
+				ratio := maxPartitionSizeBytes / maxPartitionSize
+				if ratio > 0.95 {
+					severity = "Critical"
+				} else if ratio > 0.75 {
+					severity = "Major"
+				} else if ratio > 0.55 && maxPartitionSizeBytes > 25000000000 {
+					severity = "Moderate"
+				}
+
+				// Get partition key for the table
+				partitionKeyRow := ap.app.clickHouse.QueryRow(`
+					SELECT partition_key FROM system.tables 
+					WHERE database = ? AND name = ?
+				`, database, table)
+				var partitionKey string
+				if err := partitionKeyRow.Scan(&partitionKey); err != nil {
+					partitionKey = "None"
+				}
+				if partitionKey == "" {
+					partitionKey = "None"
+				}
+
+				results = append(results, AuditResult{
+					ID:       "A1.1.03",
+					Object:   fmt.Sprintf("%s.%s", database, table),
+					Severity: severity,
+					Details:  fmt.Sprintf("Too much data in partition, background logic to collapse rows with same key may work poorly (key %s, size %.0f bytes, max_size: %.0f bytes)", partitionKey, maxPartitionSizeBytes, maxPartitionSize),
+					Values:   map[string]float64{"max_partition_size_bytes": maxPartitionSizeBytes},
+				})
+			}
+		}
+	}
+
 	// Check detached parts
 	rows, err = ap.app.clickHouse.Query(`
 		SELECT database, table, count() as parts_count
