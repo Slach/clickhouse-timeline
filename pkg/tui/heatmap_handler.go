@@ -272,30 +272,20 @@ func (a *App) ShowHeatmap() {
 				}
 			}
 
-			// Set title
-			title := fmt.Sprintf("Heatmap: %s by %s (%s to %s)",
+			// Set initial title
+			baseTitle := fmt.Sprintf("Heatmap: %s by %s (%s to %s)",
 				getMetricName(a.currentMetric),
 				getCategoryName(a.category),
 				a.fromTime.Format("2006-01-02 15:04:05 -07:00"),
 				a.toTime.Format("2006-01-02 15:04:05 -07:00"))
 
-			table.SetTitle(title).SetBorder(true)
-
-			// Create time label that will show current selected time
-			timeLabel := tview.NewTextView().
-				SetDynamicColors(true).
-				SetTextAlign(tview.AlignCenter).
-				SetText("Select a column to see timestamp")
-			timeLabel.SetBorder(true).SetTitle("Current Time")
+			table.SetTitle(baseTitle).SetBorder(true)
 
 			// Create legend
 			legend := a.generateLegend(minValue, maxValue)
 
 			// Create scrollable table container
-			tableContainer := tview.NewFlex().
-				SetDirection(tview.FlexRow).
-				AddItem(timeLabel, 3, 0, false).
-				AddItem(table, 0, 1, true)
+			tableContainer := table
 
 			// Create scroll bars with dynamic sizing
 			horizontalScroll := tview.NewTextView().
@@ -324,12 +314,13 @@ func (a *App) ShowHeatmap() {
 				AddItem(scrollWrapper, 0, 1, true).
 				AddItem(horizontalScroll, 1, 0, false) // Fixed height
 
-			// Update scroll bars and time label when table selection changes
+			// Update scroll bars and table title when table selection changes
 			table.SetSelectionChangedFunc(func(row, column int) {
 				rowsCount := table.GetRowCount()
 				colsCount := table.GetColumnCount()
 
-				// Update time label when column is selected
+				// Update table title when column is selected
+				var titleText string
 				if column > 0 && column <= len(timestamps) {
 					timestamp := timestamps[column-1]
 					var timeText string
@@ -340,10 +331,11 @@ func (a *App) ShowHeatmap() {
 					} else {
 						timeText = timestamp.In(tzLocation).Format("2006-01-02 15:04:05")
 					}
-					timeLabel.SetText(fmt.Sprintf("[yellow]%s[white]", timeText))
+					titleText = fmt.Sprintf("%s | [yellow]Current Time: %s[white]", baseTitle, timeText)
 				} else {
-					timeLabel.SetText("Select a column to see timestamp")
+					titleText = baseTitle
 				}
+				table.SetTitle(titleText)
 
 				// Get available dimensions
 				_, _, width, height := mainFlex.GetRect()
