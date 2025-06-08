@@ -590,7 +590,7 @@ func (a *App) ShowHeatmap() {
 							return event
 						})
 
-					a.pages.AddPage("action_menu", menu, true, true)
+					a.pages.AddPage("action_menu", menu, false, true)
 					a.pages.SwitchToPage("action_menu")
 					return nil
 				}
