@@ -978,6 +978,44 @@ func (ap *AuditPanel) checkReplicationQueue() []AuditResult {
 		}
 	}
 
+	// Check for tasks with no activity in replication queue
+	rows, err = ap.app.clickHouse.Query(`
+		WITH 
+			(SELECT maxArray([create_time, last_attempt_time, last_postpone_time]) FROM system.replication_queue) AS max_time
+		SELECT 
+			database,
+			table,
+			countIf(last_attempt_time < max_time - 601 AND last_postpone_time < max_time - 601) as no_activity_tasks,
+			count() as tasks
+		FROM system.replication_queue
+		GROUP BY database, table
+		HAVING no_activity_tasks > 0
+	`)
+	if err == nil {
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkReplicationQueue no activity")
+			}
+		}()
+		for rows.Next() {
+			var database, table string
+			var noActivityTasks, tasks int64
+
+			if err := rows.Scan(&database, &table, &noActivityTasks, &tasks); err == nil {
+				results = append(results, AuditResult{
+					ID:       "A1.6.2",
+					Object:   fmt.Sprintf("%s.%s", database, table),
+					Severity: "Minor",
+					Details:  fmt.Sprintf("No activity in %d tasks out of %d", noActivityTasks, tasks),
+					Values: map[string]float64{
+						"no_activity_tasks": float64(noActivityTasks),
+						"tasks":             float64(tasks),
+					},
+				})
+			}
+		}
+	}
+
 	return results
 }
 
