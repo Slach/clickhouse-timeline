@@ -1259,6 +1259,32 @@ func (ap *AuditPanel) checkSystemLogs() []AuditResult {
 		}
 	}
 
+	// Check for leftover system.*_logN tables after version upgrade
+	rows, err = ap.app.clickHouse.Query(`
+		SELECT database, name 
+		FROM system.tables 
+		WHERE database='system' AND match(name, '(.\w+)_log_(\d+)')
+	`)
+	if err == nil {
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkSystemLogs leftover tables")
+			}
+		}()
+		for rows.Next() {
+			var database, name string
+			if err := rows.Scan(&database, &name); err == nil {
+				results = append(results, AuditResult{
+					ID:       "A0.2.06",
+					Object:   fmt.Sprintf("%s.%s", database, name),
+					Severity: "Minor",
+					Details:  "Leftover after version upgrade. Should be dropped",
+					Values:   map[string]float64{},
+				})
+			}
+		}
+	}
+
 	// Check for query_thread_log being enabled (should be disabled in production)
 	row = ap.app.clickHouse.QueryRow("SELECT count() FROM system.tables WHERE database='system' AND name='query_thread_log'")
 	var threadLogExists int64
