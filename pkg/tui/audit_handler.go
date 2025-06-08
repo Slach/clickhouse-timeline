@@ -324,30 +324,23 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 	row = ap.app.clickHouse.QueryRow("SELECT count() FROM system.tables WHERE engine LIKE '%MergeTree%'")
 	var mergeTreeCount int64
 	if err := row.Scan(&mergeTreeCount); err == nil {
+		severity := ""
 		if mergeTreeCount > 10000 {
-			results = append(results, AuditResult{
-				ID:       "A0.1.02",
-				Object:   "MergeTreeTables",
-				Severity: "Critical",
-				Details:  fmt.Sprintf("Too many MergeTree tables (count: %d)", mergeTreeCount),
-				Values:   map[string]float64{"merge_tree_tables_count": float64(mergeTreeCount)},
-			})
+			severity = "Critical"
 		} else if mergeTreeCount > 3000 {
-			results = append(results, AuditResult{
-				ID:       "A0.1.02",
-				Object:   "MergeTreeTables",
-				Severity: "Major",
-				Details:  fmt.Sprintf("Too many MergeTree tables (count: %d)", mergeTreeCount),
-				Values:   map[string]float64{"merge_tree_tables_count": float64(mergeTreeCount)},
-			})
+			severity = "Major"
 		} else if mergeTreeCount > 1000 {
+			severity = "Moderate"
+		}
+		if severity != "" {
 			results = append(results, AuditResult{
 				ID:       "A0.1.02",
 				Object:   "MergeTreeTables",
-				Severity: "Moderate",
+				Severity: severity,
 				Details:  fmt.Sprintf("Too many MergeTree tables (count: %d)", mergeTreeCount),
 				Values:   map[string]float64{"merge_tree_tables_count": float64(mergeTreeCount)},
 			})
+
 		}
 	}
 
@@ -973,7 +966,7 @@ func (ap *AuditPanel) checkLongNames() []AuditResult {
 	rows, err = ap.app.clickHouse.Query(`
 		SELECT database, table, name, length(name) as name_length
 		FROM system.columns 
-		WHERE length(name) > 32
+		WHERE length(name) > 32 AND database NOT IN ('system','INFORMATION_SCHEMA','information_schema')
 	`)
 	if err == nil {
 		defer func() {
