@@ -215,7 +215,8 @@ func (a *App) ShowHeatmap() {
 			table := tview.NewTable().
 				SetBorders(false).
 				SetSelectable(true, true).
-				SetFixed(1, 1) // Fix first row and first column
+				SetFixed(1, 1). // Fix first row and first column
+				SetSeparator(' ')
 
 			// Set header row with column numbers instead of timestamps
 			table.SetCell(0, 0, tview.NewTableCell(getCategoryName(a.category)).
