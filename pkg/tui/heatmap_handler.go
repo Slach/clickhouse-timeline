@@ -216,7 +216,7 @@ func (a *App) ShowHeatmap() {
 				SetBorders(false).
 				SetSelectable(true, true).
 				SetFixed(1, 1). // Fix first row and first column
-				SetSeparator(' ')
+				SetSeparator(0) // Remove column separator/padding
 
 			// Set header row with column numbers instead of timestamps
 			table.SetCell(0, 0, tview.NewTableCell(getCategoryName(a.category)).
