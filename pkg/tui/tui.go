@@ -84,16 +84,17 @@ type App struct {
 }
 
 func NewApp(cfg *config.Config, version string) *App {
+	now := time.Now()
 	app := &App{
 		cfg:           cfg,
 		tviewApp:      tview.NewApplication(),
 		version:       version,
-		fromTime:      time.Now().Add(-24 * time.Hour), // Default: 24 hours ago
-		toTime:        time.Now(),                      // Default: now
-		category:      CategoryQueryHash,               // Default category
-		currentMetric: MetricCount,                     // Default metric
-		scaleType:     ScaleLinear,                     // Default scale
-		CLI:           &types.CLI{},                    // Initialize empty CLI
+		fromTime:      now.Add(-24 * time.Hour), // Default: 24 hours ago
+		toTime:        now,                      // Default: now
+		category:      CategoryQueryHash,        // Default category
+		currentMetric: MetricCount,              // Default metric
+		scaleType:     ScaleLinear,              // Default scale
+		CLI:           &types.CLI{},             // Initialize empty CLI
 	}
 
 	app.setupUI()
@@ -298,19 +299,19 @@ func (a *App) executeCommand(commandName string) string {
 }
 
 func (a *App) ApplyPredefinedRange(rangeOption string) {
+	a.toTime = time.Now()
 	switch rangeOption {
 	case "1h":
-		a.fromTime = time.Now().Add(-1 * time.Hour)
+		a.fromTime = a.toTime.Add(-1 * time.Hour)
 	case "24h":
-		a.fromTime = time.Now().Add(-24 * time.Hour)
+		a.fromTime = a.toTime.Add(-24 * time.Hour)
 	case "7d":
-		a.fromTime = time.Now().Add(-7 * 24 * time.Hour)
+		a.fromTime = a.toTime.Add(-7 * 24 * time.Hour)
 	case "30d":
-		a.fromTime = time.Now().Add(-30 * 24 * time.Hour)
+		a.fromTime = a.toTime.Add(-30 * 24 * time.Hour)
 	default:
-		a.fromTime = time.Now().Add(-24 * time.Hour)
+		a.fromTime = a.toTime.Add(-24 * time.Hour)
 	}
-	a.toTime = time.Now()
 }
 
 func (a *App) setupUI() {

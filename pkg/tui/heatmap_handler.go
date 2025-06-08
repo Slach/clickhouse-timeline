@@ -52,6 +52,7 @@ func (a *App) ShowHeatmap() {
 
 	// Calculate appropriate interval based on time range
 	duration := a.toTime.Sub(a.fromTime)
+
 	var interval string
 	var intervalSeconds int
 
