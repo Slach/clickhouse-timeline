@@ -240,7 +240,7 @@ func (a *App) ShowHeatmap() {
 				for j, timestamp := range timestamps {
 					value, exists := valueMap[category][timestamp]
 					if !exists {
-						table.SetCell(i+1, j+1, tview.NewTableCell("").
+						table.SetCell(i+1, j+1, tview.NewTableCell(" ").
 							SetSelectable(true))
 						continue
 					}
