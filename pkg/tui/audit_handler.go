@@ -127,6 +127,7 @@ func (ap *AuditPanel) runAudit() {
 			{"System Logs", ap.checkSystemLogs},
 			{"Rates", ap.checkRates},
 			{"Partitions", ap.checkPartitions},
+			{"Active Parts", ap.checkActiveParts},
 			{"Marks Cache", ap.checkMarksCache},
 			{"Tables", ap.checkTables},
 			{"Background Pools", ap.checkBackgroundPools},
@@ -704,6 +705,36 @@ func (ap *AuditPanel) checkMarksCache() []AuditResult {
 			Details:  fmt.Sprintf("Too big marks cache (size: %.0f bytes / total RAM: %.0f bytes)", markCacheSize, totalRam),
 			Values:   map[string]float64{"actual_mark_cache_size": markCacheSize},
 		})
+	}
+
+	return results
+}
+
+func (ap *AuditPanel) checkActiveParts() []AuditResult {
+	var results []AuditResult
+
+	// Check total active parts number (A1.5.01.1)
+	row := ap.app.clickHouse.QueryRow("SELECT sum(active) AS parts FROM system.parts WHERE active")
+	var parts int64
+	if err := row.Scan(&parts); err == nil {
+		severity := ""
+		if parts > 50000 {
+			severity = "Critical"
+		} else if parts > 20000 {
+			severity = "Major"
+		} else if parts > 10000 {
+			severity = "Moderate"
+		}
+
+		if severity != "" {
+			results = append(results, AuditResult{
+				ID:       "A1.5.01.1",
+				Object:   "Total active parts number",
+				Severity: severity,
+				Details:  fmt.Sprintf("Total active parts %d", parts),
+				Values:   map[string]float64{"total_active_parts": float64(parts)},
+			})
+		}
 	}
 
 	return results
