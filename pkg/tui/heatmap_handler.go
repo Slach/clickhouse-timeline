@@ -311,10 +311,70 @@ func (a *App) ShowHeatmap() {
 				AddItem(scrollWrapper, 0, 1, true).
 				AddItem(horizontalScroll, 1, 0, false) // Fixed height
 
+			// Store previous selection for color restoration
+			var prevRow, prevCol = -1, -1
+
 			// Update scroll bars and table title when table selection changes
 			table.SetSelectionChangedFunc(func(row, column int) {
 				rowsCount := table.GetRowCount()
 				colsCount := table.GetColumnCount()
+
+				// Restore previous cell colors if there was a previous selection
+				if prevRow > 0 && prevCol > 0 && prevRow <= len(categories) && prevCol <= len(timestamps) {
+					category := categories[prevRow-1]
+					timestamp := timestamps[prevCol-1]
+					value, exists := valueMap[category][timestamp]
+					if exists {
+						// Restore original colors
+						normalizedValue := a.applyScaling(value, minValue, maxValue)
+						var color tcell.Color
+						if normalizedValue < 0.5 {
+							green := 255
+							red := uint8(255 * normalizedValue * 2)
+							color = tcell.NewRGBColor(int32(red), int32(green), 0)
+						} else {
+							red := 255
+							green := uint8(255 * (1 - (normalizedValue-0.5)*2))
+							color = tcell.NewRGBColor(int32(red), int32(green), 0)
+						}
+						table.SetCell(prevRow, prevCol, tview.NewTableCell("█").
+							SetBackgroundColor(color).
+							SetTextColor(color).
+							SetAlign(tview.AlignCenter).
+							SetSelectable(true))
+					}
+				}
+
+				// Update current cell colors if it's a data cell with value
+				if row > 0 && column > 0 && row <= len(categories) && column <= len(timestamps) {
+					category := categories[row-1]
+					timestamp := timestamps[column-1]
+					value, exists := valueMap[category][timestamp]
+					if exists {
+						// Invert colors for selected cell
+						normalizedValue := a.applyScaling(value, minValue, maxValue)
+						var originalColor tcell.Color
+						if normalizedValue < 0.5 {
+							green := 255
+							red := uint8(255 * normalizedValue * 2)
+							originalColor = tcell.NewRGBColor(int32(red), int32(green), 0)
+						} else {
+							red := 255
+							green := uint8(255 * (1 - (normalizedValue-0.5)*2))
+							originalColor = tcell.NewRGBColor(int32(red), int32(green), 0)
+						}
+						
+						// Create inverted color (swap background and text)
+						table.SetCell(row, column, tview.NewTableCell("█").
+							SetBackgroundColor(tcell.ColorWhite).
+							SetTextColor(originalColor).
+							SetAlign(tview.AlignCenter).
+							SetSelectable(true))
+					}
+				}
+
+				// Store current selection for next iteration
+				prevRow, prevCol = row, column
 
 				// Update table title when column is selected
 				var titleText string
