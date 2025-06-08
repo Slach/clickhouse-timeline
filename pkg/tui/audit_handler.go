@@ -2405,11 +2405,71 @@ func (ap *AuditPanel) checkDiskUsage() []AuditResult {
 
 func (ap *AuditPanel) checkPerformanceMetrics() []AuditResult {
 	var results []AuditResult
+	var row *sql.Row
+	var err error
 
-	// Check if there are readonly replicas
-	row := ap.app.clickHouse.QueryRow("SELECT value FROM system.metrics WHERE metric='ReadonlyReplica'")
+	// A3.0.1: Check max concurrent queries
+	var maxConcurrentQueries float64
+	err = ap.app.clickHouse.QueryRow("SELECT value FROM system.settings WHERE name = 'max_concurrent_queries'").Scan(&maxConcurrentQueries)
+	if err == nil { // Found the setting
+		var currentQueries float64
+		err = ap.app.clickHouse.QueryRow("SELECT value FROM system.metrics WHERE metric = 'Query'").Scan(&currentQueries)
+		if err == nil {
+			if currentQueries > maxConcurrentQueries*0.5 { // Threshold from SQL
+				severity := "Minor"
+				if currentQueries > maxConcurrentQueries*0.95 {
+					severity = "Major"
+				} else if currentQueries > maxConcurrentQueries*0.75 {
+					severity = "Moderate"
+				}
+				results = append(results, AuditResult{
+					ID:       "A3.0.1",
+					Object:   "System",
+					Severity: severity,
+					Details:  fmt.Sprintf("Too many running queries (current: %.0f, max: %.0f)", currentQueries, maxConcurrentQueries),
+					Values:   map[string]float64{"current_queries": currentQueries, "max_concurrent_queries": maxConcurrentQueries},
+				})
+			}
+		} else {
+			log.Warn().Err(err).Msg("Failed to get current query count for A3.0.1")
+		}
+	} else {
+		log.Warn().Err(err).Msg("Failed to get max_concurrent_queries setting for A3.0.1")
+	}
+
+	// A3.0.2: Check max connections
+	var maxConnections float64
+	err = ap.app.clickHouse.QueryRow("SELECT value FROM system.settings WHERE name = 'max_connections'").Scan(&maxConnections)
+	if err == nil { // Found the setting
+		var currentConnections float64
+		err = ap.app.clickHouse.QueryRow("SELECT sum(value) FROM system.metrics WHERE metric IN ('TCPConnection','MySQLConnection','HTTPConnection','InterserverConnection','PostgreSQLConnection')").Scan(&currentConnections)
+		if err == nil {
+			if currentConnections > maxConnections*0.5 { // Threshold from SQL
+				severity := "Minor"
+				if currentConnections > maxConnections*0.95 {
+					severity = "Major"
+				} else if currentConnections > maxConnections*0.75 {
+					severity = "Moderate"
+				}
+				results = append(results, AuditResult{
+					ID:       "A3.0.2",
+					Object:   "System",
+					Severity: severity,
+					Details:  fmt.Sprintf("Too many connections (current: %.0f, max: %.0f)", currentConnections, maxConnections),
+					Values:   map[string]float64{"current_connections": currentConnections, "max_connections": maxConnections},
+				})
+			}
+		} else {
+			log.Warn().Err(err).Msg("Failed to get current connection count for A3.0.2")
+		}
+	} else {
+		log.Warn().Err(err).Msg("Failed to get max_connections setting for A3.0.2")
+	}
+
+	// Check if there are readonly replicas (A3.0.3)
+	row = ap.app.clickHouse.QueryRow("SELECT value FROM system.metrics WHERE metric='ReadonlyReplica'")
 	var readonlyReplicas float64
-	if err := row.Scan(&readonlyReplicas); err == nil && readonlyReplicas > 0 {
+	if err = row.Scan(&readonlyReplicas); err == nil && readonlyReplicas > 0 {
 		results = append(results, AuditResult{
 			ID:       "A3.0.3",
 			Object:   "System",
@@ -2419,8 +2479,39 @@ func (ap *AuditPanel) checkPerformanceMetrics() []AuditResult {
 		})
 	}
 
-	// Check load average
-	rows, err := ap.app.clickHouse.Query(`
+	// A3.0.4: Check Block In-flight Ops
+	rowsA304, errA304 := ap.app.clickHouse.Query("SELECT metric, value FROM system.asynchronous_metrics WHERE metric LIKE 'BlockInFlightOps%' AND value > 128")
+	if errA304 == nil {
+		defer func() {
+			if closeErr := rowsA304.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close A3.0.4 rows")
+			}
+		}()
+		for rowsA304.Next() {
+			var metricName string
+			var value float64
+			if err := rowsA304.Scan(&metricName, &value); err == nil {
+				severity := "Minor"
+				if value > 245 { // Thresholds from SQL
+					severity = "Major"
+				} else if value > 200 {
+					severity = "Moderate"
+				}
+				results = append(results, AuditResult{
+					ID:       "A3.0.4",
+					Object:   metricName,
+					Severity: severity,
+					Details:  fmt.Sprintf("Block in-flight ops is high for %s (value: %.0f)", metricName, value),
+					Values:   map[string]float64{"in_flight_ops": value},
+				})
+			}
+		}
+	} else {
+		log.Warn().Err(errA304).Msg("Failed to query BlockInFlightOps for A3.0.4")
+	}
+
+	// Check load average (A3.0.5)
+	rowsLoadAvg, errLoadAvg := ap.app.clickHouse.Query(`
 		SELECT 
 			metric, 
 			value,
@@ -2428,17 +2519,17 @@ func (ap *AuditPanel) checkPerformanceMetrics() []AuditResult {
 		FROM system.asynchronous_metrics 
 		WHERE metric LIKE 'LoadAverage%' AND value > 0
 	`)
-	if err == nil {
+	if errLoadAvg == nil {
 		defer func() {
-			if closeErr := rows.Close(); closeErr != nil {
-				log.Error().Err(closeErr).Msg("can't close checkPerformanceMetrics")
+			if closeErr := rowsLoadAvg.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkPerformanceMetrics load average")
 			}
 		}()
-		for rows.Next() {
+		for rowsLoadAvg.Next() {
 			var metric string
 			var value, cpuCount float64
 
-			if err := rows.Scan(&metric, &value, &cpuCount); err == nil {
+			if err := rowsLoadAvg.Scan(&metric, &value, &cpuCount); err == nil {
 				if cpuCount > 0 {
 					ratio := value / cpuCount
 					if ratio > 0.9 {
@@ -2466,26 +2557,28 @@ func (ap *AuditPanel) checkPerformanceMetrics() []AuditResult {
 				}
 			}
 		}
+	} else {
+		log.Warn().Err(errLoadAvg).Msg("Failed to query load average for A3.0.5")
 	}
 
-	// Check replica delays
-	rows, err = ap.app.clickHouse.Query(`
+	// Check replica delays (A3.0.6)
+	rowsReplicaDelays, errReplicaDelays := ap.app.clickHouse.Query(`
 		SELECT metric, value
 		FROM system.asynchronous_metrics
 		WHERE metric IN ('ReplicasMaxAbsoluteDelay', 'ReplicasMaxRelativeDelay') 
 		AND value > 300
 	`)
-	if err == nil {
+	if errReplicaDelays == nil {
 		defer func() {
-			if closeErr := rows.Close(); closeErr != nil {
-				log.Error().Err(closeErr).Msg("can't close checkPerformanceMetrics delays")
+			if closeErr := rowsReplicaDelays.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkPerformanceMetrics replica delays")
 			}
 		}()
-		for rows.Next() {
+		for rowsReplicaDelays.Next() {
 			var metric string
 			var value float64
 
-			if err := rows.Scan(&metric, &value); err == nil {
+			if err := rowsReplicaDelays.Scan(&metric, &value); err == nil {
 				severity := "Minor"
 				if value > 24*3600 {
 					severity = "Critical"
@@ -2504,38 +2597,43 @@ func (ap *AuditPanel) checkPerformanceMetrics() []AuditResult {
 				})
 			}
 		}
+	} else {
+		log.Warn().Err(errReplicaDelays).Msg("Failed to query replica delays for A3.0.6")
 	}
 
-	// Check queue sizes
+	// Check queue sizes (A3.0.7 - A3.0.13)
 	queueChecks := []struct {
 		metric    string
 		id        string
 		threshold float64
-		name      string
+		name      string // Used for Details string and Values map key
 	}{
-		{"ReplicasMaxInsertsInQueue", "A3.0.7", 100, "inserts in queue"},
-		{"ReplicasSumInsertsInQueue", "A3.0.8", 300, "inserts in queue"},
-		{"ReplicasMaxMergesInQueue", "A3.0.9", 80, "merges in queue"},
-		{"ReplicasSumMergesInQueue", "A3.0.10", 200, "merges in queue"},
-		{"ReplicasMaxQueueSize", "A3.0.11", 200, "tasks in queue"},
-		{"ReplicasSumQueueSize", "A3.0.12", 500, "tasks in queue"},
+		{"ReplicasMaxInsertsInQueue", "A3.0.7", 100, "max inserts in queue"},
+		{"ReplicasSumInsertsInQueue", "A3.0.8", 300, "sum inserts in queue"},
+		{"ReplicasMaxMergesInQueue", "A3.0.9", 80, "max merges in queue"},
+		{"ReplicasSumMergesInQueue", "A3.0.10", 200, "sum merges in queue"},
+		{"ReplicasMaxQueueSize", "A3.0.11", 200, "max tasks in queue"},
+		{"ReplicasSumQueueSize", "A3.0.12", 500, "sum tasks in queue"},
+		{"ReplicasSumQueueSize", "A3.0.13", 500, "sum tasks in queue (alt ID)"}, // Added A3.0.13
 	}
 
 	for _, check := range queueChecks {
-		row := ap.app.clickHouse.QueryRow(fmt.Sprintf("SELECT value FROM system.asynchronous_metrics WHERE metric = '%s'", check.metric))
+		row = ap.app.clickHouse.QueryRow(fmt.Sprintf("SELECT value FROM system.asynchronous_metrics WHERE metric = '%s'", check.metric))
 		var value float64
-		if err := row.Scan(&value); err == nil && value > check.threshold {
+		if err = row.Scan(&value); err == nil && value > check.threshold {
 			results = append(results, AuditResult{
 				ID:       check.id,
 				Object:   check.metric,
-				Severity: "Minor",
-				Details:  fmt.Sprintf("Too many %s (%s, %.0f)", check.name, check.metric, value),
-				Values:   map[string]float64{strings.Replace(check.name, " ", "_", -1): value},
+				Severity: "Minor", // Default severity for these queue checks in SQL
+				Details:  fmt.Sprintf("Too many %s (%s, %.0f)", strings.ReplaceAll(check.name, " (alt ID)", ""), check.metric, value),
+				Values:   map[string]float64{strings.ReplaceAll(strings.ReplaceAll(check.name, " ", "_"), "_(alt_ID)", ""): value},
 			})
+		} else if err != nil {
+			log.Warn().Err(err).Str("metric", check.metric).Str("check_id", check.id).Msg("Failed to get queue size metric")
 		}
 	}
 
-	// Check max parts in partition
+	// Check max parts in partition (A3.0.14)
 	row = ap.app.clickHouse.QueryRow(`
 		SELECT 
 			value,
@@ -2545,7 +2643,7 @@ func (ap *AuditPanel) checkPerformanceMetrics() []AuditResult {
 		WHERE metric = 'MaxPartCountForPartition'
 	`)
 	var maxParts, partsToDelay, partsToThrow float64
-	if err := row.Scan(&maxParts, &partsToDelay, &partsToThrow); err == nil && maxParts > partsToDelay*0.9 {
+	if err = row.Scan(&maxParts, &partsToDelay, &partsToThrow); err == nil && maxParts > partsToDelay*0.9 {
 		severity := "Minor"
 		if maxParts > partsToThrow {
 			severity = "Critical"
@@ -2560,6 +2658,64 @@ func (ap *AuditPanel) checkPerformanceMetrics() []AuditResult {
 			Details:  fmt.Sprintf("Too many parts in partition (%.0f)", maxParts),
 			Values:   map[string]float64{"max_parts_in_partition": maxParts},
 		})
+	} else if err != nil {
+		log.Warn().Err(err).Msg("Failed to get max parts in partition for A3.0.14")
+	}
+
+	// A3.0.16: Check memory used by other processes
+	var maxServerMemoryUsageToRamRatioFloat float64
+	err = ap.app.clickHouse.QueryRow("SELECT value FROM system.settings WHERE name = 'max_server_memory_usage_to_ram_ratio'").Scan(&maxServerMemoryUsageToRamRatioFloat)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to get max_server_memory_usage_to_ram_ratio setting for A3.0.16, using default 0.7")
+		maxServerMemoryUsageToRamRatioFloat = 0.7 // Default from ClickHouse if not set
+	}
+
+	var totalMem, freeWithoutCached, memResident, cachedMem, buffersMem float64
+	queryA3016 := `
+		SELECT
+			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'OSMemoryTotal'),
+			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'OSMemoryFreeWithoutCached'),
+			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'MemoryResident'),
+			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'OSMemoryCached'),
+			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'OSMemoryBuffers')
+	`
+	err = ap.app.clickHouse.QueryRow(queryA3016).Scan(&totalMem, &freeWithoutCached, &memResident, &cachedMem, &buffersMem)
+
+	if err == nil && totalMem > 0 {
+		totalUsed := totalMem - freeWithoutCached
+		usedByOtherProcesses := totalUsed - (buffersMem + cachedMem + memResident)
+		
+		thresholdRatio := (1.0 - maxServerMemoryUsageToRamRatioFloat) / 2.0
+		if thresholdRatio < 0 { // Ensure ratio is not negative if maxServer... > 1
+			thresholdRatio = 0
+		}
+		threshold := totalMem * thresholdRatio
+
+		if usedByOtherProcesses > threshold {
+			severity := "Minor" 
+            // SQL: multiIf(UsedByOtherProcesses > Total*(1-max_server_memory_usage_to_ram_ratio), 'Critical', 'Minor')
+			// This means if UsedByOtherProcesses is greater than Total*(1-max_server_memory_usage_to_ram_ratio), it's Critical.
+			// The check itself is for UsedByOtherProcesses > Total*(1-max_server_memory_usage_to_ram_ratio) / 2
+			criticalThreshold := totalMem * (1.0 - maxServerMemoryUsageToRamRatioFloat)
+			if criticalThreshold < 0 { criticalThreshold = 0}
+
+			if usedByOtherProcesses > criticalThreshold {
+				severity = "Critical"
+			}
+
+			results = append(results, AuditResult{
+				ID:       "A3.0.16",
+				Object:   "Memory",
+				Severity: severity,
+				Details:  fmt.Sprintf("Memory used by other processes is high (%.0f bytes of %.0f total. Buffers: %.0f, Cached: %.0f, ClickHouse: %.0f, Free: %.0f)", usedByOtherProcesses, totalMem, buffersMem, cachedMem, memResident, freeWithoutCached),
+				Values: map[string]float64{
+					"memory_used_by_other_processes": usedByOtherProcesses,
+					"memory_total":                   totalMem,
+				},
+			})
+		}
+	} else if err != nil {
+		log.Warn().Err(err).Msg("Failed to get memory metrics for A3.0.16")
 	}
 
 	return results
