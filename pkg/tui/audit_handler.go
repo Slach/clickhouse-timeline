@@ -140,6 +140,7 @@ func (ap *AuditPanel) runAudit() {
 			{"Performance Metrics", ap.checkPerformanceMetrics},
 			{"Version Check", ap.checkVersions},
 			{"Long Names", ap.checkLongNames},
+			{"Dependencies", ap.checkDependencies},
 		}
 
 		totalChecks := len(checks)
@@ -488,6 +489,139 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 				},
 			})
 		}
+	}
+
+	return results
+}
+
+func (ap *AuditPanel) checkDependencies() []AuditResult {
+	var results []AuditResult
+
+	// Create temporary dependencies table and populate it
+	// This implements the logic from dependancies_init.sql and dependancies_loop.sql
+	_, err := ap.app.clickHouse.Exec(`
+		CREATE TEMPORARY TABLE IF NOT EXISTS dependencies_temp (
+			parent String,
+			child String,
+			type String,
+			level UInt32
+		) ENGINE = Memory
+	`)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to create dependencies temp table")
+		return results
+	}
+
+	// Initialize dependencies from tables (dependancies_init.sql logic)
+	_, err = ap.app.clickHouse.Exec(`
+		INSERT INTO dependencies_temp
+		WITH d1 AS (
+			SELECT 
+				format('{}.{}', database, name) AS parent,
+				arrayJoin(arrayMap(x, y -> x || '.' || y, dependencies_database, dependencies_table)) as child,
+				'table' as type
+			FROM system.tables
+			WHERE dependencies_table != []
+
+			UNION ALL
+
+			WITH splitByChar(' ', create_table_query) as _create_table_query
+			SELECT 
+				format('{}.{}', database, name) AS parent,
+				_create_table_query[6] as child,
+				'MV' as type
+			FROM system.tables
+			WHERE engine = 'MaterializedView'
+			AND _create_table_query[5] = 'TO'
+		)
+		SELECT *, 0 as level FROM d1
+	`)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to populate initial dependencies")
+		return results
+	}
+
+	// Iteratively build dependency chains (dependancies_loop.sql logic)
+	// We'll do a few iterations to build the dependency tree
+	for i := 0; i < 5; i++ {
+		row := ap.app.clickHouse.QueryRow(`
+			WITH 
+				(SELECT max(level) FROM dependencies_temp) as _level,
+				d as (SELECT * FROM dependencies_temp WHERE level = _level)
+			SELECT count()
+			FROM d as a 
+			JOIN d as b ON a.child = b.parent
+		`)
+		var newDepsCount int64
+		if err := row.Scan(&newDepsCount); err != nil || newDepsCount == 0 {
+			break // No more dependencies to add
+		}
+
+		_, err = ap.app.clickHouse.Exec(`
+			INSERT INTO dependencies_temp
+			WITH 
+				(SELECT max(level) FROM dependencies_temp) as _level,
+				d as (SELECT * FROM dependencies_temp WHERE level = _level)
+			SELECT
+				a.parent as parent,
+				b.child as child,
+				'join' as type,
+				_level + 1 as level
+			FROM d as a 
+			JOIN d as b ON a.child = b.parent
+		`)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to add dependency level")
+			break
+		}
+	}
+
+	// Check for tables with too many dependencies (A2.3 logic)
+	rows, err := ap.app.clickHouse.Query(`
+		SELECT 
+			parent,
+			count() as total,
+			groupArray(child) as children
+		FROM dependencies_temp
+		GROUP BY parent
+		HAVING total > 10
+	`)
+	if err == nil {
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkDependencies")
+			}
+		}()
+		for rows.Next() {
+			var parent string
+			var total int64
+			var children []string
+
+			if err := rows.Scan(&parent, &total, &children); err == nil {
+				// Create values map from children list
+				values := make(map[string]float64)
+				for i, child := range children {
+					if i < 20 { // Limit to avoid too many values
+						values[fmt.Sprintf("child_%d", i)] = 1.0
+					}
+				}
+				values["total_dependencies"] = float64(total)
+
+				results = append(results, AuditResult{
+					ID:       "A2.3",
+					Object:   parent,
+					Severity: "Moderate",
+					Details:  fmt.Sprintf("Too long dependencies list. count: %d", total),
+					Values:   values,
+				})
+			}
+		}
+	}
+
+	// Clean up temporary table
+	_, err = ap.app.clickHouse.Exec("DROP TABLE IF EXISTS dependencies_temp")
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to drop dependencies temp table")
 	}
 
 	return results
