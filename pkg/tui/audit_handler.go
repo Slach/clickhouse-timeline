@@ -48,7 +48,7 @@ func (a *App) ShowAudit() {
 func (ap *AuditPanel) setupUI() {
 	// Create table for audit results
 	ap.table = tview.NewTable().
-		SetBorders(true).
+		SetBorders(false).
 		SetSelectable(true, false)
 
 	// Set headers
