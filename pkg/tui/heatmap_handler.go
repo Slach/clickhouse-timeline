@@ -414,6 +414,38 @@ func (a *App) ShowHeatmap() {
 
 			// Add key handler for the table
 			table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+				// Handle Ctrl+Arrow key navigation
+				if event.Key() == tcell.KeyCtrlUp {
+					// Move to first row (0), same column
+					_, col := table.GetSelection()
+					table.Select(0, col)
+					return nil
+				}
+				if event.Key() == tcell.KeyCtrlDown {
+					// Move to last row, same column
+					_, col := table.GetSelection()
+					rowCount := table.GetRowCount()
+					if rowCount > 0 {
+						table.Select(rowCount-1, col)
+					}
+					return nil
+				}
+				if event.Key() == tcell.KeyCtrlLeft {
+					// Move to first column (0), same row
+					row, _ := table.GetSelection()
+					table.Select(row, 0)
+					return nil
+				}
+				if event.Key() == tcell.KeyCtrlRight {
+					// Move to last column, same row
+					row, _ := table.GetSelection()
+					colCount := table.GetColumnCount()
+					if colCount > 0 {
+						table.Select(row, colCount-1)
+					}
+					return nil
+				}
+				
 				// When Enter is pressed, show action menu
 				if event.Key() == tcell.KeyEnter {
 					row, col := table.GetSelection()
