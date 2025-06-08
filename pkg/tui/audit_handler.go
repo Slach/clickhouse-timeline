@@ -608,6 +608,29 @@ func (ap *AuditPanel) checkMarksCache() []AuditResult {
 		})
 	}
 
+	// Check percentage of marks in memory
+	row = ap.app.clickHouse.QueryRow(`
+		SELECT 
+			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'MarkCacheBytes') as actual_mark_cache_size,
+			(SELECT sum(marks_bytes) FROM system.parts WHERE active) as overall_marks_size,
+			actual_mark_cache_size / overall_marks_size as marks_in_memory_ratio
+	`)
+	var markCacheSize, overallMarksSize, marksInMemoryRatio float64
+	if err := row.Scan(&markCacheSize, &overallMarksSize, &marksInMemoryRatio); err == nil && marksInMemoryRatio < 0.01 {
+		severity := "Minor"
+		if marksInMemoryRatio < 0.001 {
+			severity = "Moderate"
+		}
+
+		results = append(results, AuditResult{
+			ID:       "A1.2.03",
+			Object:   "MarkCache",
+			Severity: severity,
+			Details:  fmt.Sprintf("Less than 1%% of marks loaded (%.3f%%)", marksInMemoryRatio*100),
+			Values:   map[string]float64{"overall_marks_size": overallMarksSize},
+		})
+	}
+
 	// Check marks cache size vs total RAM
 	row = ap.app.clickHouse.QueryRow(`
 		SELECT 
@@ -615,7 +638,7 @@ func (ap *AuditPanel) checkMarksCache() []AuditResult {
 			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'OSMemoryTotal') as total_ram,
 			actual_mark_cache_size / total_ram as marks_cache_ratio
 	`)
-	var markCacheSize, totalRam, marksCacheRatio float64
+	var totalRam, marksCacheRatio float64
 	if err := row.Scan(&markCacheSize, &totalRam, &marksCacheRatio); err == nil && marksCacheRatio > 0.1 {
 		severity := "Minor"
 		if marksCacheRatio > 0.25 {
@@ -632,29 +655,6 @@ func (ap *AuditPanel) checkMarksCache() []AuditResult {
 			Severity: severity,
 			Details:  fmt.Sprintf("Too big marks cache (%.1f%% of total RAM)", marksCacheRatio*100),
 			Values:   map[string]float64{"actual_mark_cache_size": markCacheSize},
-		})
-	}
-
-	// Check percentage of marks in memory
-	row = ap.app.clickHouse.QueryRow(`
-		SELECT 
-			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'MarkCacheBytes') as actual_mark_cache_size,
-			(SELECT sum(marks_bytes) FROM system.parts WHERE active) as overall_marks_size,
-			actual_mark_cache_size / overall_marks_size as marks_in_memory_ratio
-	`)
-	var overallMarksSize, marksInMemoryRatio float64
-	if err := row.Scan(&markCacheSize, &overallMarksSize, &marksInMemoryRatio); err == nil && marksInMemoryRatio < 0.01 {
-		severity := "Minor"
-		if marksInMemoryRatio < 0.001 {
-			severity = "Moderate"
-		}
-
-		results = append(results, AuditResult{
-			ID:       "A1.2.03",
-			Object:   "MarkCache",
-			Severity: severity,
-			Details:  fmt.Sprintf("Less than 1%% of marks loaded (%.3f%%)", marksInMemoryRatio*100),
-			Values:   map[string]float64{"overall_marks_size": overallMarksSize},
 		})
 	}
 
