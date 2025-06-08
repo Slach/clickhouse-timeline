@@ -9,6 +9,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/Altinity/clickhouse-timeline/pkg/tui/widgets"
 )
 
 // AuditResult represents a single audit finding
@@ -23,7 +24,7 @@ type AuditResult struct {
 // AuditPanel manages the audit interface
 type AuditPanel struct {
 	app         *App
-	table       *tview.Table
+	table       *widgets.FilteredTable
 	statusText  *tview.TextView
 	progressBar *tview.TextView
 	flex        *tview.Flex
@@ -46,20 +47,13 @@ func (a *App) ShowAudit() {
 }
 
 func (ap *AuditPanel) setupUI() {
-	// Create table for audit results
-	ap.table = tview.NewTable().
-		SetBorders(false).
-		SetSelectable(true, false)
+	// Create filtered table for audit results
+	ap.table = widgets.NewFilteredTable()
+	ap.table.Table.SetBorders(false).SetSelectable(true, false)
 
 	// Set headers
 	headers := []string{"ID", "Severity", "Object", "Details"}
-	for col, header := range headers {
-		cell := tview.NewTableCell(header).
-			SetTextColor(tcell.ColorYellow).
-			SetAlign(tview.AlignCenter).
-			SetSelectable(false)
-		ap.table.SetCell(0, col, cell)
-	}
+	ap.table.SetupHeaders(headers)
 
 	// Status text
 	ap.statusText = tview.NewTextView().
@@ -76,17 +70,21 @@ func (ap *AuditPanel) setupUI() {
 		SetDirection(tview.FlexRow).
 		AddItem(ap.statusText, 1, 0, false).
 		AddItem(ap.progressBar, 1, 0, false).
-		AddItem(ap.table, 0, 1, true)
+		AddItem(ap.table.Table, 0, 1, true)
 
 	ap.flex.SetBorder(true).SetTitle("ClickHouse System Audit")
 
 	// Add to pages
 	ap.app.pages.AddPage("audit", ap.flex, true, false)
 	ap.app.pages.SwitchToPage("audit")
-	ap.app.tviewApp.SetFocus(ap.table)
+	ap.app.tviewApp.SetFocus(ap.table.Table)
 
-	// Setup key bindings
-	ap.table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+	// Setup key bindings with filtering support
+	ap.table.Table.SetInputCapture(ap.table.GetInputCapture(ap.app.tviewApp, ap.app.pages))
+	
+	// Add custom key bindings for audit-specific actions
+	originalCapture := ap.table.Table.GetInputCapture()
+	ap.table.Table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
 		case tcell.KeyEscape:
 			ap.app.pages.SwitchToPage("main")
@@ -95,6 +93,10 @@ func (ap *AuditPanel) setupUI() {
 		case tcell.KeyEnter:
 			ap.showResultDetails()
 			return nil
+		}
+		// Let the filtered table handle other keys (like '/' for filtering)
+		if originalCapture != nil {
+			return originalCapture(event)
 		}
 		return event
 	})
@@ -165,11 +167,6 @@ func (ap *AuditPanel) displayResults(results []AuditResult) {
 	ap.app.tviewApp.QueueUpdateDraw(func() {
 		ap.results = results
 
-		// Clear existing rows (keep headers)
-		for row := ap.table.GetRowCount() - 1; row > 0; row-- {
-			ap.table.RemoveRow(row)
-		}
-
 		// Sort results by severity (Critical, Major, Moderate, Minor)
 		severityOrder := map[string]int{
 			"Critical": 0,
@@ -187,10 +184,8 @@ func (ap *AuditPanel) displayResults(results []AuditResult) {
 			}
 		}
 
-		// Add results to table
+		// Add results to filtered table
 		for i, result := range results {
-			row := i + 1
-
 			// Color code by severity
 			var color tcell.Color
 			switch result.Severity {
@@ -206,16 +201,21 @@ func (ap *AuditPanel) displayResults(results []AuditResult) {
 				color = tcell.ColorWhite
 			}
 
-			ap.table.SetCell(row, 0, tview.NewTableCell(result.ID).SetTextColor(color))
-			ap.table.SetCell(row, 1, tview.NewTableCell(result.Severity).SetTextColor(color))
-			ap.table.SetCell(row, 2, tview.NewTableCell(result.Object).SetTextColor(color))
-
 			// Truncate details if too long
 			details := result.Details
 			if len(details) > 80 {
 				details = details[:77] + "..."
 			}
-			ap.table.SetCell(row, 3, tview.NewTableCell(details).SetTextColor(color))
+
+			// Create row cells
+			cells := []*tview.TableCell{
+				tview.NewTableCell(result.ID).SetTextColor(color),
+				tview.NewTableCell(result.Severity).SetTextColor(color),
+				tview.NewTableCell(result.Object).SetTextColor(color),
+				tview.NewTableCell(details).SetTextColor(color),
+			}
+
+			ap.table.AddRow(cells)
 		}
 
 		// Update status
@@ -246,7 +246,7 @@ func (ap *AuditPanel) displayResults(results []AuditResult) {
 }
 
 func (ap *AuditPanel) showResultDetails() {
-	row, _ := ap.table.GetSelection()
+	row, _ := ap.table.Table.GetSelection()
 	if row <= 0 || row > len(ap.results) {
 		return
 	}
@@ -283,7 +283,7 @@ func (ap *AuditPanel) showResultDetails() {
 	detailView.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Key() == tcell.KeyEscape {
 			ap.app.pages.SwitchToPage("audit")
-			ap.app.tviewApp.SetFocus(ap.table)
+			ap.app.tviewApp.SetFocus(ap.table.Table)
 			return nil
 		}
 		return event
