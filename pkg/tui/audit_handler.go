@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"github.com/Altinity/clickhouse-timeline/pkg/tui/widgets"
 )
 
 // AuditResult represents a single audit finding
@@ -81,7 +81,7 @@ func (ap *AuditPanel) setupUI() {
 
 	// Setup key bindings with filtering support
 	ap.table.Table.SetInputCapture(ap.table.GetInputCapture(ap.app.tviewApp, ap.app.pages))
-	
+
 	// Add custom key bindings for audit-specific actions
 	originalCapture := ap.table.Table.GetInputCapture()
 	ap.table.Table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -185,7 +185,7 @@ func (ap *AuditPanel) displayResults(results []AuditResult) {
 		}
 
 		// Add results to filtered table
-		for i, result := range results {
+		for _, result := range results {
 			// Color code by severity
 			var color tcell.Color
 			switch result.Severity {
@@ -203,8 +203,8 @@ func (ap *AuditPanel) displayResults(results []AuditResult) {
 
 			// Truncate details if too long
 			details := result.Details
-			if len(details) > 80 {
-				details = details[:77] + "..."
+			if len(details) > 256 {
+				details = details[:255] + "..."
 			}
 
 			// Create row cells
