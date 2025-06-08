@@ -1155,6 +1155,29 @@ func (ap *AuditPanel) checkSystemLogs() []AuditResult {
 		}
 	}
 
+	// Check if query_log has too old data
+	row = ap.app.clickHouse.QueryRow(`
+		SELECT 
+			max(event_time) as max_time,
+			min(event_time) as min_time
+		FROM system.query_log
+	`)
+	var maxQueryTime, minQueryTime sql.NullTime
+	if err := row.Scan(&maxQueryTime, &minQueryTime); err == nil {
+		if maxQueryTime.Valid && minQueryTime.Valid {
+			age := maxQueryTime.Time.Sub(minQueryTime.Time)
+			if age > 30*24*time.Hour { // 30 days
+				results = append(results, AuditResult{
+					ID:       "A0.2.03",
+					Object:   "system.query_log",
+					Severity: "Major",
+					Details:  fmt.Sprintf("system.query_log has too old data - %s", age.String()),
+					Values:   map[string]float64{"age": age.Seconds()},
+				})
+			}
+		}
+	}
+
 	// Check for system log tables without TTL
 	rows, err := ap.app.clickHouse.Query(`
 		SELECT database, name 
