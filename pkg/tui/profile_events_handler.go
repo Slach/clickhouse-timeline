@@ -141,7 +141,7 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 					tview.NewTableCell(p99s).
 						SetTextColor(color).
 						SetAlign(tview.AlignRight),
-					tview.NewTableCell(normalizedQuery).SetSelectable(false),
+					tview.NewTableCell(normalizedQuery),
 				})
 
 				row++
@@ -227,8 +227,11 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 			// Update query view when selection changes
 			filteredTable.Table.SetSelectionChangedFunc(func(row, column int) {
 				if row > 0 && row <= len(filteredTable.OriginalRows) {
-					if normalizedQuery := filteredTable.OriginalRows[row-1][5].Text; normalizedQuery != "" {
-						queryView.SetSQL(normalizedQuery)
+					rowData := filteredTable.OriginalRows[row-1]
+					if len(rowData) > 5 && rowData[5] != nil {
+						if normalizedQuery := rowData[5].Text; normalizedQuery != "" {
+							queryView.SetSQL(normalizedQuery)
+						}
 					}
 				}
 			})
