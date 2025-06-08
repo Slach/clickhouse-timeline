@@ -680,6 +680,32 @@ func (ap *AuditPanel) checkMarksCache() []AuditResult {
 		})
 	}
 
+	// Check marks cache size vs total RAM (A1.2.06 - duplicate of A1.2.04)
+	row = ap.app.clickHouse.QueryRow(`
+		SELECT 
+			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'MarkCacheBytes') as actual_mark_cache_size,
+			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'OSMemoryTotal') as total_ram,
+			actual_mark_cache_size / total_ram as marks_cache_ratio
+	`)
+	if err := row.Scan(&markCacheSize, &totalRam, &marksCacheRatio); err == nil && marksCacheRatio > 0.1 {
+		severity := "Minor"
+		if marksCacheRatio > 0.25 {
+			severity = "Critical"
+		} else if marksCacheRatio > 0.2 {
+			severity = "Major"
+		} else if marksCacheRatio > 0.15 {
+			severity = "Moderate"
+		}
+
+		results = append(results, AuditResult{
+			ID:       "A1.2.06",
+			Object:   "MarkCache",
+			Severity: severity,
+			Details:  fmt.Sprintf("Too big marks cache (size: %.0f bytes / total RAM: %.0f bytes)", markCacheSize, totalRam),
+			Values:   map[string]float64{"actual_mark_cache_size": markCacheSize},
+		})
+	}
+
 	return results
 }
 
