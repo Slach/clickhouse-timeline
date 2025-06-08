@@ -453,7 +453,7 @@ func (lp *LogPanel) loadLogs() {
 	}()
 
 	// Stream directly to table while storing full entry data
-	lp.streamRowsToTable(rows, true)
+	lp.streamRowsToTable(rows, true, false)
 }
 
 func (lp *LogPanel) getAvailableFilterFields() []string {
@@ -691,7 +691,7 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 	}()
 
 	// Stream additional rows (don't clear table)
-	lp.streamRowsToTable(rows, false)
+	lp.streamRowsToTable(rows, false, !newer)
 }
 
 func (lp *LogPanel) showLogDetailsModal(rowIndex int) {
@@ -925,7 +925,7 @@ func (lp *LogPanel) buildQuery(whereClause, orderBy string) string {
 		orderBy)
 }
 
-func (lp *LogPanel) streamRowsToTable(rows *sql.Rows, clearFirst bool) {
+func (lp *LogPanel) streamRowsToTable(rows *sql.Rows, clearFirst bool, insertAtTop bool) {
 	// Calculate dynamic batch size based on windowSize
 	batchSize := lp.windowSize / 10
 	if batchSize < 100 {
@@ -1018,7 +1018,7 @@ func (lp *LogPanel) streamRowsToTable(rows *sql.Rows, clearFirst bool) {
 
 		// Process batch when full
 		if len(batch) >= batchSize {
-			lp.processBatch(batch, rowIndex-len(batch))
+			lp.processBatch(batch, rowIndex-len(batch), insertAtTop)
 			batch = batch[:0] // Clear batch while keeping capacity
 
 			// Update title with current time range
@@ -1032,7 +1032,7 @@ func (lp *LogPanel) streamRowsToTable(rows *sql.Rows, clearFirst bool) {
 
 	// Process any remaining entries in the batch
 	if len(batch) > 0 {
-		lp.processBatch(batch, rowIndex-len(batch))
+		lp.processBatch(batch, rowIndex-len(batch), insertAtTop)
 
 		// Update title with final time range
 		lp.app.tviewApp.QueueUpdateDraw(func() {
@@ -1052,23 +1052,61 @@ func (lp *LogPanel) streamRowsToTable(rows *sql.Rows, clearFirst bool) {
 	})
 }
 
-func (lp *LogPanel) processBatch(batch []LogEntry, startRow int) {
+func (lp *LogPanel) processBatch(batch []LogEntry, startRow int, insertAtTop bool) {
 	lp.app.tviewApp.QueueUpdateDraw(func() {
-		for i, entry := range batch {
-			row := startRow + i + 1 // +1 for header row
-			timeStr := lp.formatTimeForDisplay(entry)
-
-			// Store full entry in first cell's reference
-			// Create cells with proper styling
-			timeCell := tview.NewTableCell(timeStr).
-				SetReference(entry)
-			messageCell := tview.NewTableCell(entry.Message)
-			if entry.Level != "" {
-				messageCell.SetTextColor(lp.getColorForLevel(entry.Level))
+		if insertAtTop {
+			// Insert at top: shift existing rows down and insert new ones at the beginning
+			// First, collect all existing rows (excluding header)
+			existingRows := make([][]*tview.TableCell, 0)
+			for r := 1; r <= lp.totalRows; r++ {
+				row := make([]*tview.TableCell, 2)
+				row[0] = lp.logDetails.Table.GetCell(r, 0)
+				row[1] = lp.logDetails.Table.GetCell(r, 1)
+				existingRows = append(existingRows, row)
 			}
+			
+			// Clear table and re-add headers
+			lp.logDetails.Table.Clear()
+			lp.logDetails.SetupHeaders([]string{"Time", "Message"})
+			
+			// Add new batch entries first (at top)
+			for i, entry := range batch {
+				row := i + 1 // +1 for header row
+				timeStr := lp.formatTimeForDisplay(entry)
 
-			// Set row in filtered table
-			lp.logDetails.SetRow(row, []*tview.TableCell{timeCell, messageCell})
+				timeCell := tview.NewTableCell(timeStr).
+					SetReference(entry)
+				messageCell := tview.NewTableCell(entry.Message)
+				if entry.Level != "" {
+					messageCell.SetTextColor(lp.getColorForLevel(entry.Level))
+				}
+
+				lp.logDetails.SetRow(row, []*tview.TableCell{timeCell, messageCell})
+			}
+			
+			// Add existing rows after the new ones
+			for i, existingRow := range existingRows {
+				row := len(batch) + i + 1 // +1 for header row
+				lp.logDetails.SetRow(row, existingRow)
+			}
+		} else {
+			// Insert at bottom (original behavior)
+			for i, entry := range batch {
+				row := startRow + i + 1 // +1 for header row
+				timeStr := lp.formatTimeForDisplay(entry)
+
+				// Store full entry in first cell's reference
+				// Create cells with proper styling
+				timeCell := tview.NewTableCell(timeStr).
+					SetReference(entry)
+				messageCell := tview.NewTableCell(entry.Message)
+				if entry.Level != "" {
+					messageCell.SetTextColor(lp.getColorForLevel(entry.Level))
+				}
+
+				// Set row in filtered table
+				lp.logDetails.SetRow(row, []*tview.TableCell{timeCell, messageCell})
+			}
 		}
 	})
 }
