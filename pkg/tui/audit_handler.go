@@ -1339,21 +1339,23 @@ func (ap *AuditPanel) checkSystemLogs() []AuditResult {
 func (ap *AuditPanel) checkPartitions() []AuditResult {
 	var results []AuditResult
 
-	// Check for tables with too many small partitions
+	// Check for tables with too many small partitions (A1.1.01)
 	rows, err := ap.app.clickHouse.Query(`
-		WITH 
-			sum(bytes_on_disk) as b,
-			sum(rows) as r,
+		WITH
+			median(b) as median_partition_size_bytes,
+			median(r) as median_partition_size_rows,
 			count() as partition_count
-		SELECT 
-			database, 
+		SELECT
+			database,
 			table,
 			partition_count,
-			median(b) as median_partition_size_bytes,
-			median(r) as median_partition_size_rows
+			median_partition_size_bytes,
+			median_partition_size_rows
 		FROM (
-			SELECT database, table, partition, sum(bytes_on_disk) as bytes_on_disk, sum(rows) as rows
-			FROM system.parts 
+			SELECT database, table,
+				sum(bytes_on_disk) as b,
+				sum(rows) as r
+			FROM system.parts
 			WHERE active AND database NOT IN ('system', 'INFORMATION_SCHEMA', 'information_schema')
 			GROUP BY database, table, partition
 		)
@@ -1372,32 +1374,49 @@ func (ap *AuditPanel) checkPartitions() []AuditResult {
 			var medianBytes, medianRows float64
 
 			if err := rows.Scan(&database, &table, &partitionCount, &medianBytes, &medianRows); err == nil {
-				severity := "Minor"
+				// Logic from original SQL: A1.1.06 The median size of the single partition is bigger than 16 Mb (compressed) or 250K rows
+				severity := "noerror"
 				if partitionCount > 1500 && (medianBytes < 16000000 || medianRows < 250000) {
 					severity = "Critical"
 				} else if partitionCount > 500 && (medianBytes < 16000000 || medianRows < 250000) {
 					severity = "Major"
+				} else if partitionCount > 500 && (medianBytes < 100000000 || medianRows < 10000000) {
+					severity = "Moderate"
 				} else if partitionCount > 100 && (medianBytes < 16000000 || medianRows < 250000) {
 					severity = "Moderate"
+				} else if partitionCount > 100 && (medianBytes < 100000000 || medianRows < 10000000) {
+					severity = "Minor"
 				} else if partitionCount > 1 && (medianBytes < 16000000 || medianRows < 250000) {
 					severity = "Minor"
 				} else if partitionCount > 1500 {
 					severity = "Minor"
-				} else {
-					continue // Skip if no issues
 				}
 
-				results = append(results, AuditResult{
-					ID:       "A1.1.01",
-					Object:   fmt.Sprintf("%s.%s", database, table),
-					Severity: severity,
-					Details:  fmt.Sprintf("Too small partitions (count: %d, median size: %.0f bytes)", partitionCount, medianBytes),
-					Values: map[string]float64{
-						"partition_count":             float64(partitionCount),
-						"median_partition_size_bytes": medianBytes,
-						"median_partition_size_rows":  medianRows,
-					},
-				})
+				if severity != "noerror" {
+					// Get partition key for the table
+					partitionKeyRow := ap.app.clickHouse.QueryRow(`
+						SELECT partition_key FROM system.tables 
+						WHERE database = ? AND name = ?
+					`, database, table)
+					var partitionKey string
+					if err := partitionKeyRow.Scan(&partitionKey); err != nil {
+						partitionKey = "None"
+					}
+					if partitionKey == "" {
+						partitionKey = "None"
+					}
+
+					results = append(results, AuditResult{
+						ID:       "A1.1.01",
+						Object:   fmt.Sprintf("%s.%s", database, table),
+						Severity: severity,
+						Details:  fmt.Sprintf("Too small partitions (key %s, number of partitions: %d, median size %.0f bytes)", partitionKey, partitionCount, medianBytes),
+						Values: map[string]float64{
+							"median_partition_size_bytes": medianBytes,
+							"median_partition_size_rows":  medianRows,
+						},
+					})
+				}
 			}
 		}
 	}
