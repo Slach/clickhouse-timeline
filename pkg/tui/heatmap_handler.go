@@ -216,24 +216,15 @@ func (a *App) ShowHeatmap() {
 				SetSelectable(true, true).
 				SetFixed(1, 1) // Fix first row and first column
 
-			// Set header row with timestamps
+			// Set header row with column numbers instead of timestamps
 			table.SetCell(0, 0, tview.NewTableCell(getCategoryName(a.category)).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignCenter).
 				SetSelectable(false))
 
-			// Format timestamps based on interval
-			for i, t := range timestamps {
-				var cellText string
-				if interval == "1 MINUTE" || interval == "10 MINUTE" {
-					cellText = t.In(tzLocation).Format("15:04")
-				} else if interval == "1 HOUR" {
-					cellText = t.In(tzLocation).Format("15:00")
-				} else {
-					cellText = t.In(tzLocation).Format("01-02")
-				}
-
-				table.SetCell(0, i+1, tview.NewTableCell(cellText).
+			// Use single character column headers
+			for i := range timestamps {
+				table.SetCell(0, i+1, tview.NewTableCell("•").
 					SetTextColor(tcell.ColorYellow).
 					SetAlign(tview.AlignCenter).
 					SetSelectable(true))
@@ -270,9 +261,10 @@ func (a *App) ShowHeatmap() {
 						color = tcell.NewRGBColor(int32(red), int32(green), 0)
 					}
 
-					// Use empty cell with background color only
-					table.SetCell(i+1, j+1, tview.NewTableCell("").
+					// Use single character with background color
+					table.SetCell(i+1, j+1, tview.NewTableCell("█").
 						SetBackgroundColor(color).
+						SetTextColor(color).
 						SetAlign(tview.AlignCenter).
 						SetSelectable(true))
 				}
@@ -287,12 +279,20 @@ func (a *App) ShowHeatmap() {
 
 			table.SetTitle(title).SetBorder(true)
 
+			// Create time label that will show current selected time
+			timeLabel := tview.NewTextView().
+				SetDynamicColors(true).
+				SetTextAlign(tview.AlignCenter).
+				SetText("Select a column to see timestamp")
+			timeLabel.SetBorder(true).SetTitle("Current Time")
+
 			// Create legend
 			legend := a.generateLegend(minValue, maxValue)
 
 			// Create scrollable table container
 			tableContainer := tview.NewFlex().
 				SetDirection(tview.FlexRow).
+				AddItem(timeLabel, 3, 0, false).
 				AddItem(table, 0, 1, true)
 
 			// Create scroll bars with dynamic sizing
@@ -322,10 +322,26 @@ func (a *App) ShowHeatmap() {
 				AddItem(scrollWrapper, 0, 1, true).
 				AddItem(horizontalScroll, 1, 0, false) // Fixed height
 
-			// Update scroll bars when table selection changes
+			// Update scroll bars and time label when table selection changes
 			table.SetSelectionChangedFunc(func(row, column int) {
 				rowsCount := table.GetRowCount()
 				colsCount := table.GetColumnCount()
+
+				// Update time label when column is selected
+				if column > 0 && column <= len(timestamps) {
+					timestamp := timestamps[column-1]
+					var timeText string
+					if interval == "1 MINUTE" || interval == "10 MINUTE" {
+						timeText = timestamp.In(tzLocation).Format("15:04:05")
+					} else if interval == "1 HOUR" {
+						timeText = timestamp.In(tzLocation).Format("15:00:00")
+					} else {
+						timeText = timestamp.In(tzLocation).Format("2006-01-02 15:04:05")
+					}
+					timeLabel.SetText(fmt.Sprintf("[yellow]%s[white]", timeText))
+				} else {
+					timeLabel.SetText("Select a column to see timestamp")
+				}
 
 				// Get available dimensions
 				_, _, width, height := mainFlex.GetRect()
