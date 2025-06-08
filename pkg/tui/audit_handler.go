@@ -1066,7 +1066,7 @@ func (ap *AuditPanel) checkMaterializedViews() []AuditResult {
 			var database, name string
 			if err := rows.Scan(&database, &name); err == nil {
 				results = append(results, AuditResult{
-					ID:       "A2.3",
+					ID:       "A2.2.01",
 					Object:   fmt.Sprintf("%s.%s", database, name),
 					Severity: "Moderate",
 					Details:  "MV: JOIN is used",
@@ -1082,8 +1082,6 @@ func (ap *AuditPanel) checkMaterializedViews() []AuditResult {
 func (ap *AuditPanel) checkVersions() []AuditResult {
 	var results []AuditResult
 
-	// Complex version analysis based on the original SQL
-	// This is a simplified implementation of the complex SQL logic from A2.1_obsolete_versions.sql
 	row := ap.app.clickHouse.QueryRow(`
 		WITH version_data AS (
 			SELECT
@@ -1115,7 +1113,7 @@ func (ap *AuditPanel) checkVersions() []AuditResult {
 		FROM parsed_version
 		WHERE version_full != ''
 	`)
-	
+
 	var versionFull string
 	var releaseDate sql.NullTime
 	var versionMaj, versionMin, versionBugfix sql.NullString
