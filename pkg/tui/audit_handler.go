@@ -368,6 +368,39 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 		}
 	}
 
+	// Check column files in parts vs inodes
+	row = ap.app.clickHouse.QueryRow(`
+		SELECT 
+			(SELECT count() * 4 FROM system.parts_columns) as column_files_in_parts_count,
+			(SELECT min(value) FROM system.asynchronous_metrics WHERE metric='FilesystemMainPathTotalINodes') as total_inodes,
+			column_files_in_parts_count / total_inodes as ratio
+	`)
+	var columnFilesCount, totalInodes int64
+	var inodesRatio float64
+	if err := row.Scan(&columnFilesCount, &totalInodes, &inodesRatio); err == nil && inodesRatio > 0.5 {
+		severity := ""
+		if inodesRatio > 0.8 {
+			severity = "Critical"
+		} else if inodesRatio > 0.7 {
+			severity = "Major"
+		} else if inodesRatio > 0.6 {
+			severity = "Moderate"
+		}
+
+		if severity != "" {
+			results = append(results, AuditResult{
+				ID:       "A0.1.04",
+				Object:   "PartsColumns",
+				Severity: severity,
+				Details:  fmt.Sprintf("Total columns files in parts too close to max inodes (column_files: %d, inodes: %d)", columnFilesCount, totalInodes),
+				Values: map[string]float64{
+					"column_files_in_parts_count": float64(columnFilesCount),
+					"total_inodes":                float64(totalInodes),
+				},
+			})
+		}
+	}
+
 	// Check total parts count
 	row = ap.app.clickHouse.QueryRow("SELECT count() FROM system.parts")
 	var partsCount int64
