@@ -294,6 +294,8 @@ func (a *App) executeCommand(commandName string) string {
 			}
 		}
 		a.logPanel.Show()
+	case CmdAudit:
+		a.ShowAudit()
 	}
 	return ""
 }
