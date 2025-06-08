@@ -601,9 +601,9 @@ func (ap *AuditPanel) checkDependencies() []AuditResult {
 			if err := rows.Scan(&parent, &total, &children); err == nil {
 				// Create values map from children list
 				values := make(map[string]float64)
-				for i, child := range children {
+				for i, childName := range children {
 					if i < 20 { // Limit to avoid too many values
-						values[fmt.Sprintf("child_%d", i)] = 1.0
+						values[childName] = 1.0
 					}
 				}
 				values["total_dependencies"] = float64(total)
