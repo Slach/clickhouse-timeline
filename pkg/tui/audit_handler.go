@@ -405,27 +405,19 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 	row = ap.app.clickHouse.QueryRow("SELECT count() FROM system.parts")
 	var partsCount int64
 	if err := row.Scan(&partsCount); err == nil {
+		severity := ""
 		if partsCount > 120000 {
-			results = append(results, AuditResult{
-				ID:       "A0.1.05",
-				Object:   "Parts",
-				Severity: "Critical",
-				Details:  fmt.Sprintf("Too many parts (count: %d)", partsCount),
-				Values:   map[string]float64{"parts_count": float64(partsCount)},
-			})
+			severity = "Critical"
 		} else if partsCount > 90000 {
-			results = append(results, AuditResult{
-				ID:       "A0.1.05",
-				Object:   "Parts",
-				Severity: "Major",
-				Details:  fmt.Sprintf("Too many parts (count: %d)", partsCount),
-				Values:   map[string]float64{"parts_count": float64(partsCount)},
-			})
+			severity = "Major"
 		} else if partsCount > 60000 {
+			severity = "Moderate"
+		}
+		if severity != "" {
 			results = append(results, AuditResult{
 				ID:       "A0.1.05",
 				Object:   "Parts",
-				Severity: "Moderate",
+				Severity: severity,
 				Details:  fmt.Sprintf("Too many parts (count: %d)", partsCount),
 				Values:   map[string]float64{"parts_count": float64(partsCount)},
 			})
