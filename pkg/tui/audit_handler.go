@@ -329,6 +329,7 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 	}
 
 	// Check MergeTree tables count
+	mergeTreeCount := 0
 	row = ap.app.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, count() FROM cluster('%s', system.tables) WHERE engine LIKE '%%MergeTree%%' GROUP BY h", ap.app.cluster))
 	if err := row.Scan(&host, &mergeTreeCount); err == nil {
 		severity := ""
@@ -353,6 +354,7 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 	}
 
 	// Check databases count
+	databasesCount := 0
 	row = ap.app.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, count() FROM cluster('%s', system.databases) GROUP BY h", ap.app.cluster))
 	if err := row.Scan(&host, &databasesCount); err == nil {
 		severity := ""
@@ -413,6 +415,7 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 	}
 
 	// Check total parts count
+	partsCount := 0
 	row = ap.app.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, count() FROM cluster('%s', system.parts) GROUP BY h", ap.app.cluster))
 	if err := row.Scan(&host, &partsCount); err == nil {
 		severity := ""
