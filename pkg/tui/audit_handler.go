@@ -125,13 +125,20 @@ func (ap *AuditPanel) runAudit() {
 		}{
 			{"System Counts", ap.checkSystemCounts},
 			{"System Logs", ap.checkSystemLogs},
+			{"Rates", ap.checkRates},
 			{"Partitions", ap.checkPartitions},
-			{"Primary Keys", ap.checkPrimaryKeys},
+			{"Marks Cache", ap.checkMarksCache},
 			{"Tables", ap.checkTables},
+			{"Background Pools", ap.checkBackgroundPools},
+			{"Uncompressed Cache", ap.checkUncompressedCache},
+			{"Replication Queue", ap.checkReplicationQueue},
 			{"Memory Usage", ap.checkMemoryUsage},
 			{"Disk Usage", ap.checkDiskUsage},
-			{"Replication", ap.checkReplication},
+			{"Primary Keys", ap.checkPrimaryKeys},
+			{"Materialized Views", ap.checkMaterializedViews},
 			{"Performance Metrics", ap.checkPerformanceMetrics},
+			{"Version Check", ap.checkVersions},
+			{"Long Names", ap.checkLongNames},
 		}
 
 		totalChecks := len(checks)
@@ -384,6 +391,629 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 	return results
 }
 
+func (ap *AuditPanel) checkRates() []AuditResult {
+	var results []AuditResult
+
+	// Check parts creation rate
+	row := ap.app.clickHouse.QueryRow(`
+		WITH 
+			(SELECT max(toUInt32(value)) FROM system.merge_tree_settings WHERE name='old_parts_lifetime') as old_parts_lifetime_raw,
+			if(old_parts_lifetime_raw IS NULL OR old_parts_lifetime_raw = 0, 480, old_parts_lifetime_raw) as old_parts_lifetime
+		SELECT 
+			count() as parts_created_count,
+			parts_created_count / old_parts_lifetime as parts_created_per_second
+		FROM system.parts 
+		WHERE modification_time > (SELECT max(modification_time) FROM system.parts) - old_parts_lifetime 
+		AND level = 0
+	`)
+	var partsCreatedCount int64
+	var partsCreatedPerSecond float64
+	if err := row.Scan(&partsCreatedCount, &partsCreatedPerSecond); err == nil && partsCreatedPerSecond > 5 {
+		severity := "Minor"
+		if partsCreatedPerSecond > 50 {
+			severity = "Critical"
+		} else if partsCreatedPerSecond > 30 {
+			severity = "Major"
+		} else if partsCreatedPerSecond > 10 {
+			severity = "Moderate"
+		}
+
+		results = append(results, AuditResult{
+			ID:       "A0.3.01",
+			Object:   "PartsCreatedPerSecond",
+			Severity: severity,
+			Details:  fmt.Sprintf("Too many parts created per second (%.2f)", partsCreatedPerSecond),
+			Values:   map[string]float64{"parts_created_per_second": partsCreatedPerSecond},
+		})
+	}
+
+	// Check parts creation rate per table
+	rows, err := ap.app.clickHouse.Query(`
+		WITH 
+			(SELECT max(toUInt32(value)) FROM system.merge_tree_settings WHERE name='old_parts_lifetime') as old_parts_lifetime_raw,
+			if(old_parts_lifetime_raw IS NULL OR old_parts_lifetime_raw = 0, 480, old_parts_lifetime_raw) as old_parts_lifetime
+		SELECT 
+			database,
+			table,
+			count() as parts_created_count,
+			parts_created_count / old_parts_lifetime as parts_created_per_second
+		FROM system.parts 
+		WHERE modification_time > (SELECT max(modification_time) FROM system.parts) - old_parts_lifetime 
+		AND level = 0
+		GROUP BY database, table
+		HAVING parts_created_per_second > 5
+	`)
+	if err == nil {
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkRates")
+			}
+		}()
+		for rows.Next() {
+			var database, table string
+			var partsCount int64
+			var rate float64
+			if err := rows.Scan(&database, &table, &partsCount, &rate); err == nil {
+				severity := "Minor"
+				if rate > 50 {
+					severity = "Critical"
+				} else if rate > 30 {
+					severity = "Major"
+				} else if rate > 10 {
+					severity = "Moderate"
+				}
+
+				results = append(results, AuditResult{
+					ID:       "A0.3.02",
+					Object:   fmt.Sprintf("%s.%s", database, table),
+					Severity: severity,
+					Details:  fmt.Sprintf("Too many parts created per second (%.2f)", rate),
+					Values:   map[string]float64{"parts_created_per_second": rate},
+				})
+			}
+		}
+	}
+
+	return results
+}
+
+func (ap *AuditPanel) checkMarksCache() []AuditResult {
+	var results []AuditResult
+
+	// Check marks cache hit ratio
+	row := ap.app.clickHouse.QueryRow(`
+		SELECT 
+			(SELECT value FROM system.events WHERE event = 'MarkCacheHits') as hits,
+			(SELECT value FROM system.events WHERE event = 'MarkCacheMisses') as misses,
+			hits / (hits + misses) as hit_ratio
+	`)
+	var hits, misses, hitRatio float64
+	if err := row.Scan(&hits, &misses, &hitRatio); err == nil && hitRatio < 0.8 {
+		severity := "Minor"
+		if hitRatio < 0.3 {
+			severity = "Critical"
+		} else if hitRatio < 0.5 {
+			severity = "Major"
+		} else if hitRatio < 0.7 {
+			severity = "Moderate"
+		}
+
+		results = append(results, AuditResult{
+			ID:       "A1.2.02",
+			Object:   "MarkCache",
+			Severity: severity,
+			Details:  fmt.Sprintf("Bad hit/miss ratio for marks cache (hits: %.0f, misses: %.0f, ratio: %.3f)", hits, misses, hitRatio),
+			Values:   map[string]float64{"hit_ratio": hitRatio},
+		})
+	}
+
+	// Check marks cache size vs total RAM
+	row = ap.app.clickHouse.QueryRow(`
+		SELECT 
+			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'MarkCacheBytes') as actual_mark_cache_size,
+			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'OSMemoryTotal') as total_ram,
+			actual_mark_cache_size / total_ram as marks_cache_ratio
+	`)
+	var markCacheSize, totalRam, marksCacheRatio float64
+	if err := row.Scan(&markCacheSize, &totalRam, &marksCacheRatio); err == nil && marksCacheRatio > 0.1 {
+		severity := "Minor"
+		if marksCacheRatio > 0.25 {
+			severity = "Critical"
+		} else if marksCacheRatio > 0.2 {
+			severity = "Major"
+		} else if marksCacheRatio > 0.15 {
+			severity = "Moderate"
+		}
+
+		results = append(results, AuditResult{
+			ID:       "A1.2.04",
+			Object:   "MarkCache",
+			Severity: severity,
+			Details:  fmt.Sprintf("Too big marks cache (%.1f%% of total RAM)", marksCacheRatio*100),
+			Values:   map[string]float64{"actual_mark_cache_size": markCacheSize},
+		})
+	}
+
+	// Check percentage of marks in memory
+	row = ap.app.clickHouse.QueryRow(`
+		SELECT 
+			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'MarkCacheBytes') as actual_mark_cache_size,
+			(SELECT sum(marks_bytes) FROM system.parts WHERE active) as overall_marks_size,
+			actual_mark_cache_size / overall_marks_size as marks_in_memory_ratio
+	`)
+	var overallMarksSize, marksInMemoryRatio float64
+	if err := row.Scan(&markCacheSize, &overallMarksSize, &marksInMemoryRatio); err == nil && marksInMemoryRatio < 0.01 {
+		severity := "Minor"
+		if marksInMemoryRatio < 0.001 {
+			severity = "Moderate"
+		}
+
+		results = append(results, AuditResult{
+			ID:       "A1.2.03",
+			Object:   "MarkCache",
+			Severity: severity,
+			Details:  fmt.Sprintf("Less than 1%% of marks loaded (%.3f%%)", marksInMemoryRatio*100),
+			Values:   map[string]float64{"overall_marks_size": overallMarksSize},
+		})
+	}
+
+	return results
+}
+
+func (ap *AuditPanel) checkBackgroundPools() []AuditResult {
+	var results []AuditResult
+
+	// Check background pool overload
+	rows, err := ap.app.clickHouse.Query(`
+		SELECT 
+			extract(m.metric, '^Background(.*)Task') AS pool_name,
+			m.value as current_value,
+			s.max_value,
+			m.value / s.max_value as pool_load_ratio
+		FROM (
+			SELECT metric, value 
+			FROM system.metrics 
+			WHERE metric LIKE 'Background%PoolTask'
+		) m
+		INNER JOIN (
+			SELECT 
+				transform(
+					extract(name, '^background_(.*)_size'),
+					['buffer_flush_schedule_pool', 'pool', 'fetches_pool', 'move_pool', 'common_pool', 'schedule_pool', 'message_broker_schedule_pool', 'distributed_schedule_pool'],
+					['BufferFlushSchedulePool','MergesAndMutationsPool','FetchesPool', 'MovePool', 'CommonPool', 'SchedulePool', 'MessageBrokerSchedulePool', 'DistributedSchedulePool'],
+					''
+				) as pool_name,
+				toFloat64(value) AS max_value
+			FROM system.settings 
+			WHERE name LIKE 'background%pool_size'
+		) s USING (pool_name)
+		WHERE pool_load_ratio > 0.8
+	`)
+	if err == nil {
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkBackgroundPools")
+			}
+		}()
+		for rows.Next() {
+			var poolName string
+			var currentValue, maxValue, loadRatio float64
+			if err := rows.Scan(&poolName, &currentValue, &maxValue, &loadRatio); err == nil {
+				severity := "Minor"
+				if loadRatio > 0.99 {
+					severity = "Major"
+				} else if loadRatio > 0.9 {
+					severity = "Moderate"
+				}
+
+				results = append(results, AuditResult{
+					ID:       "A1.4.01",
+					Object:   poolName,
+					Severity: severity,
+					Details:  fmt.Sprintf("%s is overloaded (used: %.0f, size: %.0f, load ratio: %.3f)", poolName, currentValue, maxValue, loadRatio),
+					Values: map[string]float64{
+						"size":       currentValue,
+						"load_ratio": loadRatio,
+					},
+				})
+			}
+		}
+	}
+
+	// Check MessageBrokerSchedulePool size vs Kafka/RabbitMQ tables
+	row := ap.app.clickHouse.QueryRow(`
+		SELECT 
+			(SELECT toUInt64(value) FROM system.settings WHERE name = 'background_message_broker_schedule_pool_size') as pool_size,
+			(SELECT count() FROM system.tables WHERE engine = 'Kafka' OR engine = 'RabbitMQ') as tables_with_engines
+	`)
+	var poolSize, tablesWithEngines int64
+	if err := row.Scan(&poolSize, &tablesWithEngines); err == nil && poolSize < tablesWithEngines {
+		results = append(results, AuditResult{
+			ID:       "A1.4.02",
+			Object:   "MessageBrokerSchedulePool",
+			Severity: "Critical",
+			Details:  fmt.Sprintf("MessageBrokerSchedulePool size is too small (size: %d / tables with Kafka or RabbitMQ engines: %d)", poolSize, tablesWithEngines),
+			Values: map[string]float64{
+				"size":    float64(poolSize),
+				"engines": float64(tablesWithEngines),
+			},
+		})
+	}
+
+	return results
+}
+
+func (ap *AuditPanel) checkUncompressedCache() []AuditResult {
+	var results []AuditResult
+
+	// Check uncompressed cache hit ratio
+	row := ap.app.clickHouse.QueryRow(`
+		SELECT 
+			(SELECT value FROM system.events WHERE event = 'UncompressedCacheHits') as hits,
+			(SELECT value FROM system.events WHERE event = 'UncompressedCacheMisses') as misses,
+			hits / (hits + misses) as hit_ratio
+	`)
+	var hits, misses, hitRatio float64
+	if err := row.Scan(&hits, &misses, &hitRatio); err == nil && hitRatio < 0.1 {
+		severity := "Minor"
+		if hitRatio < 0.01 {
+			severity = "Moderate"
+		}
+
+		results = append(results, AuditResult{
+			ID:       "A1.5.01",
+			Object:   "UncompressedCache",
+			Severity: severity,
+			Details:  fmt.Sprintf("Bad hit/miss ratio for uncompressed cache (hits: %.0f, misses: %.0f, ratio: %.3f)", hits, misses, hitRatio),
+			Values: map[string]float64{
+				"hits":   hits,
+				"misses": misses,
+				"ratio":  hitRatio,
+			},
+		})
+	}
+
+	// Check uncompressed cache size vs total RAM
+	row = ap.app.clickHouse.QueryRow(`
+		SELECT 
+			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'UncompressedCacheBytes') as actual_uncompressed_cache_size,
+			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'OSMemoryTotal') as total_ram,
+			actual_uncompressed_cache_size / total_ram as uncompressed_cache_ratio
+	`)
+	var uncompressedCacheSize, totalRam, uncompressedCacheRatio float64
+	if err := row.Scan(&uncompressedCacheSize, &totalRam, &uncompressedCacheRatio); err == nil && uncompressedCacheRatio > 0.1 {
+		severity := "Minor"
+		if uncompressedCacheRatio > 0.25 {
+			severity = "Critical"
+		} else if uncompressedCacheRatio > 0.2 {
+			severity = "Major"
+		} else if uncompressedCacheRatio > 0.15 {
+			severity = "Moderate"
+		}
+
+		results = append(results, AuditResult{
+			ID:       "A1.5.02",
+			Object:   "UncompressedCache",
+			Severity: severity,
+			Details:  fmt.Sprintf("Too big uncompressed cache (%.1f%% of total RAM)", uncompressedCacheRatio*100),
+			Values:   map[string]float64{"actual_uncompressed_cache_size": uncompressedCacheSize, "total_ram": totalRam},
+		})
+	}
+
+	return results
+}
+
+func (ap *AuditPanel) checkReplicationQueue() []AuditResult {
+	var results []AuditResult
+
+	// Check replication queue size (moved from checkReplication)
+	rows, err := ap.app.clickHouse.Query(`
+		SELECT 
+			database, 
+			table, 
+			count() as count_all,
+			countIf(last_exception != '') as count_err,
+			countIf(num_postponed > 0) as count_postponed,
+			countIf(is_currently_executing) as count_executing
+		FROM system.replication_queue
+		GROUP BY database, table
+		HAVING count_all > 100
+	`)
+	if err == nil {
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkReplicationQueue")
+			}
+		}()
+		for rows.Next() {
+			var database, table string
+			var countAll, countErr, countPostponed, countExecuting int64
+
+			if err := rows.Scan(&database, &table, &countAll, &countErr, &countPostponed, &countExecuting); err == nil {
+				severity := "Minor"
+				if countAll > 500 {
+					severity = "Critical"
+				} else if countAll > 400 {
+					severity = "Major"
+				} else if countAll > 200 {
+					severity = "Moderate"
+				}
+
+				results = append(results, AuditResult{
+					ID:       "A1.6",
+					Object:   fmt.Sprintf("%s.%s", database, table),
+					Severity: severity,
+					Details:  fmt.Sprintf("Too many tasks in the replication_queue (count: %d)", countAll),
+					Values: map[string]float64{
+						"count_all":       float64(countAll),
+						"count_err":       float64(countErr),
+						"count_postponed": float64(countPostponed),
+						"count_executing": float64(countExecuting),
+					},
+				})
+			}
+		}
+	}
+
+	// Check for old tasks in replication queue
+	rows, err = ap.app.clickHouse.Query(`
+		WITH 
+			(SELECT maxArray([create_time, last_attempt_time, last_postpone_time]) FROM system.replication_queue) AS max_time
+		SELECT 
+			database,
+			table,
+			max_time - min(create_time) as relative_delay
+		FROM system.replication_queue
+		GROUP BY database, table
+		HAVING relative_delay > 300
+	`)
+	if err == nil {
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkReplicationQueue old tasks")
+			}
+		}()
+		for rows.Next() {
+			var database, table string
+			var relativeDelay float64
+
+			if err := rows.Scan(&database, &table, &relativeDelay); err == nil {
+				severity := "Minor"
+				if relativeDelay > 24*3600 {
+					severity = "Critical"
+				} else if relativeDelay > 2*3600 {
+					severity = "Major"
+				} else if relativeDelay > 1800 {
+					severity = "Moderate"
+				}
+
+				results = append(results, AuditResult{
+					ID:       "A1.6.1",
+					Object:   fmt.Sprintf("%s.%s", database, table),
+					Severity: severity,
+					Details:  fmt.Sprintf("Old tasks in replication_queue (max age: %.0f seconds)", relativeDelay),
+					Values:   map[string]float64{"delay": relativeDelay},
+				})
+			}
+		}
+	}
+
+	return results
+}
+
+func (ap *AuditPanel) checkMaterializedViews() []AuditResult {
+	var results []AuditResult
+
+	// Check for MVs not using TO syntax
+	rows, err := ap.app.clickHouse.Query(`
+		SELECT database, name 
+		FROM system.tables 
+		WHERE engine='MaterializedView' 
+		AND splitByChar(' ', create_table_query)[5] != 'TO'
+	`)
+	if err == nil {
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkMaterializedViews")
+			}
+		}()
+		for rows.Next() {
+			var database, name string
+			if err := rows.Scan(&database, &name); err == nil {
+				results = append(results, AuditResult{
+					ID:       "A2.2",
+					Object:   fmt.Sprintf("%s.%s", database, name),
+					Severity: "Moderate",
+					Details:  "MV: TO syntax is not used",
+					Values:   map[string]float64{},
+				})
+			}
+		}
+	}
+
+	// Check for MVs using JOINs
+	rows, err = ap.app.clickHouse.Query(`
+		SELECT database, name 
+		FROM system.tables 
+		WHERE engine='MaterializedView' 
+		AND create_table_query ILIKE '%JOIN%'
+	`)
+	if err == nil {
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkMaterializedViews JOINs")
+			}
+		}()
+		for rows.Next() {
+			var database, name string
+			if err := rows.Scan(&database, &name); err == nil {
+				results = append(results, AuditResult{
+					ID:       "A2.3",
+					Object:   fmt.Sprintf("%s.%s", database, name),
+					Severity: "Moderate",
+					Details:  "MV: JOIN is used",
+					Values:   map[string]float64{},
+				})
+			}
+		}
+	}
+
+	return results
+}
+
+func (ap *AuditPanel) checkVersions() []AuditResult {
+	var results []AuditResult
+
+	// Check ClickHouse version age
+	row := ap.app.clickHouse.QueryRow(`
+		SELECT 
+			maxIf(value, name = 'VERSION_DESCRIBE') AS version_full,
+			maxIf(toDate(parseDateTimeBestEffortOrNull(value)), lower(name) LIKE '%date%') AS release_date
+		FROM system.build_options
+		WHERE (name = 'VERSION_DESCRIBE') OR (lower(name) LIKE '%date%')
+	`)
+	var versionFull string
+	var releaseDate sql.NullTime
+	if err := row.Scan(&versionFull, &releaseDate); err == nil && releaseDate.Valid {
+		versionAgeDays := int(time.Since(releaseDate.Time).Hours() / 24)
+		
+		if versionAgeDays > 182 {
+			severity := "Minor"
+			if versionAgeDays > 900 {
+				severity = "Critical"
+			} else if versionAgeDays > 700 {
+				severity = "Major"
+			} else if versionAgeDays > 365 {
+				severity = "Moderate"
+			}
+
+			results = append(results, AuditResult{
+				ID:       "A.2.1.01",
+				Object:   "system",
+				Severity: severity,
+				Details:  fmt.Sprintf("You use old ClickHouse version (%s, %d days old), consider upgrade", versionFull, versionAgeDays),
+				Values:   map[string]float64{},
+			})
+		}
+	}
+
+	return results
+}
+
+func (ap *AuditPanel) checkLongNames() []AuditResult {
+	var results []AuditResult
+
+	// Check for long database names
+	rows, err := ap.app.clickHouse.Query(`
+		SELECT name, length(name) as name_length
+		FROM system.databases 
+		WHERE length(name) > 32
+	`)
+	if err == nil {
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkLongNames databases")
+			}
+		}()
+		for rows.Next() {
+			var name string
+			var nameLength int64
+			if err := rows.Scan(&name, &nameLength); err == nil {
+				severity := "Moderate"
+				if nameLength > 196 {
+					severity = "Critical"
+				} else if nameLength > 128 {
+					severity = "Major"
+				} else if nameLength > 64 {
+					severity = "Moderate"
+				}
+
+				results = append(results, AuditResult{
+					ID:       "A0.0.6",
+					Object:   name,
+					Severity: severity,
+					Details:  "Long database name",
+					Values:   map[string]float64{},
+				})
+			}
+		}
+	}
+
+	// Check for long table names
+	rows, err = ap.app.clickHouse.Query(`
+		SELECT database, name, length(name) as name_length
+		FROM system.tables 
+		WHERE length(name) > 32
+	`)
+	if err == nil {
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkLongNames tables")
+			}
+		}()
+		for rows.Next() {
+			var database, name string
+			var nameLength int64
+			if err := rows.Scan(&database, &name, &nameLength); err == nil {
+				severity := "Moderate"
+				if nameLength > 196 {
+					severity = "Critical"
+				} else if nameLength > 128 {
+					severity = "Major"
+				} else if nameLength > 64 {
+					severity = "Moderate"
+				}
+
+				results = append(results, AuditResult{
+					ID:       "A0.0.6",
+					Object:   fmt.Sprintf("%s.%s", database, name),
+					Severity: severity,
+					Details:  "Long table name",
+					Values:   map[string]float64{},
+				})
+			}
+		}
+	}
+
+	// Check for long column names
+	rows, err = ap.app.clickHouse.Query(`
+		SELECT database, table, name, length(name) as name_length
+		FROM system.columns 
+		WHERE length(name) > 32
+	`)
+	if err == nil {
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkLongNames columns")
+			}
+		}()
+		for rows.Next() {
+			var database, table, name string
+			var nameLength int64
+			if err := rows.Scan(&database, &table, &name, &nameLength); err == nil {
+				severity := "Moderate"
+				if nameLength > 196 {
+					severity = "Critical"
+				} else if nameLength > 128 {
+					severity = "Major"
+				} else if nameLength > 64 {
+					severity = "Moderate"
+				}
+
+				results = append(results, AuditResult{
+					ID:       "A0.0.6",
+					Object:   fmt.Sprintf("%s.%s.%s", database, table, name),
+					Severity: severity,
+					Details:  "Long column name",
+					Values:   map[string]float64{},
+				})
+			}
+		}
+	}
+
+	return results
+}
+
 func (ap *AuditPanel) checkSystemLogs() []AuditResult {
 	var results []AuditResult
 
@@ -451,6 +1081,54 @@ func (ap *AuditPanel) checkSystemLogs() []AuditResult {
 		}
 	}
 
+	// Check for query_thread_log being enabled (should be disabled in production)
+	row = ap.app.clickHouse.QueryRow("SELECT count() FROM system.tables WHERE database='system' AND name='query_thread_log'")
+	var threadLogExists int64
+	if err := row.Scan(&threadLogExists); err == nil && threadLogExists > 0 {
+		results = append(results, AuditResult{
+			ID:       "A0.2.07",
+			Object:   "System",
+			Severity: "Major",
+			Details:  "system.query_thread_log should be disabled in production systems",
+			Values:   map[string]float64{},
+		})
+	}
+
+	// Check for recent crashes
+	row = ap.app.clickHouse.QueryRow("SELECT count() FROM system.crash_log WHERE event_time > now() - INTERVAL 5 DAY")
+	var crashCount int64
+	if err := row.Scan(&crashCount); err == nil && crashCount > 1 {
+		results = append(results, AuditResult{
+			ID:       "A0.2.08",
+			Object:   "System",
+			Severity: "Major",
+			Details:  fmt.Sprintf("There are %d crashes for last 5 days", crashCount),
+			Values:   map[string]float64{},
+		})
+	}
+
+	// Check for warnings
+	rows, err = ap.app.clickHouse.Query("SELECT message FROM system.warnings")
+	if err == nil {
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close warnings check")
+			}
+		}()
+		for rows.Next() {
+			var message string
+			if err := rows.Scan(&message); err == nil {
+				results = append(results, AuditResult{
+					ID:       "A0.2.09",
+					Object:   "System",
+					Severity: "Minor",
+					Details:  fmt.Sprintf("Warning: %s", message),
+					Values:   map[string]float64{},
+				})
+			}
+		}
+	}
+
 	return results
 }
 
@@ -481,7 +1159,7 @@ func (ap *AuditPanel) checkPartitions() []AuditResult {
 	if err == nil {
 		defer func() {
 			if closeErr := rows.Close(); closeErr != nil {
-				log.Error().Err(closeErr).Msg("can't close checkSystemLogs")
+				log.Error().Err(closeErr).Msg("can't close checkPartitions")
 			}
 		}()
 		for rows.Next() {
@@ -515,6 +1193,148 @@ func (ap *AuditPanel) checkPartitions() []AuditResult {
 						"median_partition_size_bytes": medianBytes,
 						"median_partition_size_rows":  medianRows,
 					},
+				})
+			}
+		}
+	}
+
+	// Check for too fast inserts
+	rows, err = ap.app.clickHouse.Query(`
+		WITH 
+			(SELECT max(toUInt32(value)) FROM system.merge_tree_settings WHERE name='old_parts_lifetime') as old_parts_lifetime_raw,
+			if(old_parts_lifetime_raw IS NULL OR old_parts_lifetime_raw = 0, 480, old_parts_lifetime_raw) as old_parts_lifetime
+		SELECT 
+			database,
+			table,
+			count() as parts_created_count,
+			sum(rows) as rows_in_parts,
+			round(rows_in_parts / parts_created_count, 2) as average_rows_in_parts,
+			round(1 / avg(dateDiff('second', 
+				lagInFrame(modification_time) OVER (PARTITION BY database, table ORDER BY modification_time), 
+				modification_time
+			)), 2) as average_insert_rate
+		FROM system.parts
+		WHERE level = 0 
+		AND database NOT IN ('system', 'INFORMATION_SCHEMA', 'information_schema')
+		AND modification_time > (SELECT max(modification_time) FROM system.parts) - old_parts_lifetime
+		GROUP BY database, table
+		HAVING average_rows_in_parts < 10000
+	`)
+	if err == nil {
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkPartitions fast inserts")
+			}
+		}()
+		for rows.Next() {
+			var database, table string
+			var partsCount, rowsInParts int64
+			var avgRowsInParts, avgInsertRate float64
+
+			if err := rows.Scan(&database, &table, &partsCount, &rowsInParts, &avgRowsInParts, &avgInsertRate); err == nil {
+				if avgInsertRate > 1 {
+					severity := "Minor"
+					if avgInsertRate > 10 {
+						severity = "Critical"
+					} else if avgInsertRate > 5 {
+						severity = "Major"
+					} else if avgInsertRate > 2 {
+						severity = "Moderate"
+					}
+
+					results = append(results, AuditResult{
+						ID:       "A1.1.05",
+						Object:   fmt.Sprintf("%s.%s", database, table),
+						Severity: severity,
+						Details:  fmt.Sprintf("Too fast Inserts (%.2f per second)", avgInsertRate),
+						Values: map[string]float64{
+							"average_rows_in_parts": avgRowsInParts,
+							"average_insert_rate":   avgInsertRate,
+						},
+					})
+				}
+			}
+		}
+	}
+
+	// Check average row size
+	rows, err = ap.app.clickHouse.Query(`
+		SELECT 
+			database,
+			table,
+			sum(data_uncompressed_bytes) as data_uncompressed_bytes_sum,
+			sum(rows) as rows_sum,
+			data_uncompressed_bytes_sum / rows_sum as average_row_size
+		FROM system.parts
+		WHERE active 
+		GROUP BY database, table
+		HAVING average_row_size > 3000
+		ORDER BY average_row_size DESC
+	`)
+	if err == nil {
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkPartitions row size")
+			}
+		}()
+		for rows.Next() {
+			var database, table string
+			var dataUncompressed, rowsSum int64
+			var avgRowSize float64
+
+			if err := rows.Scan(&database, &table, &dataUncompressed, &rowsSum, &avgRowSize); err == nil {
+				severity := "Minor"
+				if avgRowSize > 12000 {
+					severity = "Critical"
+				} else if avgRowSize > 8000 {
+					severity = "Major"
+				} else if avgRowSize > 5000 {
+					severity = "Moderate"
+				}
+
+				results = append(results, AuditResult{
+					ID:       "A1.1.06",
+					Object:   fmt.Sprintf("%s.%s", database, table),
+					Severity: severity,
+					Details:  fmt.Sprintf("Too big average row size (%.0f bytes)", avgRowSize),
+					Values:   map[string]float64{"average_row_size": avgRowSize},
+				})
+			}
+		}
+	}
+
+	// Check detached parts
+	rows, err = ap.app.clickHouse.Query(`
+		SELECT database, table, count() as parts_count
+		FROM system.detached_parts
+		GROUP BY database, table
+	`)
+	if err == nil {
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkPartitions detached")
+			}
+		}()
+		for rows.Next() {
+			var database, table string
+			var partsCount int64
+
+			if err := rows.Scan(&database, &table, &partsCount); err == nil {
+				severity := "Minor"
+				if partsCount > 500 {
+					severity = "Critical"
+				} else if partsCount > 200 {
+					severity = "Major"
+				} else if partsCount > 50 {
+					severity = "Moderate"
+				}
+
+				results = append(results, AuditResult{
+					ID:       "A1.1.07",
+					Object:   fmt.Sprintf("%s.%s", database, table),
+					Severity: severity,
+					Details:  fmt.Sprintf("Detached parts (count: %d)", partsCount),
+					Values:   map[string]float64{"parts_count": float64(partsCount)},
 				})
 			}
 		}
@@ -590,7 +1410,7 @@ func (ap *AuditPanel) checkTables() []AuditResult {
 	if err == nil {
 		defer func() {
 			if closeErr := rows.Close(); closeErr != nil {
-				log.Error().Err(closeErr).Msg("can't close checkSystemLogs")
+				log.Error().Err(closeErr).Msg("can't close checkTables")
 			}
 		}()
 		for rows.Next() {
@@ -618,6 +1438,34 @@ func (ap *AuditPanel) checkTables() []AuditResult {
 		}
 	}
 
+	// Check for tables with TTL but without ttl_only_drop_parts=1
+	rows, err = ap.app.clickHouse.Query(`
+		SELECT database, name
+		FROM system.tables
+		WHERE create_table_query LIKE '% TTL %'
+		AND name NOT IN ('grants')
+		AND NOT (create_table_query LIKE '%ttl_only_drop_parts = 1%' OR create_table_query LIKE '%ttl_only_drop_parts=1%')
+	`)
+	if err == nil {
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkTables TTL")
+			}
+		}()
+		for rows.Next() {
+			var database, name string
+			if err := rows.Scan(&database, &name); err == nil {
+				results = append(results, AuditResult{
+					ID:       "A1.3.02",
+					Object:   fmt.Sprintf("%s.%s", database, name),
+					Severity: "Minor",
+					Details:  "Table has TTL but ttl_only_drop_parts=1 is not used",
+					Values:   map[string]float64{},
+				})
+			}
+		}
+	}
+
 	return results
 }
 
@@ -633,23 +1481,16 @@ func (ap *AuditPanel) checkMemoryUsage() []AuditResult {
 	var memoryResident, memoryTotal float64
 	if err := row.Scan(&memoryResident, &memoryTotal); err == nil && memoryTotal > 0 {
 		ratio := memoryResident / memoryTotal
-		if ratio > 0.9 {
+		if ratio > 0.8 {
+			severity := "Major"
+			if ratio > 0.9 {
+				severity = "Critical"
+			}
+
 			results = append(results, AuditResult{
 				ID:       "A3.0.15",
 				Object:   "Memory",
-				Severity: "Critical",
-				Details:  fmt.Sprintf("Memory usage is high (%.1f%% of total)", ratio*100),
-				Values: map[string]float64{
-					"memory_resident": memoryResident,
-					"memory_total":    memoryTotal,
-					"ratio":           ratio,
-				},
-			})
-		} else if ratio > 0.8 {
-			results = append(results, AuditResult{
-				ID:       "A3.0.15",
-				Object:   "Memory",
-				Severity: "Major",
+				Severity: severity,
 				Details:  fmt.Sprintf("Memory usage is high (%.1f%% of total)", ratio*100),
 				Values: map[string]float64{
 					"memory_resident": memoryResident,
@@ -658,6 +1499,68 @@ func (ap *AuditPanel) checkMemoryUsage() []AuditResult {
 				},
 			})
 		}
+	}
+
+	// Check memory used by dictionaries and memory tables
+	row = ap.app.clickHouse.QueryRow(`
+		SELECT 
+			(SELECT sum(bytes_allocated) FROM system.dictionaries) as dictionaries,
+			(SELECT sum(total_bytes) FROM system.tables WHERE engine IN ('Memory','Set','Join')) as mem_tables,
+			(SELECT value FROM system.asynchronous_metrics WHERE metric='OSMemoryTotal') as total_memory,
+			(dictionaries + mem_tables) / total_memory as ratio
+	`)
+	var dictionaries, memTables, totalMemory, dictMemRatio float64
+	if err := row.Scan(&dictionaries, &memTables, &totalMemory, &dictMemRatio); err == nil && dictMemRatio > 0.1 {
+		severity := "Minor"
+		if dictMemRatio > 0.3 {
+			severity = "Critical"
+		} else if dictMemRatio > 0.25 {
+			severity = "Major"
+		} else if dictMemRatio > 0.2 {
+			severity = "Moderate"
+		}
+
+		results = append(results, AuditResult{
+			ID:       "A1.7.01",
+			Object:   "system OS RAM",
+			Severity: severity,
+			Details:  fmt.Sprintf("Too much memory used by dictionaries and memory tables (ratio: %.3f)", dictMemRatio),
+			Values: map[string]float64{
+				"ratio":        dictMemRatio,
+				"dictionaries": dictionaries,
+				"mem_tables":   memTables,
+			},
+		})
+	}
+
+	// Check memory used by primary keys
+	row = ap.app.clickHouse.QueryRow(`
+		SELECT 
+			(SELECT sum(primary_key_bytes_in_memory) FROM system.parts) as primary_key_bytes_in_memory,
+			(SELECT value FROM system.asynchronous_metrics WHERE metric='OSMemoryTotal') as total_memory,
+			primary_key_bytes_in_memory / total_memory as ratio
+	`)
+	var primaryKeyMemory, pkMemRatio float64
+	if err := row.Scan(&primaryKeyMemory, &totalMemory, &pkMemRatio); err == nil && pkMemRatio > 0.1 {
+		severity := "Minor"
+		if pkMemRatio > 0.3 {
+			severity = "Critical"
+		} else if pkMemRatio > 0.25 {
+			severity = "Major"
+		} else if pkMemRatio > 0.2 {
+			severity = "Moderate"
+		}
+
+		results = append(results, AuditResult{
+			ID:       "A1.7.02",
+			Object:   "system OS RAM",
+			Severity: severity,
+			Details:  fmt.Sprintf("Too much memory used by primary keys (ratio: %.3f)", pkMemRatio),
+			Values: map[string]float64{
+				"ratio":                        pkMemRatio,
+				"primary_key_bytes_in_memory": primaryKeyMemory,
+			},
+		})
 	}
 
 	return results
@@ -674,12 +1577,12 @@ func (ap *AuditPanel) checkDiskUsage() []AuditResult {
 			total_space,
 			free_space / total_space as ratio
 		FROM system.disks 
-		WHERE type = 'Local'
+		WHERE type = 'Local' AND ratio < 0.3
 	`)
 	if err == nil {
 		defer func() {
 			if closeErr := rows.Close(); closeErr != nil {
-				log.Error().Err(closeErr).Msg("can't close checkSystemLogs")
+				log.Error().Err(closeErr).Msg("can't close checkDiskUsage")
 			}
 		}()
 		for rows.Next() {
@@ -688,93 +1591,23 @@ func (ap *AuditPanel) checkDiskUsage() []AuditResult {
 
 			if err := rows.Scan(&name, &freeSpace, &totalSpace, &ratio); err == nil {
 				usedRatio := 1.0 - ratio
-				if usedRatio > 0.9 {
-					results = append(results, AuditResult{
-						ID:       "A1.8.01",
-						Object:   fmt.Sprintf("Disk %s", name),
-						Severity: "Critical",
-						Details:  fmt.Sprintf("Too low free space (%.1f%% used)", usedRatio*100),
-						Values: map[string]float64{
-							"ratio":            usedRatio,
-							"unreserved_space": freeSpace,
-						},
-					})
-				} else if usedRatio > 0.85 {
-					results = append(results, AuditResult{
-						ID:       "A1.8.01",
-						Object:   fmt.Sprintf("Disk %s", name),
-						Severity: "Major",
-						Details:  fmt.Sprintf("Too low free space (%.1f%% used)", usedRatio*100),
-						Values: map[string]float64{
-							"ratio":            usedRatio,
-							"unreserved_space": freeSpace,
-						},
-					})
-				} else if usedRatio > 0.8 {
-					results = append(results, AuditResult{
-						ID:       "A1.8.01",
-						Object:   fmt.Sprintf("Disk %s", name),
-						Severity: "Moderate",
-						Details:  fmt.Sprintf("Too low free space (%.1f%% used)", usedRatio*100),
-						Values: map[string]float64{
-							"ratio":            usedRatio,
-							"unreserved_space": freeSpace,
-						},
-					})
-				}
-			}
-		}
-	}
-
-	return results
-}
-
-func (ap *AuditPanel) checkReplication() []AuditResult {
-	var results []AuditResult
-
-	// Check replication queue size
-	rows, err := ap.app.clickHouse.Query(`
-		SELECT 
-			database, 
-			table, 
-			count() as count_all,
-			countIf(last_exception != '') as count_err,
-			countIf(num_postponed > 0) as count_postponed,
-			countIf(is_currently_executing) as count_executing
-		FROM system.replication_queue
-		GROUP BY database, table
-		HAVING count_all > 100
-	`)
-	if err == nil {
-		defer func() {
-			if closeErr := rows.Close(); closeErr != nil {
-				log.Error().Err(closeErr).Msg("can't close checkSystemLogs")
-			}
-		}()
-		for rows.Next() {
-			var database, table string
-			var countAll, countErr, countPostponed, countExecuting int64
-
-			if err := rows.Scan(&database, &table, &countAll, &countErr, &countPostponed, &countExecuting); err == nil {
 				severity := "Minor"
-				if countAll > 500 {
+				if usedRatio > 0.9 {
 					severity = "Critical"
-				} else if countAll > 400 {
+				} else if usedRatio > 0.85 {
 					severity = "Major"
-				} else if countAll > 200 {
+				} else if usedRatio > 0.8 {
 					severity = "Moderate"
 				}
 
 				results = append(results, AuditResult{
-					ID:       "A1.6",
-					Object:   fmt.Sprintf("%s.%s", database, table),
+					ID:       "A1.8.01",
+					Object:   fmt.Sprintf("Disk %s", name),
 					Severity: severity,
-					Details:  fmt.Sprintf("Too many tasks in the replication_queue (count: %d)", countAll),
+					Details:  fmt.Sprintf("Too low free space (%.1f%% used)", usedRatio*100),
 					Values: map[string]float64{
-						"count_all":       float64(countAll),
-						"count_err":       float64(countErr),
-						"count_postponed": float64(countPostponed),
-						"count_executing": float64(countExecuting),
+						"ratio":            usedRatio,
+						"unreserved_space": freeSpace,
 					},
 				})
 			}
@@ -783,6 +1616,7 @@ func (ap *AuditPanel) checkReplication() []AuditResult {
 
 	return results
 }
+
 
 func (ap *AuditPanel) checkPerformanceMetrics() []AuditResult {
 	var results []AuditResult
@@ -812,7 +1646,7 @@ func (ap *AuditPanel) checkPerformanceMetrics() []AuditResult {
 	if err == nil {
 		defer func() {
 			if closeErr := rows.Close(); closeErr != nil {
-				log.Error().Err(closeErr).Msg("can't close checkSystemLogs")
+				log.Error().Err(closeErr).Msg("can't close checkPerformanceMetrics")
 			}
 		}()
 		for rows.Next() {
@@ -822,35 +1656,20 @@ func (ap *AuditPanel) checkPerformanceMetrics() []AuditResult {
 			if err := rows.Scan(&metric, &value, &cpuCount); err == nil {
 				if cpuCount > 0 {
 					ratio := value / cpuCount
-					if ratio > 10 {
+					if ratio > 0.9 {
+						severity := "Minor"
+						if ratio > 10 {
+							severity = "Critical"
+						} else if ratio > 2 {
+							severity = "Major"
+						} else if ratio > 1 {
+							severity = "Moderate"
+						}
+
 						results = append(results, AuditResult{
 							ID:       "A3.0.5",
 							Object:   metric,
-							Severity: "Critical",
-							Details:  fmt.Sprintf("Load average is high (%s %.2f, %d cores)", metric, value, int(cpuCount)),
-							Values: map[string]float64{
-								"load":      value,
-								"cpu_count": cpuCount,
-								"ratio":     ratio,
-							},
-						})
-					} else if ratio > 2 {
-						results = append(results, AuditResult{
-							ID:       "A3.0.5",
-							Object:   metric,
-							Severity: "Major",
-							Details:  fmt.Sprintf("Load average is high (%s %.2f, %d cores)", metric, value, int(cpuCount)),
-							Values: map[string]float64{
-								"load":      value,
-								"cpu_count": cpuCount,
-								"ratio":     ratio,
-							},
-						})
-					} else if ratio > 1 {
-						results = append(results, AuditResult{
-							ID:       "A3.0.5",
-							Object:   metric,
-							Severity: "Moderate",
+							Severity: severity,
 							Details:  fmt.Sprintf("Load average is high (%s %.2f, %d cores)", metric, value, int(cpuCount)),
 							Values: map[string]float64{
 								"load":      value,
@@ -862,6 +1681,100 @@ func (ap *AuditPanel) checkPerformanceMetrics() []AuditResult {
 				}
 			}
 		}
+	}
+
+	// Check replica delays
+	rows, err = ap.app.clickHouse.Query(`
+		SELECT metric, value
+		FROM system.asynchronous_metrics
+		WHERE metric IN ('ReplicasMaxAbsoluteDelay', 'ReplicasMaxRelativeDelay') 
+		AND value > 300
+	`)
+	if err == nil {
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkPerformanceMetrics delays")
+			}
+		}()
+		for rows.Next() {
+			var metric string
+			var value float64
+
+			if err := rows.Scan(&metric, &value); err == nil {
+				severity := "Minor"
+				if value > 24*3600 {
+					severity = "Critical"
+				} else if value > 3*3600 {
+					severity = "Major"
+				} else if value > 1800 {
+					severity = "Moderate"
+				}
+
+				results = append(results, AuditResult{
+					ID:       "A3.0.6",
+					Object:   metric,
+					Severity: severity,
+					Details:  fmt.Sprintf("Replica delay is too big (%s, %.0f seconds)", metric, value),
+					Values:   map[string]float64{"delay": value},
+				})
+			}
+		}
+	}
+
+	// Check queue sizes
+	queueChecks := []struct {
+		metric    string
+		id        string
+		threshold float64
+		name      string
+	}{
+		{"ReplicasMaxInsertsInQueue", "A3.0.7", 100, "inserts in queue"},
+		{"ReplicasSumInsertsInQueue", "A3.0.8", 300, "inserts in queue"},
+		{"ReplicasMaxMergesInQueue", "A3.0.9", 80, "merges in queue"},
+		{"ReplicasSumMergesInQueue", "A3.0.10", 200, "merges in queue"},
+		{"ReplicasMaxQueueSize", "A3.0.11", 200, "tasks in queue"},
+		{"ReplicasSumQueueSize", "A3.0.12", 500, "tasks in queue"},
+	}
+
+	for _, check := range queueChecks {
+		row := ap.app.clickHouse.QueryRow(fmt.Sprintf("SELECT value FROM system.asynchronous_metrics WHERE metric = '%s'", check.metric))
+		var value float64
+		if err := row.Scan(&value); err == nil && value > check.threshold {
+			results = append(results, AuditResult{
+				ID:       check.id,
+				Object:   check.metric,
+				Severity: "Minor",
+				Details:  fmt.Sprintf("Too many %s (%s, %.0f)", check.name, check.metric, value),
+				Values:   map[string]float64{strings.Replace(check.name, " ", "_", -1): value},
+			})
+		}
+	}
+
+	// Check max parts in partition
+	row = ap.app.clickHouse.QueryRow(`
+		SELECT 
+			value,
+			(SELECT toUInt32(value) FROM system.merge_tree_settings WHERE name='parts_to_delay_insert') as parts_to_delay_insert,
+			(SELECT toUInt32(value) FROM system.merge_tree_settings WHERE name='parts_to_throw_insert') as parts_to_throw_insert
+		FROM system.asynchronous_metrics 
+		WHERE metric = 'MaxPartCountForPartition'
+	`)
+	var maxParts, partsToDelay, partsToThrow float64
+	if err := row.Scan(&maxParts, &partsToDelay, &partsToThrow); err == nil && maxParts > partsToDelay*0.9 {
+		severity := "Minor"
+		if maxParts > partsToThrow {
+			severity = "Critical"
+		} else if maxParts > partsToDelay {
+			severity = "Major"
+		}
+
+		results = append(results, AuditResult{
+			ID:       "A3.0.14",
+			Object:   "MaxPartCountForPartition",
+			Severity: severity,
+			Details:  fmt.Sprintf("Too many parts in partition (%.0f)", maxParts),
+			Values:   map[string]float64{"max_parts_in_partition": maxParts},
+		})
 	}
 
 	return results
