@@ -3,13 +3,12 @@ package tui
 import (
 	"database/sql"
 	"fmt"
-	"strconv"
+	"github.com/rs/zerolog/log"
 	"strings"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"github.com/rs/zerolog/log"
 )
 
 // AuditResult represents a single audit finding
@@ -23,13 +22,13 @@ type AuditResult struct {
 
 // AuditPanel manages the audit interface
 type AuditPanel struct {
-	app          *App
-	table        *tview.Table
-	statusText   *tview.TextView
-	progressBar  *tview.TextView
-	flex         *tview.Flex
-	results      []AuditResult
-	isRunning    bool
+	app         *App
+	table       *tview.Table
+	statusText  *tview.TextView
+	progressBar *tview.TextView
+	flex        *tview.Flex
+	results     []AuditResult
+	isRunning   bool
 }
 
 // ShowAudit displays the audit interface
@@ -136,14 +135,14 @@ func (ap *AuditPanel) runAudit() {
 		}
 
 		totalChecks := len(checks)
-		allResults := []AuditResult{}
+		allResults := make([]AuditResult, 0)
 
 		for i, check := range checks {
 			ap.updateProgress(fmt.Sprintf("Running %s checks...", check.name), i, totalChecks)
-			
+
 			results := check.fn()
 			allResults = append(allResults, results...)
-			
+
 			time.Sleep(100 * time.Millisecond) // Small delay for visual feedback
 		}
 
@@ -155,7 +154,7 @@ func (ap *AuditPanel) runAudit() {
 func (ap *AuditPanel) displayResults(results []AuditResult) {
 	ap.app.tviewApp.QueueUpdateDraw(func() {
 		ap.results = results
-		
+
 		// Clear existing rows (keep headers)
 		for row := ap.table.GetRowCount() - 1; row > 0; row-- {
 			ap.table.RemoveRow(row)
@@ -181,7 +180,7 @@ func (ap *AuditPanel) displayResults(results []AuditResult) {
 		// Add results to table
 		for i, result := range results {
 			row := i + 1
-			
+
 			// Color code by severity
 			var color tcell.Color
 			switch result.Severity {
@@ -200,7 +199,7 @@ func (ap *AuditPanel) displayResults(results []AuditResult) {
 			ap.table.SetCell(row, 0, tview.NewTableCell(result.ID).SetTextColor(color))
 			ap.table.SetCell(row, 1, tview.NewTableCell(result.Severity).SetTextColor(color))
 			ap.table.SetCell(row, 2, tview.NewTableCell(result.Object).SetTextColor(color))
-			
+
 			// Truncate details if too long
 			details := result.Details
 			if len(details) > 80 {
@@ -214,7 +213,7 @@ func (ap *AuditPanel) displayResults(results []AuditResult) {
 		majorCount := 0
 		moderateCount := 0
 		minorCount := 0
-		
+
 		for _, result := range results {
 			switch result.Severity {
 			case "Critical":
@@ -230,7 +229,7 @@ func (ap *AuditPanel) displayResults(results []AuditResult) {
 
 		statusMsg := fmt.Sprintf("[red]Critical: %d[white] | [orange]Major: %d[white] | [yellow]Moderate: %d[white] | [green]Minor: %d[white] | Total: %d issues found",
 			criticalCount, majorCount, moderateCount, minorCount, len(results))
-		
+
 		ap.statusText.SetText(statusMsg)
 		ap.progressBar.SetText("[green]Press Enter for details, Esc to return[white]")
 	})
@@ -243,7 +242,7 @@ func (ap *AuditPanel) showResultDetails() {
 	}
 
 	result := ap.results[row-1]
-	
+
 	details := fmt.Sprintf(`[yellow::b]Audit Result Details[white::-]
 
 [yellow]ID:[white] %s
@@ -433,7 +432,11 @@ func (ap *AuditPanel) checkSystemLogs() []AuditResult {
 		AND engine_full NOT LIKE '% TTL %'
 	`)
 	if err == nil {
-		defer rows.Close()
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkSystemLogs")
+			}
+		}()
 		for rows.Next() {
 			var database, name string
 			if err := rows.Scan(&database, &name); err == nil {
@@ -476,12 +479,16 @@ func (ap *AuditPanel) checkPartitions() []AuditResult {
 		HAVING partition_count > 1
 	`)
 	if err == nil {
-		defer rows.Close()
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkSystemLogs")
+			}
+		}()
 		for rows.Next() {
 			var database, table string
 			var partitionCount int64
 			var medianBytes, medianRows float64
-			
+
 			if err := rows.Scan(&database, &table, &partitionCount, &medianBytes, &medianRows); err == nil {
 				severity := "Minor"
 				if partitionCount > 1500 && (medianBytes < 16000000 || medianRows < 250000) {
@@ -504,9 +511,9 @@ func (ap *AuditPanel) checkPartitions() []AuditResult {
 					Severity: severity,
 					Details:  fmt.Sprintf("Too small partitions (count: %d, median size: %.0f bytes)", partitionCount, medianBytes),
 					Values: map[string]float64{
-						"partition_count":              float64(partitionCount),
-						"median_partition_size_bytes":  medianBytes,
-						"median_partition_size_rows":   medianRows,
+						"partition_count":             float64(partitionCount),
+						"median_partition_size_bytes": medianBytes,
+						"median_partition_size_rows":  medianRows,
 					},
 				})
 			}
@@ -532,11 +539,15 @@ func (ap *AuditPanel) checkPrimaryKeys() []AuditResult {
 		HAVING sum(marks) > 0 AND pk_per_mark > 64
 	`)
 	if err == nil {
-		defer rows.Close()
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkSystemLogs")
+			}
+		}()
 		for rows.Next() {
 			var database, table string
 			var pkPerMark, totalPkMemory float64
-			
+
 			if err := rows.Scan(&database, &table, &pkPerMark, &totalPkMemory); err == nil {
 				severity := "Minor"
 				if pkPerMark > 256 {
@@ -577,11 +588,15 @@ func (ap *AuditPanel) checkTables() []AuditResult {
 		HAVING columns > 600
 	`)
 	if err == nil {
-		defer rows.Close()
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkSystemLogs")
+			}
+		}()
 		for rows.Next() {
 			var database, table string
 			var columns int64
-			
+
 			if err := rows.Scan(&database, &table, &columns); err == nil {
 				severity := "Minor"
 				if columns > 1500 {
@@ -662,11 +677,15 @@ func (ap *AuditPanel) checkDiskUsage() []AuditResult {
 		WHERE type = 'Local'
 	`)
 	if err == nil {
-		defer rows.Close()
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkSystemLogs")
+			}
+		}()
 		for rows.Next() {
 			var name string
 			var freeSpace, totalSpace, ratio float64
-			
+
 			if err := rows.Scan(&name, &freeSpace, &totalSpace, &ratio); err == nil {
 				usedRatio := 1.0 - ratio
 				if usedRatio > 0.9 {
@@ -676,7 +695,7 @@ func (ap *AuditPanel) checkDiskUsage() []AuditResult {
 						Severity: "Critical",
 						Details:  fmt.Sprintf("Too low free space (%.1f%% used)", usedRatio*100),
 						Values: map[string]float64{
-							"ratio":           usedRatio,
+							"ratio":            usedRatio,
 							"unreserved_space": freeSpace,
 						},
 					})
@@ -687,7 +706,7 @@ func (ap *AuditPanel) checkDiskUsage() []AuditResult {
 						Severity: "Major",
 						Details:  fmt.Sprintf("Too low free space (%.1f%% used)", usedRatio*100),
 						Values: map[string]float64{
-							"ratio":           usedRatio,
+							"ratio":            usedRatio,
 							"unreserved_space": freeSpace,
 						},
 					})
@@ -698,7 +717,7 @@ func (ap *AuditPanel) checkDiskUsage() []AuditResult {
 						Severity: "Moderate",
 						Details:  fmt.Sprintf("Too low free space (%.1f%% used)", usedRatio*100),
 						Values: map[string]float64{
-							"ratio":           usedRatio,
+							"ratio":            usedRatio,
 							"unreserved_space": freeSpace,
 						},
 					})
@@ -727,11 +746,15 @@ func (ap *AuditPanel) checkReplication() []AuditResult {
 		HAVING count_all > 100
 	`)
 	if err == nil {
-		defer rows.Close()
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkSystemLogs")
+			}
+		}()
 		for rows.Next() {
 			var database, table string
 			var countAll, countErr, countPostponed, countExecuting int64
-			
+
 			if err := rows.Scan(&database, &table, &countAll, &countErr, &countPostponed, &countExecuting); err == nil {
 				severity := "Minor"
 				if countAll > 500 {
@@ -748,10 +771,10 @@ func (ap *AuditPanel) checkReplication() []AuditResult {
 					Severity: severity,
 					Details:  fmt.Sprintf("Too many tasks in the replication_queue (count: %d)", countAll),
 					Values: map[string]float64{
-						"count_all":        float64(countAll),
-						"count_err":        float64(countErr),
-						"count_postponed":  float64(countPostponed),
-						"count_executing":  float64(countExecuting),
+						"count_all":       float64(countAll),
+						"count_err":       float64(countErr),
+						"count_postponed": float64(countPostponed),
+						"count_executing": float64(countExecuting),
 					},
 				})
 			}
@@ -787,11 +810,15 @@ func (ap *AuditPanel) checkPerformanceMetrics() []AuditResult {
 		WHERE metric LIKE 'LoadAverage%' AND value > 0
 	`)
 	if err == nil {
-		defer rows.Close()
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close checkSystemLogs")
+			}
+		}()
 		for rows.Next() {
 			var metric string
 			var value, cpuCount float64
-			
+
 			if err := rows.Scan(&metric, &value, &cpuCount); err == nil {
 				if cpuCount > 0 {
 					ratio := value / cpuCount
