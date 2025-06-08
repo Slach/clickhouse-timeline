@@ -363,7 +363,7 @@ func (a *App) ShowHeatmap() {
 							green := uint8(255 * (1 - (normalizedValue-0.5)*2))
 							originalColor = tcell.NewRGBColor(int32(red), int32(green), 0)
 						}
-						
+
 						// Create inverted color (swap background and text)
 						table.SetCell(row, column, tview.NewTableCell("█").
 							SetBackgroundColor(tcell.ColorWhite).
@@ -505,7 +505,7 @@ func (a *App) ShowHeatmap() {
 						return nil
 					}
 				}
-				
+
 				// When Enter is pressed, show action menu
 				if event.Key() == tcell.KeyEnter {
 					row, col := table.GetSelection()
@@ -568,29 +568,29 @@ func (a *App) ShowHeatmap() {
 							case "Cancel":
 								a.pages.SwitchToPage("heatmap")
 							}
-						}).
-						SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-							switch event.Rune() {
-							case 'f', 'F':
-								a.pages.SwitchToPage("main")
-								a.generateFlamegraph(categoryType, categoryValue, traceType, fromTime, toTime, a.cluster, "heatmap")
-								return nil
-							case 'p', 'P':
-								a.pages.SwitchToPage("main")
-								a.ShowProfileEvents(categoryType, categoryValue, fromTime, toTime, a.cluster)
-								return nil
-							case 'c', 'C':
-								a.pages.SwitchToPage("heatmap")
-								return nil
-							}
-							if event.Key() == tcell.KeyEscape {
-								a.pages.SwitchToPage("heatmap")
-								return nil
-							}
-							return event
 						})
+					menu.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+						switch event.Rune() {
+						case 'f', 'F':
+							a.pages.SwitchToPage("main")
+							a.generateFlamegraph(categoryType, categoryValue, traceType, fromTime, toTime, a.cluster, "heatmap")
+							return nil
+						case 'p', 'P':
+							a.pages.SwitchToPage("main")
+							a.ShowProfileEvents(categoryType, categoryValue, fromTime, toTime, a.cluster)
+							return nil
+						case 'c', 'C':
+							a.pages.SwitchToPage("heatmap")
+							return nil
+						}
+						if event.Key() == tcell.KeyEscape {
+							a.pages.SwitchToPage("heatmap")
+							return nil
+						}
+						return event
+					})
 
-					a.pages.AddPage("action_menu", menu, false, true)
+					a.pages.AddPage("action_menu", menu, true, true)
 					a.pages.SwitchToPage("action_menu")
 					return nil
 				}
