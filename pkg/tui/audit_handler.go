@@ -299,30 +299,24 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 	row := ap.app.clickHouse.QueryRow("SELECT count() FROM system.tables WHERE engine LIKE 'Replicated%'")
 	var replicatedCount int64
 	if err := row.Scan(&replicatedCount); err == nil {
+		severity := ""
 		if replicatedCount > 2000 {
-			results = append(results, AuditResult{
-				ID:       "A0.1.01",
-				Object:   "ReplicatedTables",
-				Severity: "Critical",
-				Details:  fmt.Sprintf("Too many replicated tables (count: %d) - background_schedule_pool_size should be tuned", replicatedCount),
-				Values:   map[string]float64{"replicated_tables_count": float64(replicatedCount)},
-			})
+			severity = "Critical"
 		} else if replicatedCount > 900 {
-			results = append(results, AuditResult{
-				ID:       "A0.1.01",
-				Object:   "ReplicatedTables",
-				Severity: "Major",
-				Details:  fmt.Sprintf("Too many replicated tables (count: %d) - background_schedule_pool_size should be tuned", replicatedCount),
-				Values:   map[string]float64{"replicated_tables_count": float64(replicatedCount)},
-			})
+			severity = "Major"
 		} else if replicatedCount > 200 {
+			severity = "Moderate"
+		}
+
+		if severity != "" {
 			results = append(results, AuditResult{
 				ID:       "A0.1.01",
 				Object:   "ReplicatedTables",
-				Severity: "Moderate",
+				Severity: severity,
 				Details:  fmt.Sprintf("Too many replicated tables (count: %d) - background_schedule_pool_size should be tuned", replicatedCount),
 				Values:   map[string]float64{"replicated_tables_count": float64(replicatedCount)},
 			})
+
 		}
 	}
 
@@ -876,7 +870,7 @@ func (ap *AuditPanel) checkVersions() []AuditResult {
 	var releaseDate sql.NullTime
 	if err := row.Scan(&versionFull, &releaseDate); err == nil && releaseDate.Valid {
 		versionAgeDays := int(time.Since(releaseDate.Time).Hours() / 24)
-		
+
 		if versionAgeDays > 182 {
 			severity := "Minor"
 			if versionAgeDays > 900 {
@@ -1557,7 +1551,7 @@ func (ap *AuditPanel) checkMemoryUsage() []AuditResult {
 			Severity: severity,
 			Details:  fmt.Sprintf("Too much memory used by primary keys (ratio: %.3f)", pkMemRatio),
 			Values: map[string]float64{
-				"ratio":                        pkMemRatio,
+				"ratio":                       pkMemRatio,
 				"primary_key_bytes_in_memory": primaryKeyMemory,
 			},
 		})
@@ -1616,7 +1610,6 @@ func (ap *AuditPanel) checkDiskUsage() []AuditResult {
 
 	return results
 }
-
 
 func (ap *AuditPanel) checkPerformanceMetrics() []AuditResult {
 	var results []AuditResult
