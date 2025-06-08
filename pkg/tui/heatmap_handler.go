@@ -568,6 +568,26 @@ func (a *App) ShowHeatmap() {
 							case "Cancel":
 								a.pages.SwitchToPage("heatmap")
 							}
+						}).
+						SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+							switch event.Rune() {
+							case 'f', 'F':
+								a.pages.SwitchToPage("main")
+								a.generateFlamegraph(categoryType, categoryValue, traceType, fromTime, toTime, a.cluster, "heatmap")
+								return nil
+							case 'p', 'P':
+								a.pages.SwitchToPage("main")
+								a.ShowProfileEvents(categoryType, categoryValue, fromTime, toTime, a.cluster)
+								return nil
+							case 'c', 'C':
+								a.pages.SwitchToPage("heatmap")
+								return nil
+							}
+							if event.Key() == tcell.KeyEscape {
+								a.pages.SwitchToPage("heatmap")
+								return nil
+							}
+							return event
 						})
 
 					a.pages.AddPage("action_menu", menu, true, true)
