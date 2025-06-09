@@ -665,12 +665,12 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 			return
 		}
 
-		timeConditionStr = fmt.Sprintf("%s BETWEEN ? AND ?", lp.timeField)
+		timeConditionStr = fmt.Sprintf("`%s` BETWEEN ? AND ?", lp.timeField)
 		builtWhereClause, args := lp.buildWhereClause(timeConditionStr, []interface{}{prevBatchTime, lp.firstEntryTime})
 		queryArgs = args
 		whereClause = builtWhereClause
 	} else {
-		timeConditionStr = fmt.Sprintf("%s BETWEEN ? AND ?", lp.timeField)
+		timeConditionStr = fmt.Sprintf("`%s` > ? AND `%s` <= ?", lp.timeField, lp.timeField)
 		builtWhereClause, args := lp.buildWhereClause(timeConditionStr, []interface{}{lp.lastEntryTime, lp.app.toTime})
 		queryArgs = args
 		whereClause = builtWhereClause
@@ -893,22 +893,34 @@ func (lp *LogPanel) buildWhereClause(timeCondition string, args []interface{}) (
 	if len(args) > 0 && lp.dateField != "" {
 		if len(args) >= 1 {
 			if t, ok := args[0].(time.Time); ok {
-				whereConditions = append(whereConditions, fmt.Sprintf("%s >= '%s'", lp.dateField, t.Format("2006-01-02")))
+				whereConditions = append(whereConditions, fmt.Sprintf("`%s` >= '%s'", lp.dateField, t.Format("2006-01-02")))
 			}
 		}
 		if len(args) >= 2 {
 			if t, ok := args[1].(time.Time); ok {
-				whereConditions = append(whereConditions, fmt.Sprintf("%s <= '%s'", lp.dateField, t.Format("2006-01-02")))
+				whereConditions = append(whereConditions, fmt.Sprintf("`%s` <= '%s'", lp.dateField, t.Format("2006-01-02")))
 			}
 		}
 	}
-
+	// Precise time filtering by using dateField if available
+	if len(args) > 0 && lp.timeMsField != "" {
+		if len(args) >= 1 {
+			if t, ok := args[0].(time.Time); ok {
+				whereConditions = append(whereConditions, fmt.Sprintf("`%s` >= parseDateTime64BestEffort('%s')", lp.timeMsField, t.Format("2006-01-02 15:04:05.000 MST")))
+			}
+		}
+		if len(args) >= 2 {
+			if t, ok := args[1].(time.Time); ok {
+				whereConditions = append(whereConditions, fmt.Sprintf("`%s` <= parseDateTime64BestEffort('%s')", lp.timeMsField, t.Format("2006-01-02 15:04:05.000 MST")))
+			}
+		}
+	}
 	// Add the main time condition
 	whereConditions = append(whereConditions, timeCondition)
 
 	// Add filter conditions
 	for _, filter := range lp.filters {
-		whereConditions = append(whereConditions, fmt.Sprintf("%s %s ?", filter.Field, filter.Operator))
+		whereConditions = append(whereConditions, fmt.Sprintf("`%s` %s ?", filter.Field, filter.Operator))
 		queryArgs = append(queryArgs, filter.Value)
 	}
 
@@ -1001,9 +1013,15 @@ func (lp *LogPanel) streamRowsToTable(rows *sql.Rows, clearFirst bool, insertAtT
 		// Track time bounds for pagination
 		if rowIndex == 0 || (!entry.Time.IsZero() && entry.Time.Before(lp.firstEntryTime)) {
 			lp.firstEntryTime = entry.Time
+			if !entry.TimeMs.IsZero() && entry.TimeMs.Before(lp.firstEntryTime) {
+				lp.firstEntryTime = entry.TimeMs
+			}
 		}
 		if rowIndex == 0 || (!entry.Time.IsZero() && entry.Time.After(lp.lastEntryTime)) {
 			lp.lastEntryTime = entry.Time
+			if !entry.TimeMs.IsZero() && entry.TimeMs.After(lp.lastEntryTime) {
+				lp.lastEntryTime = entry.TimeMs
+			}
 		}
 
 		// Update level counts for overview

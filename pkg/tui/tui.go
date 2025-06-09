@@ -260,7 +260,7 @@ func (a *App) executeCommand(commandName string) string {
 			windowSize:   1000,
 			database:     "",
 			table:        "",
-			messageField: "message",
+			messageField: "",
 			timeField:    "",
 			timeMsField:  "",
 			dateField:    "",
