@@ -961,8 +961,24 @@ func (lp *LogPanel) streamRowsToTable(rows *sql.Rows, clearFirst bool, insertAtT
 	colTypes, _ := rows.ColumnTypes()
 	scanArgs := make([]interface{}, len(colTypes))
 
-	// For overview statistics
+	// For overview statistics - collect from all displayed rows, not just new batch
 	levelCounts := make(map[string]int)
+	
+	// If not clearing first, collect existing level counts from displayed rows
+	if !clearFirst {
+		for r := 1; r <= lp.totalRows; r++ {
+			if cell := lp.logDetails.Table.GetCell(r, 0); cell != nil && cell.Reference != nil {
+				if entry, ok := cell.Reference.(LogEntry); ok && lp.levelField != "" {
+					if entry.Level != "" {
+						levelCounts[strings.ToLower(entry.Level)]++
+					} else {
+						levelCounts["unknown"]++
+					}
+				}
+			}
+		}
+	}
+	
 	rowIndex := lp.totalRows
 	var batch []LogEntry
 
