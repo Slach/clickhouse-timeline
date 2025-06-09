@@ -446,7 +446,9 @@ func (lp *LogPanel) loadLogs() {
 
 	rows, err := lp.app.clickHouse.Query(logsQuery, queryArgs...)
 	if err != nil {
-		lp.app.SwitchToMainPage(fmt.Sprintf("loadLogs Query failed: %v", err))
+		lp.app.tviewApp.QueueUpdateDraw(func() {
+			lp.app.SwitchToMainPage(fmt.Sprintf("loadLogs Query failed: %v", err))
+		})
 		return
 	}
 	defer func() {
