@@ -36,6 +36,7 @@ type LogPanel struct {
 	databases      []string
 	tables         []string
 	allFields      []string // Stores all field names from current table
+	autoSubmitted  bool     // Flag to track if auto-submit has been done
 }
 
 type LogFilter struct {
@@ -119,8 +120,9 @@ func (lp *LogPanel) Show() {
 	lp.app.pages.AddPage("logs", logsFlex, true, true)
 	lp.app.pages.SwitchToPage("logs")
 
-	// If all required fields are set via CLI, auto-submit the form
-	if lp.database != "" && lp.table != "" && lp.messageField != "" && lp.timeField != "" {
+	// If all required fields are set via CLI, auto-submit the form (only once)
+	if !lp.autoSubmitted && lp.database != "" && lp.table != "" && lp.messageField != "" && lp.timeField != "" {
+		lp.autoSubmitted = true
 		go func() {
 			time.Sleep(500 * time.Millisecond) // Small delay to let UI render
 			lp.app.tviewApp.QueueUpdateDraw(func() {
