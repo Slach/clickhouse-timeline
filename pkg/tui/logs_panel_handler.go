@@ -642,28 +642,42 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 	var queryArgs []interface{}
 
 	if !newer {
-		// Load older logs: get logs before the first entry time
-		timeConditionStr = fmt.Sprintf("%s < ?", lp.timeField)
-		builtWhereClause, args := lp.buildWhereClause(timeConditionStr, []interface{}{lp.firstEntryTime})
+		// Use window function to find the exact timestamp for the previous batch
+		timeQuery := fmt.Sprintf(`
+			SELECT timestamp FROM (
+				SELECT
+					%s,
+					FIRST_VALUE(%s) OVER (ORDER BY %s ROWS BETWEEN %d PRECEDING AND CURRENT ROW) AS timestamp
+				FROM `+"`%s`.`%s`"+`
+				ORDER BY %s
+			) WHERE %s = ?`,
+			lp.timeField, lp.timeField, lp.timeField, lp.windowSize,
+			lp.database, lp.table,
+			lp.timeField,
+			lp.timeField)
+
+		var prevBatchTime time.Time
+		err := lp.app.clickHouse.QueryRow(timeQuery, lp.firstEntryTime).Scan(&prevBatchTime)
+		if err != nil {
+			lp.app.tviewApp.QueueUpdateDraw(func() {
+				lp.overview.SetText(fmt.Sprintf("Error finding previous batch time: %v", err))
+			})
+			return
+		}
+
+		timeConditionStr = fmt.Sprintf("%s BETWEEN ? AND ?", lp.timeField)
+		builtWhereClause, args := lp.buildWhereClause(timeConditionStr, []interface{}{prevBatchTime, lp.firstEntryTime})
 		queryArgs = args
 		whereClause = builtWhereClause
 	} else {
-		// Load newer logs: get logs after the last entry time
-		timeConditionStr = fmt.Sprintf("%s > ?", lp.timeField)
-		builtWhereClause, args := lp.buildWhereClause(timeConditionStr, []interface{}{lp.lastEntryTime})
+		timeConditionStr = fmt.Sprintf("%s BETWEEN ? AND ?", lp.timeField)
+		builtWhereClause, args := lp.buildWhereClause(timeConditionStr, []interface{}{lp.lastEntryTime, lp.app.toTime})
 		queryArgs = args
 		whereClause = builtWhereClause
 	}
 
-	// Build query with appropriate time range and ordering
-	var orderBy string
-	if newer {
-		orderBy = lp.timeField + " ASC" // For newer logs, order ascending to get the next chronological entries
-	} else {
-		orderBy = lp.timeField + " DESC" // For older logs, order descending to get the previous chronological entries
-	}
-	
-	query := lp.buildQuery(whereClause, orderBy)
+	// Build query with appropriate time range
+	query := lp.buildQuery(whereClause, lp.timeField)
 	queryArgs = append(queryArgs, lp.windowSize)
 
 	rows, err := lp.app.clickHouse.Query(query, queryArgs...)
@@ -680,7 +694,6 @@ func (lp *LogPanel) loadMoreLogs(newer bool) {
 	}()
 
 	// Stream additional rows (don't clear table)
-	// For older logs (!newer), insert at top; for newer logs, insert at bottom
 	lp.streamRowsToTable(rows, false, !newer)
 }
 
