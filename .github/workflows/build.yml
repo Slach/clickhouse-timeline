@@ -39,10 +39,16 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Download artifacts
+    - name: Download amd64 artifacts
       uses: actions/download-artifact@v4
       with:
         name: binaries-linux-amd64
+        path: build
+
+    - name: Download arm64 artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: binaries-linux-arm64
         path: build
 
     - name: Set up QEMU
@@ -64,4 +70,4 @@ jobs:
         context: .
         push: true
         tags: ghcr.io/slach/clickhouse-timeline:latest
-        platforms: linux/amd64
+        platforms: linux/amd64,linux/arm64

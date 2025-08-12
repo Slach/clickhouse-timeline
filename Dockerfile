@@ -1,5 +1,7 @@
-FROM alpine:latest
+FROM --platform=$TARGETPLATFORM alpine:latest
 
-COPY build/clickhouse-timeline-linux-amd64 /usr/bin/clickhouse-timeline
+ARG TARGETARCH
+
+COPY build/clickhouse-timeline-linux-${TARGETARCH} /usr/bin/clickhouse-timeline
 
 ENTRYPOINT ["/usr/bin/clickhouse-timeline"]
