@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -96,6 +97,12 @@ func NewApp(cfg *config.Config, version string) *App {
 		heatmapMetric: MetricCount,              // Default metric
 		scaleType:     ScaleLinear,              // Default scale
 		CLI:           &types.CLI{},             // Initialize empty CLI
+	}
+
+	// Check if flamelens binary exists, if not use native flamegraph
+	if _, err := exec.LookPath("flamelens"); err != nil {
+		app.flamegraphNative = true
+		log.Info().Msg("flamelens binary not found in PATH, using native flamegraph viewer")
 	}
 
 	app.setupUI()
