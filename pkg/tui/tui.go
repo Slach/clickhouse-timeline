@@ -99,12 +99,6 @@ func NewApp(cfg *config.Config, version string) *App {
 		CLI:           &types.CLI{},             // Initialize empty CLI
 	}
 
-	// Check if flamelens binary exists, if not use native flamegraph
-	if _, err := exec.LookPath("flamelens"); err != nil {
-		app.flamegraphNative = true
-		log.Info().Msg("flamelens binary not found in PATH, using native flamegraph viewer")
-	}
-
 	app.setupUI()
 	return app
 }
@@ -128,6 +122,12 @@ func (a *App) SwitchToMainPage(mainMsg string) {
 func (a *App) ApplyCLIParameters(c *types.CLI, commandName string) {
 	mainMsg := ""
 	a.flamegraphNative = c.FlamegraphNative
+	// Check if flamelens binary exists, if not then use native flamegraph
+	if _, err := exec.LookPath("flamelens"); err != nil {
+		a.flamegraphNative = true
+		log.Info().Msg("flamelens binary not found in PATH, using native flamegraph viewer")
+	}
+
 	if c.ConnectTo != "" {
 		if found := a.SetConnectByName(c.ConnectTo); !found {
 			mainMsg += fmt.Sprintf("Error: Context '%s' not found\nAvailable contexts:\n%s", c.ConnectTo, a.GetContextList())
