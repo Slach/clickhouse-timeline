@@ -39,6 +39,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'push' }}
+    permissions:
+      contents: read
+      packages: write
     steps:
     - uses: actions/checkout@v5
 
@@ -83,7 +86,7 @@ jobs:
           echo "tags=ghcr.io/slach/clickhouse-timeline:${VERSION},ghcr.io/slach/clickhouse-timeline:latest,clickhousepro/clickhouse-timeline:${VERSION},clickhousepro/clickhouse-timeline:latest" >> $GITHUB_OUTPUT
         else
           BRANCH="${{ github.ref_name }}"
-          echo "tags=clickhousepro/clickhouse-timeline:${BRANCH}" >> $GITHUB_OUTPUT
+          echo "tags=ghcr.io/slach/clickhouse-timeline:${BRANCH},clickhousepro/clickhouse-timeline:${BRANCH}" >> $GITHUB_OUTPUT
         fi
 
     - name: Build and push
