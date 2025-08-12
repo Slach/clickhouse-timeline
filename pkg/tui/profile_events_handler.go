@@ -2,12 +2,13 @@ package tui
 
 import (
 	"fmt"
+	"strings"
+	"time"
+
 	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/rs/zerolog/log"
-	"strings"
-	"time"
 )
 
 const profileEventsQueryTemplate = `
@@ -49,7 +50,7 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 		fromStr := fromTime.Format("2006-01-02 15:04:05 -07:00")
 		toStr := toTime.Format("2006-01-02 15:04:05 -07:00")
 
-		// Build category filter if categoryValue is provided
+		// Build categoryType filter if categoryValue is provided
 		var categoryFilter string
 		if categoryValue != "" {
 			switch categoryType {

@@ -3,16 +3,17 @@ package tui
 import (
 	"database/sql"
 	"fmt"
-	"github.com/Slach/clickhouse-timeline/pkg/flamegraph"
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/Slach/clickhouse-timeline/pkg/flamegraph"
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 )
 
-// Different query templates for flamegraph depending on the category
+// Different query templates for flamegraph depending on the categoryType
 const flamegraphQueryByHash = `
 SELECT
 	count() AS samples, 
@@ -306,7 +307,7 @@ func (a *App) ShowFlamegraphForm(params ...FlamegraphParams) {
 		toTime = a.toTime
 	}
 
-	// Add category selection
+	// Add categoryType selection
 	categoryOptions := []string{
 		"Query Hash",
 		"Table",
@@ -337,7 +338,7 @@ func (a *App) ShowFlamegraphForm(params ...FlamegraphParams) {
 		}
 	})
 
-	// Field for category value
+	// Field for categoryValue value
 	form.AddInputField("Category Value:", categoryValue, 40, nil, func(text string) {
 		categoryValue = text
 	})
@@ -404,7 +405,7 @@ func (a *App) ShowFlamegraphForm(params ...FlamegraphParams) {
 	a.tviewApp.SetFocus(form)
 }
 
-// getFlamegraphQuery returns the appropriate query string based on category type
+// getFlamegraphQuery returns the appropriate query string based on categoryType type
 func (a *App) getFlamegraphQuery(categoryType CategoryType, categoryValue string, traceType TraceType,
 	fromDateStr, toDateStr, fromStr, toStr, cluster string) string {
 	switch categoryType {
@@ -421,7 +422,7 @@ func (a *App) getFlamegraphQuery(categoryType CategoryType, categoryValue string
 		}
 		return fmt.Sprintf(flamegraphQueryByError, cluster, cluster, parts[1], fromDateStr, toDateStr, fromStr, toStr, traceType)
 	default:
-		// If category is not specified, use only time range
+		// If categoryType is not specified, use only time range
 		return fmt.Sprintf(flamegraphQueryByTimeRange, cluster, cluster, fromDateStr, toDateStr, fromStr, toStr, traceType)
 	}
 }

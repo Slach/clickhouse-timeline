@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+
 	"github.com/rivo/tview"
 )
 
@@ -83,7 +84,7 @@ func (a *App) showMetricSelector() {
 	}
 
 	metricList.SetSelectedFunc(func(i int, _ string, _ string, _ rune) {
-		a.currentMetric = metrics[i].metric
+		a.heatmapMetric = metrics[i].metric
 		a.SwitchToMainPage(fmt.Sprintf("Metric changed to: %s", metrics[i].name))
 
 		// If we already have a heatmap, regenerate it with the new metric

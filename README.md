@@ -197,8 +197,8 @@ Once in the TUI, use these commands:
 - Use arrow keys to navigate
 - Press / to filter
 - Press Esc to cancel current operation
-- Press Enter in heatmap to show action menu
-- Double-click in heatmap to show action menu
+- Press Enter to show action menu
+- Double-click to show action menu
 
 ## Query Analysis
 

@@ -2,9 +2,10 @@ package tui
 
 import (
 	"fmt"
+	"math"
+
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"math"
 )
 
 // ScaleType represents the type of scaling to apply to heatmap values
@@ -86,7 +87,7 @@ func (a *App) generateLegend(minValue, maxValue float64) *tview.Table {
 
 		// Format the value
 		var displayValue string
-		if a.currentMetric == MetricCount {
+		if a.heatmapMetric == MetricCount {
 			displayValue = fmt.Sprintf("%.0f", stepValue)
 		} else if stepValue >= 1000000000 {
 			displayValue = fmt.Sprintf("%.1fG", stepValue/1000000000)

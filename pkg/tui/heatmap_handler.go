@@ -2,12 +2,13 @@ package tui
 
 import (
 	"fmt"
-	"github.com/Slach/clickhouse-timeline/pkg/timezone"
-	"github.com/rs/zerolog/log"
 	"math"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Slach/clickhouse-timeline/pkg/timezone"
+	"github.com/rs/zerolog/log"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -24,7 +25,7 @@ WITH
    arrayMap(i -> (toStartOfInterval(toTimeZone(query_start_time, '%s'), INTERVAL %s) + i), range(0, toUInt32(toStartOfInterval(toTimeZone(event_time, '%s'), INTERVAL %s) - toStartOfInterval(toTimeZone(query_start_time, '%s'), INTERVAL %s) + 1),%d)) as timestamps
 SELECT
     arrayJoin(timestamps) as t,
-    %s AS category,
+    %s AS categoryType,
     intDiv(%s,if(intervals=0,1,intervals)) as metricValue
 FROM clusterAllReplicas('%s', merge(system,'^query_log'))
 WHERE
@@ -77,8 +78,8 @@ func (a *App) ShowHeatmap() {
 	fromStr := a.fromTime.Format("2006-01-02 15:04:05 -07:00")
 	toStr := a.toTime.Format("2006-01-02 15:04:05 -07:00")
 
-	metricSQL := getMetricSQL(a.currentMetric)
-	categorySQL := getCategorySQL(a.category)
+	metricSQL := getMetricSQL(a.heatmapMetric)
+	categorySQL := getCategorySQL(a.categoryType)
 
 	// Get timezone name from offset
 	tzName, offset := a.fromTime.Zone()
@@ -94,7 +95,7 @@ func (a *App) ShowHeatmap() {
 
 	// Add error filter if showing errors
 	errorFilter := ""
-	if a.category == CategoryError {
+	if a.categoryType == CategoryError {
 		errorFilter = "AND exception_code != 0"
 	}
 
@@ -157,7 +158,7 @@ func (a *App) ShowHeatmap() {
 		// Process data for heatmap
 		if len(data) == 0 {
 			a.tviewApp.QueueUpdateDraw(func() {
-				a.mainView.SetText("No data found for the selected time range and category")
+				a.mainView.SetText("No data found for the selected time range and categoryType")
 			})
 			return
 		}
@@ -219,7 +220,7 @@ func (a *App) ShowHeatmap() {
 				SetSeparator(0) // Remove column separator/padding
 
 			// Set header row with column numbers instead of timestamps
-			table.SetCell(0, 0, tview.NewTableCell(getCategoryName(a.category)).
+			table.SetCell(0, 0, tview.NewTableCell(getCategoryName(a.categoryType)).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignCenter).
 				SetSelectable(false))
@@ -274,8 +275,8 @@ func (a *App) ShowHeatmap() {
 
 			// Set initial title
 			baseTitle := fmt.Sprintf("Heatmap: %s by %s (%s to %s)",
-				getMetricName(a.currentMetric),
-				getCategoryName(a.category),
+				getMetricName(a.heatmapMetric),
+				getCategoryName(a.categoryType),
 				a.fromTime.Format("2006-01-02 15:04:05 -07:00"),
 				a.toTime.Format("2006-01-02 15:04:05 -07:00"))
 
@@ -444,29 +445,29 @@ func (a *App) ShowHeatmap() {
 						info := fmt.Sprintf("Category: %s\nTime: %s\n%s: %.2f\n\nPress Enter to generate flamegraph for this selection",
 							category,
 							timestamp.Format("2006-01-02 15:04:05"),
-							getMetricName(a.currentMetric),
+							getMetricName(a.heatmapMetric),
 							value)
 
 						a.mainView.SetText(info)
 
 						// Save selected data for use in flamegraph
-						a.selectedCategory = category
-						a.selectedTimestamp = timestamp
+						a.categoryValue = category
+						a.flamegraphTimeStamp = timestamp
 					}
 				} else if row > 0 && col == 0 {
-					// Handle category selection (row header)
+					// Handle categoryType selection (row header)
 					category := categories[row-1]
-					info := fmt.Sprintf("Selected Category: %s\n\nPress Enter to generate flamegraph for this category with global time range",
+					info := fmt.Sprintf("Selected Category: %s\n\nPress Enter to generate flamegraph for this categoryType with global time range",
 						category)
 					a.mainView.SetText(info)
-					a.selectedCategory = category
+					a.categoryValue = category
 				} else if row == 0 && col > 0 {
 					// Handle timestamp selection (column header)
 					timestamp := timestamps[col-1]
 					info := fmt.Sprintf("Selected Time: %s\n\nPress Enter to generate flamegraph for all categories at this time",
 						timestamp.Format("2006-01-02 15:04:05"))
 					a.mainView.SetText(info)
-					a.selectedTimestamp = timestamp
+					a.flamegraphTimeStamp = timestamp
 				}
 			}
 			// Add selection handler
@@ -510,21 +511,21 @@ func (a *App) ShowHeatmap() {
 				if event.Key() == tcell.KeyEnter {
 					row, col := table.GetSelection()
 
-					// Determine category type and trace type
-					var categoryType = a.category
+					// Determine categoryType type and trace type
+					var categoryType = a.categoryType
 					var categoryValue string
 					var fromTime, toTime time.Time
 
 					// Set trace type based on metric
 					var traceType TraceType
-					if a.currentMetric == MetricMemoryUsage {
+					if a.heatmapMetric == MetricMemoryUsage {
 						traceType = TraceMemory
 					} else {
 						traceType = TraceReal
 					}
 
 					if row > 0 && col > 0 {
-						// Cell in data area - specific category and time
+						// Cell in data area - specific categoryType and time
 						categoryValue = categories[row-1]
 						timestamp := timestamps[col-1]
 						fromTime = timestamp

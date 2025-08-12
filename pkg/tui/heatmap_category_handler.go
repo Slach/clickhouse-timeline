@@ -2,10 +2,11 @@ package tui
 
 import (
 	"fmt"
+
 	"github.com/rivo/tview"
 )
 
-// getCategorySQL returns the SQL expression for the given category
+// getCategorySQL returns the SQL expression for the given categoryType
 func getCategorySQL(category CategoryType) string {
 	switch category {
 	case CategoryQueryHash:
@@ -21,7 +22,7 @@ func getCategorySQL(category CategoryType) string {
 	}
 }
 
-// getCategoryName returns a human-readable name for the category
+// getCategoryName returns a human-readable name for the categoryType
 func getCategoryName(category CategoryType) string {
 	switch category {
 	case CategoryQueryHash:
@@ -33,7 +34,7 @@ func getCategoryName(category CategoryType) string {
 	case CategoryError:
 		return "Errors"
 	default:
-		return "Unknown category"
+		return "Unknown categoryType"
 	}
 }
 
@@ -58,8 +59,8 @@ func (a *App) showCategorySelector() {
 	}
 
 	categoryList.SetSelectedFunc(func(i int, _ string, _ string, _ rune) {
-		a.category = categories[i].category
-		a.SwitchToMainPage(fmt.Sprintf("Category set to: %s", categories[i].name))
+		a.categoryType = categories[i].category
+		a.SwitchToMainPage(fmt.Sprintf("Heatmap category set to: %s", categories[i].name))
 	})
 
 	a.categoryList = categoryList

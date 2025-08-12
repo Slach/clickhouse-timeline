@@ -2,14 +2,14 @@ package tui
 
 import (
 	"fmt"
-	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
-	"github.com/Slach/clickhouse-timeline/pkg/types"
-	"github.com/araddon/dateparse"
 	"strings"
 	"time"
 
 	"github.com/Slach/clickhouse-timeline/pkg/client"
 	"github.com/Slach/clickhouse-timeline/pkg/config"
+	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
+	"github.com/Slach/clickhouse-timeline/pkg/types"
+	"github.com/araddon/dateparse"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/rs/zerolog/log"
@@ -43,8 +43,11 @@ var logo = `
 `
 
 type App struct {
-	cfg             *config.Config
+	cfg *config.Config
+	// connection
 	clickHouse      *client.Client
+	cluster         string
+	clusterList     *tview.List
 	selectedContext *config.Context
 
 	tviewApp     *tview.Application
@@ -62,19 +65,17 @@ type App struct {
 	rangeForm *tview.Form
 
 	// Heatmap fields
-	category      CategoryType
-	cluster       string
-	currentMetric HeatmapMetric
+	categoryType  CategoryType
+	heatmapMetric HeatmapMetric
 	scaleType     ScaleType
 	heatmapTable  *tview.Table
-	clusterList   *tview.List
 	categoryList  *tview.List
 	metricList    *tview.List
 	scaleList     *tview.List
 
 	// Selection fields for flamegraph integration
-	selectedCategory  string
-	selectedTimestamp time.Time
+	categoryValue       string
+	flamegraphTimeStamp time.Time
 
 	//use Native Flamegraph widget
 	flamegraphNative bool
@@ -91,8 +92,8 @@ func NewApp(cfg *config.Config, version string) *App {
 		version:       version,
 		fromTime:      now.Add(-24 * time.Hour), // Default: 24 hours ago
 		toTime:        now,                      // Default: now
-		category:      CategoryQueryHash,        // Default category
-		currentMetric: MetricCount,              // Default metric
+		categoryType:  CategoryQueryHash,        // Default categoryType
+		heatmapMetric: MetricCount,              // Default metric
 		scaleType:     ScaleLinear,              // Default scale
 		CLI:           &types.CLI{},             // Initialize empty CLI
 	}
@@ -105,11 +106,11 @@ func (a *App) SwitchToMainPage(mainMsg string) {
 	if a.selectedContext != nil {
 		mainMsg += fmt.Sprintf("\nConnected to %s", a.getContextString(*a.selectedContext))
 	}
-	if a.category != "" {
-		mainMsg += fmt.Sprintf("\nSet category to %s", a.selectedCategory)
+	if a.heatmapMetric != "" {
+		mainMsg += fmt.Sprintf("\nSet heatmap metric to %s", a.heatmapMetric)
 	}
-	if a.currentMetric != "" {
-		mainMsg += fmt.Sprintf("\nSet metric to %s", a.currentMetric)
+	if a.categoryType != "" {
+		mainMsg += fmt.Sprintf("\nSet flamegraph category to %s", a.categoryValue)
 	}
 	mainMsg += "\nPress ':' to continue"
 	a.mainView.SetText(mainMsg)
@@ -163,7 +164,7 @@ func (a *App) ApplyCLIParameters(c *types.CLI, commandName string) {
 
 	if c.Category != "" {
 		a.SetCategory(c.Category)
-		mainMsg += fmt.Sprintf("Set category '%s'\n", c.Category)
+		mainMsg += fmt.Sprintf("Set categoryType '%s'\n", c.Category)
 	}
 
 	// Handle command execution if specified
@@ -190,11 +191,11 @@ func (a *App) SetCluster(cluster string) {
 }
 
 func (a *App) SetMetric(metric string) {
-	a.currentMetric = HeatmapMetric(metric)
+	a.heatmapMetric = HeatmapMetric(metric)
 }
 
 func (a *App) SetCategory(category string) {
-	a.category = CategoryType(category)
+	a.categoryType = CategoryType(category)
 }
 
 func (a *App) GetContextList() string {
@@ -242,8 +243,8 @@ func (a *App) executeCommand(commandName string) string {
 		a.ShowFlamegraphForm()
 	case CmdProfileEvents:
 		a.ShowProfileEvents(
-			a.category,
-			a.selectedCategory,
+			a.categoryType,
+			a.categoryValue,
 			a.fromTime,
 			a.toTime,
 			a.cluster,
