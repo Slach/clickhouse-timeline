@@ -2,7 +2,9 @@ name: Build and Push
 
 on:
   push:
-    branches: [ main ]
+    branches: [ '**' ]
+    tags:
+      - 'v*.*.*'
   pull_request:
     branches: [ main ]
 
@@ -36,6 +38,7 @@ jobs:
   docker:
     needs: build
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' }}
     steps:
     - uses: actions/checkout@v4
 
@@ -70,10 +73,23 @@ jobs:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_TOKEN }}
 
+    - name: Set Docker tags
+      id: docker-tags
+      shell: bash
+      run: |
+        if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+          VERSION="${{ github.ref_name }}"
+          VERSION=${VERSION#v}
+          echo "tags=ghcr.io/slach/clickhouse-timeline:${VERSION},ghcr.io/slach/clickhouse-timeline:latest,clickhousepro/clickhouse-timeline:${VERSION},clickhousepro/clickhouse-timeline:latest" >> $GITHUB_OUTPUT
+        else
+          BRANCH="${{ github.ref_name }}"
+          echo "tags=ghcr.io/slach/clickhouse-timeline:${BRANCH},clickhousepro/clickhouse-timeline:${BRANCH}" >> $GITHUB_OUTPUT
+        fi
+
     - name: Build and push
       uses: docker/build-push-action@v6
       with:
         context: .
         push: true
-        tags: ghcr.io/slach/clickhouse-timeline:latest,clickhousepro/clickhouse-timeline:latest
+        tags: ${{ steps.docker-tags.outputs.tags }}
         platforms: linux/amd64,linux/arm64
