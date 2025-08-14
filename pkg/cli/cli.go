@@ -75,22 +75,23 @@ func NewRootCommand(cli *types.CLI, version string) *cobra.Command {
 	}
 	rootCmd.AddCommand(metricLogCmd)
 
- 	asyncMetricLogCmd := &cobra.Command{
- 		Use:   "asynchronous_metric_log",
- 		Short: "Start in asynchronous_metric_log mode",
- 		RunE: func(cmd *cobra.Command, args []string) error {
- 			return RunSubCommand(cli, version, cmd, args)
- 		},
- 	}
- 	memoryCmd := &cobra.Command{
- 		Use:   "memory",
- 		Short: "Start memory viewer",
- 		RunE: func(cmd *cobra.Command, args []string) error {
- 			return RunSubCommand(cli, version, cmd, args)
- 		},
- 	}
- 	rootCmd.AddCommand(asyncMetricLogCmd)
- 	rootCmd.AddCommand(memoryCmd)
+	asyncMetricLogCmd := &cobra.Command{
+		Use:   "asynchronous_metric_log",
+		Short: "Start in asynchronous_metric_log mode",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return RunSubCommand(cli, version, cmd, args)
+		},
+	}
+	rootCmd.AddCommand(asyncMetricLogCmd)
+
+	memoryCmd := &cobra.Command{
+		Use:   "memory",
+		Short: "Start memory viewer",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return RunSubCommand(cli, version, cmd, args)
+		},
+	}
+	rootCmd.AddCommand(memoryCmd)
 
 	logsCmd := &cobra.Command{
 		Use:   "logs",
@@ -129,6 +130,10 @@ func RunRootCommand(cliInstance *types.CLI, version string, cmd *cobra.Command, 
 				cliInstance = instance
 			}
 		}
+	}
+	if cliInstance == nil {
+		log.Error().Stack().Msg("can't initialize cliInstance from cmd.Context()")
+		return fmt.Errorf("can't initialize cliInstance from cmd.Context()")
 	}
 
 	// Set default paths
@@ -169,10 +174,8 @@ func RunRootCommand(cliInstance *types.CLI, version string, cmd *cobra.Command, 
 	app := tui.NewApp(cfg, version)
 
 	// Get CLI instance from command context
-	if cliInstance != nil {
-		app.CLI = cliInstance
-		app.ApplyCLIParameters(cliInstance, cmd.Name())
-	}
+	app.CLI = cliInstance
+	app.ApplyCLIParameters(cliInstance, cmd.Name())
 
 	if runErr := app.Run(); runErr != nil {
 		log.Error().Stack().Err(runErr).Send()

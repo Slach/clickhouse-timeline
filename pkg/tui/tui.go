@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -231,51 +232,49 @@ func (a *App) SetConnectByName(contextName string) bool {
 
 // executeCommand return message if something wrong, return empty string if all OK
 func (a *App) executeCommand(commandName string) string {
- 	// Check prerequisites for commands that need them
- 	if commandName == CmdHeatmap || commandName == CmdFlamegraph ||
- 		commandName == CmdProfileEvents || commandName == CmdMetricLog ||
- 		commandName == CmdAsyncMetricLog || commandName == CmdLogs || commandName == CmdMemory {
- 		if a.clickHouse == nil {
- 			return "Error: Please connect to a ClickHouse instance first using :connect command\n"
- 		}
- 		if a.cluster == "" {
- 			return "Error: Please select a cluster first using :cluster command\n"
- 		}
- 	}
+	// Check prerequisites for commands that need them
+	if slices.Contains([]string{CmdHeatmap, CmdFlamegraph, CmdProfileEvents, CmdMetricLog, CmdAsyncMetricLog, CmdLogs, CmdMemory}, commandName) {
+		if a.clickHouse == nil {
+			return "Error: Please connect to a ClickHouse instance first using :connect command\n"
+		}
+		if a.cluster == "" {
+			return "Error: Please select a cluster first using :cluster command\n"
+		}
+	}
 
 	switch commandName {
- 				case CmdHeatmap:
- 					a.ShowHeatmap()
- 				case CmdFlamegraph:
- 					a.ShowFlamegraphForm()
- 				case CmdProfileEvents:
- 					a.ShowProfileEvents(
- 						a.categoryType,
- 						a.categoryValue,
- 						a.fromTime,
- 						a.toTime,
- 						a.cluster,
- 					)
- 				case CmdMetricLog:
- 					a.ShowMetricLog(a.fromTime, a.toTime, a.cluster)
- 				case CmdAsyncMetricLog:
- 					a.ShowAsynchronousMetricLog(a.fromTime, a.toTime, a.cluster)
- 				case CmdMemory:
- 					a.ShowMemory()
- 				case CmdLogs:
- 					// Only apply CLI params when explicitly executing logs command
- 					// Initialize log panel with CLI params if available
- 					a.logPanel = &LogPanel{
- 						app:          a,
- 						windowSize:   1000,
- 						database:     "",
- 						table:        "",
- 						messageField: "",
- 						timeField:    "",
- 						timeMsField:  "",
- 						dateField:    "",
- 						levelField:   "",
- 					}
+	case CmdHeatmap:
+		a.ShowHeatmap()
+	case CmdFlamegraph:
+		a.ShowFlamegraphForm()
+	case CmdProfileEvents:
+		a.ShowProfileEvents(
+			a.categoryType,
+			a.categoryValue,
+			a.fromTime,
+			a.toTime,
+			a.cluster,
+		)
+	case CmdMetricLog:
+		a.ShowMetricLog(a.fromTime, a.toTime, a.cluster)
+	case CmdAsyncMetricLog:
+		a.ShowAsynchronousMetricLog(a.fromTime, a.toTime, a.cluster)
+	case CmdMemory:
+		a.ShowMemory()
+	case CmdLogs:
+		// Only apply CLI params when explicitly executing logs command
+		// Initialize log panel with CLI params if available
+		a.logPanel = &LogPanel{
+			app:          a,
+			windowSize:   1000,
+			database:     "",
+			table:        "",
+			messageField: "",
+			timeField:    "",
+			timeMsField:  "",
+			dateField:    "",
+			levelField:   "",
+		}
 
 		if a.CLI != nil {
 			if a.CLI.LogsParams.Database != "" {
@@ -443,19 +442,19 @@ func (a *App) setupKeybindings() {
 					a.showMetricSelector()
 				case CmdScale:
 					a.showScaleSelector()
- 				case CmdAudit:
- 					a.executeCommand(CmdAudit)
- 				case CmdMemory:
- 					mainMsg := a.executeCommand(CmdMemory)
- 					if mainMsg != "" {
- 						a.SwitchToMainPage(mainMsg)
- 					}
- 				default:
- 					mainMsg := a.executeCommand(cmd)
- 					if mainMsg != "" {
- 						a.SwitchToMainPage(mainMsg)
- 					}
- 				}
+				case CmdAudit:
+					a.executeCommand(CmdAudit)
+				case CmdMemory:
+					mainMsg := a.executeCommand(CmdMemory)
+					if mainMsg != "" {
+						a.SwitchToMainPage(mainMsg)
+					}
+				default:
+					mainMsg := a.executeCommand(cmd)
+					if mainMsg != "" {
+						a.SwitchToMainPage(mainMsg)
+					}
+				}
 			}
 		})
 

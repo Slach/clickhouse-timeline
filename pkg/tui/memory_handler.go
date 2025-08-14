@@ -39,7 +39,7 @@ SELECT hostName() AS host, 6 AS priority, 'MemoryTables' as group, engine as nam
 UNION ALL
 SELECT hostName() AS host, 7 AS priority, 'Dictionaries' as group, type as name, toInt64(sum(bytes_allocated)) FROM cluster('%[1]s','system','dictionaries') GROUP BY name
 UNION ALL
-SELECT hostName() AS host, 8 AS priority, 'PrimaryKeys' as group, 'db:'||database as name, toInt64(sum(primary_key_bytes_in_memory_allocated) FROM cluster('%[1]s','system','parts') GROUP BY name
+SELECT hostName() AS host, 8 AS priority, 'PrimaryKeys' as group, 'db:'||database as name, toInt64(sum(primary_key_bytes_in_memory_allocated)) FROM cluster('%[1]s','system','parts') GROUP BY name
 UNION ALL
 SELECT hostName() AS host, 9 AS priority, 'Merges' as group, 'db:'||database as name, toInt64(sum(memory_usage)) FROM cluster('%[1]s','system','merges') GROUP BY name
 UNION ALL
@@ -47,7 +47,7 @@ SELECT hostName() AS host, 10 AS priority, 'Queries' as group, left(query,7) as 
 UNION ALL
 SELECT hostName() AS host, 11 AS priority, 'AsyncInserts' as group, 'db:'||database as name, toInt64(sum(total_bytes)) FROM cluster('%[1]s','system','asynchronous_inserts') GROUP BY name
 UNION ALL
-SELECT hostName() AS host, 12 AS priority 'InMemoryParts' as group, 'db:'||database as name, toInt64(sum(data_uncompressed_bytes)) FROM cluster('%[1]s','system','parts') WHERE part_type = 'InMemory' GROUP BY name
+SELECT hostName() AS host, 12 AS priority, 'InMemoryParts' as group, 'db:'||database as name, toInt64(sum(data_uncompressed_bytes)) FROM cluster('%[1]s','system','parts') WHERE part_type = 'InMemory' GROUP BY name
 UNION ALL
 SELECT hostName() AS host, 13 AS priority, 'UserMemoryTracking' as group, user as name, toInt64(memory_usage) FROM cluster('%[1]s','system','user_processes')
 UNION ALL
