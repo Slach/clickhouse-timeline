@@ -121,9 +121,6 @@ func InitLogFile(cliInstance *types.CLI, version string) error {
 	consoleWriter := zerolog.ConsoleWriter{
 		Out:        logFile,
 		NoColor:    true,
-		// Disable automatic quoting of field values so multiline strings
-		// can be rendered as-is when we return them from FormatFieldValue.
-		NoQuote:    true,
 		TimeFormat: "2006-01-02 15:04:05.000",
 		FormatFieldValue: func(i interface{}) string {
 			// Convert the value to a string.
