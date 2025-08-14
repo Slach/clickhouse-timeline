@@ -7,7 +7,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/Slach/clickhouse-timeline/pkg/types"
 	"github.com/pkg/errors"
@@ -119,50 +118,11 @@ func InitLogFile(cliInstance *types.CLI, version string) error {
 		return errors.Wrap(err, "failed to open log file")
 	}
 
-	// Now set up the proper file logging using zerolog.ConsoleWriter.
-	// ConsoleWriter will print a pretty, non-quoted representation while preserving time.
 	out := zerolog.ConsoleWriter{
-		Out:        logFile,
-		NoColor:    true,
-		TimeFormat: time.RFC3339Nano,
-		// Put parts in the order we prefer and avoid duplicating error fields in the trailing section.
+		Out:           logFile,
+		NoColor:       true,
 		PartsOrder:    []string{zerolog.TimestampFieldName, zerolog.LevelFieldName, zerolog.CallerFieldName, zerolog.MessageFieldName, zerolog.ErrorFieldName, zerolog.ErrorStackFieldName},
 		FieldsExclude: []string{zerolog.ErrorFieldName, zerolog.ErrorStackFieldName},
-	}
-
-	// Remove unnecessary quoting and control formatting of parts.
-	out.FormatMessage = func(i interface{}) string { return fmt.Sprint(i) }
-	out.FormatFieldName = func(i interface{}) string { return fmt.Sprintf("%s=", i) }
-	out.FormatFieldValue = func(i interface{}) string {
-		s := fmt.Sprint(i)
-		// If the formatted value is wrapped in quotes, try to unquote it so we don't
-		// emit an extra pair of quotes in logs. Fall back to trimming quotes if
-		// strconv.Unquote fails.
-		if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
-			if us, err := strconv.Unquote(s); err == nil {
-				s = us
-			} else {
-				s = strings.Trim(s, "\"")
-			}
-		}
-		return s
-	}
-
-	// Make stack trace multiline & readable when present.
-	out.FormatPartValueByName = func(v interface{}, name string) string {
-		if name == zerolog.ErrorStackFieldName {
-			if frames, ok := v.([]interface{}); ok {
-				var b strings.Builder
-				for _, fr := range frames {
-					if m, ok := fr.(map[string]interface{}); ok {
-						// keys: "func", "source", "line"
-						fmt.Fprintf(&b, "\n    at %s (%v:%v)", m["func"], m["source"], m["line"])
-					}
-				}
-				return b.String()
-			}
-		}
-		return fmt.Sprint(v)
 	}
 
 	// Build logger that writes pretty output to the file (with timestamp and caller).
