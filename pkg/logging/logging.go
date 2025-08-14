@@ -2,15 +2,16 @@ package logging
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+
 	"github.com/Slach/clickhouse-timeline/pkg/types"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	_ "github.com/rs/zerolog/pkgerrors"
-	"os"
-	"path/filepath"
-	"strconv"
-	"strings"
 )
 
 func InitConsoleStdErrLog() {
@@ -79,7 +80,7 @@ func InitLogFile(cliInstance *types.CLI, version string) error {
 		return errors.Wrap(err, "failed to open log file")
 	}
 
-	// Now setup the proper file logging
+	// Now set up the proper file logging
 	consoleWriter := zerolog.ConsoleWriter{
 		Out:        logFile,
 		NoColor:    true,
@@ -90,7 +91,7 @@ func InitLogFile(cliInstance *types.CLI, version string) error {
 	baseLogger := zerolog.New(zerolog.SyncWriter(consoleWriter)).
 		With().
 		Timestamp().
-		Caller(). // Normal caller info
+		Caller().
 		Str("version", version).
 		Logger()
 
