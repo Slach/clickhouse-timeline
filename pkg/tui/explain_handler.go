@@ -47,12 +47,12 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 	form.AddFormItem(hashField)
 
 	// Separate output area for explain flow (do not use a.mainView)
-	output := tview.NewTextView().
-		SetDynamicColors(true).
-		SetWrap(true).
-		SetWordWrap(true).
-		SetBorder(true).
-		SetTitle("Explain Output")
+	output := tview.NewTextView()
+	output.SetDynamicColors(true)
+	output.SetWrap(true)
+	output.SetWordWrap(true)
+	output.SetBorder(true)
+	output.SetTitle("Explain Output")
 
 	// Placeholders for lists
 	tablesList := tview.NewList().ShowSecondaryText(false)
