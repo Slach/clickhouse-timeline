@@ -72,22 +72,46 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 	kindFL := widgets.NewFilteredList(kindTList, "Query kinds", []string{}, "explain_kinds_filter")
 	kindList := kindFL.List
 
-	// Helper to toggle selection in a list and reflect prefix
+	// Helper to toggle selection in a list and reflect prefix.
+	// Preserve the currently focused item (by visible text) so refreshing the list
+	// doesn't reset the cursor to the first row when the user presses space.
 	var toggleSelect func(list *tview.List, items []string, selMap map[string]bool)
 	toggleSelect = func(list *tview.List, items []string, selMap map[string]bool) {
+		// Capture current item text (may include prefix)
+		curIdx := list.GetCurrentItem()
+		curText, _ := list.GetItemText(curIdx)
+
 		list.Clear()
 		for _, it := range items {
 			prefix := " [ ] "
 			if selMap[it] {
 				prefix = " [+] "
 			}
-			list.AddItem(prefix+it, "", 0, func(i string) func() {
-				return func() {
-					selMap[i] = !selMap[i]
-					// refresh lists
-					toggleSelect(list, items, selMap)
+			// capture item by value for closure
+			item := it
+			list.AddItem(prefix+item, "", 0, func() {
+				// Toggle selection for this item and refresh the rendered list.
+				selMap[item] = !selMap[item]
+				toggleSelect(list, items, selMap)
+			})
+		}
+
+		// Try to restore previously focused item if it still exists.
+		if curText != "" {
+			trimmed := strings.TrimSpace(curText)
+			// Remove common prefix patterns like "[ ]" or "[+]" if present.
+			if strings.HasPrefix(trimmed, "[") {
+				if idx := strings.Index(trimmed, "]"); idx != -1 && idx+1 < len(trimmed) {
+					trimmed = strings.TrimSpace(trimmed[idx+1:])
 				}
-			}(it))
+			}
+			// Find the same item in the new list and restore the cursor.
+			for i, it := range items {
+				if it == trimmed {
+					list.SetCurrentItem(i)
+					break
+				}
+			}
 		}
 	}
 
