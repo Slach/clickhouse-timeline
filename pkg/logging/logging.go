@@ -116,14 +116,30 @@ func InitLogFile(cliInstance *types.CLI, version string) error {
 	}
 
 	// Now set up the proper file logging
-	// We want to preserve multiline values (notably the "stack" field).
+	// We want to preserve multiline values (notably the "stack" field)
+	// and avoid surrounding the multiline block in extra quotes.
 	consoleWriter := zerolog.ConsoleWriter{
 		Out:        logFile,
 		NoColor:    true,
+		// Disable automatic quoting of field values so multiline strings
+		// can be rendered as-is when we return them from FormatFieldValue.
+		NoQuote:    true,
 		TimeFormat: "2006-01-02 15:04:05.000",
 		FormatFieldValue: func(i interface{}) string {
+			// Convert the value to a string.
 			val := fmt.Sprint(i)
+
+			// If the value contains escaped newline sequences (e.g. "\\n"),
+			// convert them into real newlines so they render as multiline in the log.
 			val = strings.ReplaceAll(val, `\n`, "\n")
+
+			// Trim a single trailing newline to avoid an extra blank line
+			// and to prevent ConsoleWriter from inserting closing quotes on a
+			// separate line in some versions.
+			val = strings.TrimSuffix(val, "\n")
+
+			// If the value contains any real newline characters, place the
+			// field value on the following line for readability.
 			if strings.Contains(val, "\n") {
 				return "\n" + val
 			}
