@@ -85,6 +85,7 @@ var availableCommands = []string{
  :connect         - Connect to a ClickHouse instance
  :quit            - Exit the application
  :flamegraph      - Generate a flamegraph
+ :explain         - Open explain query flow (filter by normalized_query_hash, tables, kinds)
  :from            - Set the start time
  :to              - Set the end time
  :range           - Set time range with predefined options
