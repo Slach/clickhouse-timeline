@@ -323,16 +323,60 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 		a.pages.SwitchToPage("main")
 	}
 
-	form.AddButton("Search", searchFunc)
-	form.AddButton("Cancel", cancelFunc)
+	// Create standalone buttons (not part of the form) so we can control focus order
+	searchBtn := tview.NewButton("Search").SetSelectedFunc(func() {
+		// Run search in a goroutine to avoid blocking the UI
+		go searchFunc()
+	})
+	cancelBtn := tview.NewButton("Cancel").SetSelectedFunc(func() {
+		cancelFunc()
+	})
+	buttonsFlex := tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(searchBtn, 0, 1, false).
+		AddItem(cancelBtn, 0, 1, false)
 
-	// Layout: left = form + lists, right = mainView for messages
+	// Make Tab/Shift-Tab navigation work:
+	// - From hashField (input) Tab -> tablesList, Enter -> trigger search
+	hashField.SetDoneFunc(func(key tcell.Key) {
+		if key == tcell.KeyTab {
+			a.tviewApp.SetFocus(tablesList)
+		} else if key == tcell.KeyEnter {
+			go searchFunc()
+		}
+	})
+
+	// - From tablesList Tab -> kindList, Shift-Tab -> hashField
+	tablesList.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyTab {
+			a.tviewApp.SetFocus(kindList)
+			return nil
+		} else if event.Key() == tcell.KeyBacktab {
+			a.tviewApp.SetFocus(hashField)
+			return nil
+		}
+		return event
+	})
+
+	// - From kindList Tab -> searchBtn, Shift-Tab -> tablesList
+	kindList.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyTab {
+			a.tviewApp.SetFocus(searchBtn)
+			return nil
+		} else if event.Key() == tcell.KeyBacktab {
+			a.tviewApp.SetFocus(tablesList)
+			return nil
+		}
+		return event
+	})
+
+	// Layout: left = form + lists + buttons, right = output area
 		// assemble selection content inside bordered selectionBox
 		selectionBox.AddItem(form, 7, 0, true)
 		selectionBox.AddItem(tview.NewTextView().SetText("Tables:"), 1, 0, false)
 		selectionBox.AddItem(tablesList, 0, 1, false)
 		selectionBox.AddItem(tview.NewTextView().SetText("Query kinds:"), 1, 0, false)
 		selectionBox.AddItem(kindList, 0, 1, false)
+		selectionBox.AddItem(buttonsFlex, 1, 0, false)
 
 		leftFlex := selectionBox
 
@@ -342,7 +386,8 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 
 	a.pages.AddPage("explain", mainFlex, true, true)
 	a.pages.SwitchToPage("explain")
-	a.tviewApp.SetFocus(form)
+	// Focus the hash input field initially so Tab moves into the lists
+	a.tviewApp.SetFocus(hashField)
 }
 
 // truncate utility
