@@ -48,6 +48,15 @@ func NewRootCommand(cli *types.CLI, version string) *cobra.Command {
 	}
 	rootCmd.AddCommand(heatmapCmd)
 
+	explainCmd := &cobra.Command{
+		Use:   "explain",
+		Short: "Start in explain mode",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return RunSubCommand(cli, version, cmd, args)
+		},
+	}
+	rootCmd.AddCommand(explainCmd)
+
 	flamegraphCmd := &cobra.Command{
 		Use:   "flamegraph",
 		Short: "Start in flamegraph mode",

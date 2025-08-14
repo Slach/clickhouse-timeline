@@ -6,6 +6,7 @@ package tui
  	CmdConnect        = "connect"
  	CmdQuit           = "quit"
  	CmdFlamegraph     = "flamegraph"
+ 	CmdExplain        = "explain"
  	CmdFrom           = "from"
  	CmdTo             = "to"
  	CmdRange          = "range"
@@ -61,6 +62,7 @@ var availableCommands = []string{
 	CmdConnect,
 	CmdQuit,
 	CmdFlamegraph,
+	CmdExplain,
 	CmdFrom,
 	CmdTo,
 	CmdRange,
