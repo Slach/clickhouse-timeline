@@ -51,7 +51,8 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 	kindList := tview.NewList().ShowSecondaryText(false)
 
 	// Helper to toggle selection in a list and reflect prefix
-	toggleSelect := func(list *tview.List, items []string, selMap map[string]bool) {
+	var toggleSelect func(list *tview.List, items []string, selMap map[string]bool)
+	toggleSelect = func(list *tview.List, items []string, selMap map[string]bool) {
 		list.Clear()
 		for _, it := range items {
 			prefix := " [ ] "
@@ -69,7 +70,8 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 	}
 
 	// Load options button - queries DB to fill tables and kinds
-	loadBtn := tview.NewButton("Load options").SetSelectedFunc(func() {
+	var loadFunc func()
+	loadFunc = func() {
 		a.tviewApp.QueueUpdateDraw(func() {
 			a.mainView.SetText("Loading tables and query kinds...")
 		})
@@ -151,9 +153,11 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 			}
 			a.mainView.SetText("Options loaded. Toggle selections and press Search.")
 		})
-	})
+	}
+	loadBtn := tview.NewButton("Load options").SetSelectedFunc(loadFunc)
 
-	searchBtn := tview.NewButton("Search").SetSelectedFunc(func() {
+	var searchFunc func()
+	searchFunc = func() {
 		// Build filters
 		hashVal := strings.TrimSpace(hashField.GetText())
 		var whereParts []string
@@ -279,15 +283,18 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 			a.pages.AddPage("explain_queries", flex, true, true)
 			a.pages.SwitchToPage("explain_queries")
 		})
-	})
+	}
+	searchBtn := tview.NewButton("Search").SetSelectedFunc(searchFunc)
 
-	cancelBtn := tview.NewButton("Cancel").SetSelectedFunc(func() {
+	var cancelFunc func()
+	cancelFunc = func() {
 		a.pages.SwitchToPage("main")
-	})
+	}
+	cancelBtn := tview.NewButton("Cancel").SetSelectedFunc(cancelFunc)
 
-	form.AddButton("Load options", func() { loadBtn.Selected() })
-	form.AddButton("Search", func() { searchBtn.Selected() })
-	form.AddButton("Cancel", func() { cancelBtn.Selected() })
+	form.AddButton("Load options", loadFunc)
+	form.AddButton("Search", searchFunc)
+	form.AddButton("Cancel", cancelFunc)
 
 	// Layout: left = form + lists, right = mainView for messages
 	leftFlex := tview.NewFlex().SetDirection(tview.FlexRow).
