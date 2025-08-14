@@ -331,6 +331,33 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 	cancelBtn := tview.NewButton("Cancel").SetSelectedFunc(func() {
 		cancelFunc()
 	})
+	// Tab navigation for buttons: forward/backwards between kindList -> searchBtn -> cancelBtn -> hashField
+	searchBtn.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event == nil {
+			return event
+		}
+		if event.Key() == tcell.KeyTab {
+			a.tviewApp.SetFocus(cancelBtn)
+			return nil
+		} else if event.Key() == tcell.KeyBacktab {
+			a.tviewApp.SetFocus(kindList)
+			return nil
+		}
+		return event
+	})
+	cancelBtn.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event == nil {
+			return event
+		}
+		if event.Key() == tcell.KeyTab {
+			a.tviewApp.SetFocus(hashField)
+			return nil
+		} else if event.Key() == tcell.KeyBacktab {
+			a.tviewApp.SetFocus(searchBtn)
+			return nil
+		}
+		return event
+	})
 	buttonsFlex := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(searchBtn, 0, 1, false).
 		AddItem(cancelBtn, 0, 1, false)
@@ -343,6 +370,26 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 		} else if key == tcell.KeyEnter {
 			go searchFunc()
 		}
+	})
+	// Also capture raw input events on the field so Tab works even when the surrounding Form captures it,
+	// and allow '/' to open the tables filter.
+	hashField.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event == nil {
+			return event
+		}
+		if event.Rune() == '/' {
+			tablesFL.ShowFilterInput(a.tviewApp, a.pages)
+			return nil
+		}
+		if event.Key() == tcell.KeyTab {
+			a.tviewApp.SetFocus(tablesList)
+			return nil
+		} else if event.Key() == tcell.KeyBacktab {
+			// Move focus backwards to cancel button
+			a.tviewApp.SetFocus(cancelBtn)
+			return nil
+		}
+		return event
 	})
 
 	// - From tablesList Tab -> kindList, Shift-Tab -> hashField
