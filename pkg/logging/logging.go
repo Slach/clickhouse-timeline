@@ -1,10 +1,14 @@
 package logging
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -115,26 +119,112 @@ func InitLogFile(cliInstance *types.CLI, version string) error {
 		return errors.Wrap(err, "failed to open log file")
 	}
 
-	// Now set up the proper file logging
-	// We want to preserve multiline values (notably the "stack" field)
-	// and avoid surrounding the multiline block in extra quotes.
-	consoleWriter := zerolog.ConsoleWriter{
-		Out:        logFile,
-		NoColor:    true,
-		TimeFormat: "2006-01-02 15:04:05.000",
-		FormatFieldValue: func(i interface{}) string {
-			val := fmt.Sprintf("%s", i)
-			val = strings.ReplaceAll(val, `\n`, "\n")
-
-			if strings.Contains(val, "\n") {
-				return "\n" + val
-			}
-			return val
-		},
+	// Now set up the proper file logging.
+	// ConsoleWriter applies quoting rules that are not instrumentable in the
+	// zerolog version in use. To render human-friendly multiline values
+	// (notably "stack") without extra quoting, create a small JSON->text
+	// pretty-writer that parses zerolog's JSON events and emits a readable
+	// single-line header plus multiline field blocks.
+	type prettyWriter struct {
+		Out io.Writer
 	}
 
-	// Create base logger with normal caller info
-	baseLogger := zerolog.New(zerolog.SyncWriter(consoleWriter)).
+	// Write implements io.Writer and expects p to contain a complete JSON event
+	// (zerolog writes one JSON object per event, typically ending with '\n').
+	func (w *prettyWriter) Write(p []byte) (int, error) {
+		// Trim surrounding whitespace/newline
+		b := bytes.TrimSpace(p)
+
+		// Try to unmarshal JSON into raw messages for stable handling of fields.
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal(b, &m); err != nil {
+			// Fallback: write raw bytes if we can't parse JSON.
+			return w.Out.Write(p)
+		}
+
+		// Extract common fields.
+		var ts, level, message, caller string
+		_ = json.Unmarshal(m["time"], &ts)
+		_ = json.Unmarshal(m["level"], &level)
+		_ = json.Unmarshal(m["message"], &message)
+		_ = json.Unmarshal(m["caller"], &caller)
+
+		// Prepare deterministic key order for remaining fields.
+		keys := make([]string, 0, len(m))
+		for k := range m {
+			if k == "time" || k == "level" || k == "message" || k == "caller" {
+				continue
+			}
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		var out strings.Builder
+		// Header: timestamp LEVEL [caller > ]message
+		if ts != "" {
+			out.WriteString(ts)
+			out.WriteString(" ")
+		}
+		if level != "" {
+			out.WriteString(strings.ToUpper(level))
+			out.WriteString(" ")
+		}
+		if caller != "" {
+			out.WriteString(caller)
+			out.WriteString(" > ")
+		}
+		out.WriteString(message)
+
+		// Append other fields. Strings that contain newlines are printed as
+		// a multiline block (key= newline + raw value).
+		for _, k := range keys {
+			raw := m[k]
+			// Try as string first.
+			var s string
+			if err := json.Unmarshal(raw, &s); err == nil {
+				// json.Unmarshal already unescaped \n sequences into real newlines.
+				// Trim a trailing newline to avoid double blank lines.
+				s = strings.TrimSuffix(s, "\n")
+				if strings.Contains(s, "\n") {
+					out.WriteString(" ")
+					out.WriteString(k)
+					out.WriteString("=")
+					out.WriteString("\n")
+					out.WriteString(s)
+					out.WriteString("\n")
+					continue
+				}
+				out.WriteString(" ")
+				out.WriteString(k)
+				out.WriteString("=")
+				out.WriteString(s)
+				continue
+			}
+
+			// Non-string fields: unmarshal into interface{} and format.
+			var iv interface{}
+			if err := json.Unmarshal(raw, &iv); err == nil {
+				out.WriteString(" ")
+				out.WriteString(k)
+				out.WriteString("=")
+				out.WriteString(fmt.Sprint(iv))
+				continue
+			}
+
+			// As a last resort, write the raw bytes.
+			out.WriteString(" ")
+			out.WriteString(k)
+			out.WriteString("=")
+			out.Write(raw)
+		}
+
+		out.WriteString("\n")
+		sout := out.String()
+		return w.Out.Write([]byte(sout))
+	}
+
+	// Create base logger using our prettyWriter wrapped with zerolog.SyncWriter.
+	baseLogger := zerolog.New(zerolog.SyncWriter(&prettyWriter{Out: logFile})).
 		With().
 		Timestamp().
 		Caller().
