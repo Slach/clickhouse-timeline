@@ -73,7 +73,7 @@ var availableCommands = []string{
 	CmdMetricLog,
 	CmdAsyncMetricLog,
 	CmdLogs,
-+	CmdMemory,
+	CmdMemory,
 	CmdAudit,
 }
 
