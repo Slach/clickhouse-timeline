@@ -554,8 +554,7 @@ func (a *App) ShowHeatmap() {
 						categoryValue = ""
 					}
 
-					// Create action menu
-					menu := tview.NewModal().
+					actionMenu := tview.NewModal().
 						SetText("Select action:\n[f] Flamegraph\n[p] Profile Events").
 						AddButtons([]string{"Flamegraph (f)", "Profile Events (p)", "Cancel"}).
 						SetDoneFunc(func(buttonIndex int, buttonLabel string) {
@@ -570,7 +569,7 @@ func (a *App) ShowHeatmap() {
 								a.pages.SwitchToPage("heatmap")
 							}
 						})
-					menu.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+					actionMenu.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 						switch event.Rune() {
 						case 'f', 'F':
 							a.pages.SwitchToPage("main")
@@ -591,7 +590,7 @@ func (a *App) ShowHeatmap() {
 						return event
 					})
 
-					a.pages.AddPage("action_menu", menu, true, true)
+					a.pages.AddPage("action_menu", actionMenu, true, true)
 					a.pages.SwitchToPage("action_menu")
 					return nil
 				}
