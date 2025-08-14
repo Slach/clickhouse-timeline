@@ -357,10 +357,31 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 			filterInput.SetChangedFunc(func(text string) {
 				queriesFL.FilterList(text)
 			})
+			// When Enter is pressed in the filter input, move focus to the list so user can
+			// navigate with arrows and press Enter to inspect an item. Escape returns to main.
 			filterInput.SetDoneFunc(func(key tcell.Key) {
 				if key == tcell.KeyEscape {
 					a.pages.SwitchToPage("main")
+					return
 				}
+				if key == tcell.KeyEnter {
+					// Ensure the list has a current item and give it focus.
+					if queriesList.GetItemCount() > 0 {
+						queriesList.SetCurrentItem(0)
+					}
+					a.tviewApp.SetFocus(queriesList)
+				}
+			})
+			// Also allow Tab from the filter input to move focus to the list.
+			filterInput.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+				if event == nil {
+					return event
+				}
+				if event.Key() == tcell.KeyTab {
+					a.tviewApp.SetFocus(queriesList)
+					return nil
+				}
+				return event
 			})
 
 			// Layout
