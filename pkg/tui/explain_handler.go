@@ -46,10 +46,10 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 	hashField := tview.NewInputField().SetLabel("normalized_query_hash: ").SetText(prefillHash)
 	form.AddFormItem(hashField)
 
-	selectionBox := tview.NewFlex().SetDirection(tview.FlexRow).
-		SetBorder(true).
-		SetTitle("Explain Query - Selection").
-		SetTitleAlign(tview.AlignLeft)
+	selectionBox := tview.NewFlex().SetDirection(tview.FlexRow)
+	selectionBox.SetBorder(true)
+	selectionBox.SetTitle("Explain Query - Selection")
+	selectionBox.SetTitleAlign(tview.AlignLeft)
 
 	// Separate output area for explain flow (do not use a.mainView)
 	output := tview.NewTextView()
