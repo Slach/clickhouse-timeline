@@ -1,25 +1,26 @@
 package tui
 
-// Available commands
-const (
-	CmdHelp           = "help"
-	CmdConnect        = "connect"
-	CmdQuit           = "quit"
-	CmdFlamegraph     = "flamegraph"
-	CmdFrom           = "from"
-	CmdTo             = "to"
-	CmdRange          = "range"
-	CmdCluster        = "cluster"
-	CmdHeatmap        = "heatmap"
-	CmdCategory       = "categoryType"
-	CmdMetric         = "heatmapMetric"
-	CmdScale          = "scale"
-	CmdProfileEvents  = "profile_events"
-	CmdMetricLog      = "metric_log"
-	CmdAsyncMetricLog = "asynchronous_metric_log"
-	CmdLogs           = "logs"
-	CmdAudit          = "audit"
-)
+ // Available commands
+ const (
+ 	CmdHelp           = "help"
+ 	CmdConnect        = "connect"
+ 	CmdQuit           = "quit"
+ 	CmdFlamegraph     = "flamegraph"
+ 	CmdFrom           = "from"
+ 	CmdTo             = "to"
+ 	CmdRange          = "range"
+ 	CmdCluster        = "cluster"
+ 	CmdHeatmap        = "heatmap"
+ 	CmdCategory       = "categoryType"
+ 	CmdMetric         = "heatmapMetric"
+ 	CmdScale          = "scale"
+ 	CmdProfileEvents  = "profile_events"
+ 	CmdMetricLog      = "metric_log"
+ 	CmdAsyncMetricLog = "asynchronous_metric_log"
+ 	CmdLogs           = "logs"
++	CmdMemory         = "memory"
+ 	CmdAudit          = "audit"
+ )
 
 type TraceType string
 
@@ -72,32 +73,34 @@ var availableCommands = []string{
 	CmdMetricLog,
 	CmdAsyncMetricLog,
 	CmdLogs,
++	CmdMemory,
 	CmdAudit,
 }
 
-// Help text
-const helpText = `ClickHouse Timeline Commands:
-:help            - Show this help
-:connect         - Connect to a ClickHouse instance
-:quit            - Exit the application
-:flamegraph      - Generate a flamegraph
-:from            - Set the start time
-:to              - Set the end time
-:range           - Set time range with predefined options
-:heatmap         - Generate a heatmap visualization
-:categoryType    - Set categoryType for heatmap (query_hash, tables, hosts)
-:heatmapMetric   - Select metric for heatmap visualization
-:profile_events  - Show profile events
-:cluster         - Select cluster for queries
-:scale           - Set scale type for heatmap (linear, log2, log10)
-:logs            - Show any table logs (text_log, query_log, query_thread_log)
-:metric_log              - Show system.metric_log metrics
-:asynchronous_metric_log - Show system.asynchronous_metric_log metrics
-:audit          - Run system audit and show diagnostics and suggestions
-
-Navigation:
-- Use arrow keys to navigate
-- Press / to filter
-- Press Esc to cancel current operation
-- Press Enter to show action menu
-- Double click to show action menu`
+ // Help text
+ const helpText = `ClickHouse Timeline Commands:
+ :help            - Show this help
+ :connect         - Connect to a ClickHouse instance
+ :quit            - Exit the application
+ :flamegraph      - Generate a flamegraph
+ :from            - Set the start time
+ :to              - Set the end time
+ :range           - Set time range with predefined options
+ :heatmap         - Generate a heatmap visualization
+ :categoryType    - Set categoryType for heatmap (query_hash, tables, hosts)
+ :heatmapMetric   - Select metric for heatmap visualization
+ :profile_events  - Show profile events
+ :cluster         - Select cluster for queries
+ :scale           - Set scale type for heatmap (linear, log2, log10)
+ :logs            - Show any table logs (text_log, query_log, query_thread_log)
+ :metric_log              - Show system.metric_log metrics
+ :asynchronous_metric_log - Show system.asynchronous_metric_log metrics
++:memory          - Show Memory usage (grouped by host)
+ :audit          - Run system audit and show diagnostics and suggestions
+ 
+ Navigation:
+ - Use arrow keys to navigate
+ - Press / to filter
+ - Press Esc to cancel current operation
+ - Press Enter to show action menu
+ - Double click to show action menu`
