@@ -223,7 +223,7 @@ func InitLogFile(cliInstance *types.CLI, version string) error {
 	pw := &prettyWriter{Out: logFile}
 
 	// Create base logger using our prettyWriter wrapped with zerolog.SyncWriter.
-	baseLogger := zerolog.New(zerolog.SyncWriter(&prettyWriter{Out: logFile})).
+	baseLogger := zerolog.New(zerolog.SyncWriter(pw)).
 		With().
 		Timestamp().
 		Caller().
