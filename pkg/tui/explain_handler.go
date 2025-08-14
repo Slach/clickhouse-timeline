@@ -77,9 +77,15 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 	// doesn't reset the cursor to the first row when the user presses space.
 	var toggleSelect func(list *tview.List, items []string, selMap map[string]bool)
 	toggleSelect = func(list *tview.List, items []string, selMap map[string]bool) {
-		// Capture current item text (may include prefix)
-		curIdx := list.GetCurrentItem()
-		curText, _ := list.GetItemText(curIdx)
+		// Capture current item text (may include prefix). Only attempt to read if list has items.
+		count := list.GetItemCount()
+		curText := ""
+		if count > 0 {
+			curIdx := list.GetCurrentItem()
+			if curIdx >= 0 && curIdx < count {
+				curText, _ = list.GetItemText(curIdx)
+			}
+		}
 
 		list.Clear()
 		for _, it := range items {
@@ -108,7 +114,10 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 			// Find the same item in the new list and restore the cursor.
 			for i, it := range items {
 				if it == trimmed {
-					list.SetCurrentItem(i)
+					// Ensure index is still valid for the current list before setting.
+					if i >= 0 && i < list.GetItemCount() {
+						list.SetCurrentItem(i)
+					}
 					break
 				}
 			}
