@@ -379,7 +379,7 @@ func (a *App) showExplainPercentiles(hash, queryText string, fromTime, toTime ti
 	if rows.Next() {
 		if err := rows.Scan(&p50, &p90, &p99); err != nil {
 			a.tviewApp.QueueUpdateDraw(func() {
-				a.mainView.SetText(fmt.Sprintf("Error scanning percentiles: %v", err))
+				output.SetText(fmt.Sprintf("Error scanning percentiles: %v", err))
 			})
 			return
 		}
