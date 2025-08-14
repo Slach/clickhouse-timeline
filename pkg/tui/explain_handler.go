@@ -168,6 +168,14 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 		})
 	}
 
+	// Reload options when the hash input changes and load initial options immediately
+	hashField.SetChangedFunc(func(text string) {
+		// Call in goroutine so UI doesn't block
+		go loadFunc()
+	})
+	// Trigger initial load
+	go loadFunc()
+
 	var searchFunc func()
 	searchFunc = func() {
 		// Build filters
@@ -302,7 +310,6 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 		a.pages.SwitchToPage("main")
 	}
 
-	form.AddButton("Load options", loadFunc)
 	form.AddButton("Search", searchFunc)
 	form.AddButton("Cancel", cancelFunc)
 
