@@ -13,6 +13,9 @@ type FilteredList struct {
 	Title      string
 	Items      []string
 	FilterPage string
+	// RenderList, if set, is used to render items into the real list.
+	// This allows callers to preserve custom prefixes (e.g. "[ ]"/"[x]") and selection behavior.
+	RenderList func(list *tview.List, items []string)
 }
 
 func NewFilteredList(list *tview.List, title string, items []string, filterPage string) *FilteredList {
@@ -21,6 +24,7 @@ func NewFilteredList(list *tview.List, title string, items []string, filterPage 
 		Title:      title,
 		Items:      items,
 		FilterPage: filterPage,
+		RenderList: nil,
 	}
 }
 
@@ -126,16 +130,35 @@ func (fl *FilteredList) FilterList(filter string) {
 
 	fl.List.SetTitle(fmt.Sprintf("%s [::b::cyan]/%s[-:-:-]", fl.Title, filter))
 	filter = strings.ToLower(filter)
+
+	// Build filtered slice
+	var filtered []string
 	for _, item := range fl.Items {
 		if strings.Contains(strings.ToLower(item), filter) {
-			fl.List.AddItem(item, "", 0, nil).ShowSecondaryText(false)
+			filtered = append(filtered, item)
 		}
+	}
+
+	// If caller provided a custom renderer, use it so prefixes/selection state can be preserved.
+	if fl.RenderList != nil {
+		fl.RenderList(fl.List, filtered)
+		return
+	}
+
+	for _, item := range filtered {
+		fl.List.AddItem(item, "", 0, nil).ShowSecondaryText(false)
 	}
 }
 
 func (fl *FilteredList) ResetList() {
 	fl.List.Clear()
 	fl.List.SetTitle(fl.Title)
+
+	if fl.RenderList != nil {
+		fl.RenderList(fl.List, fl.Items)
+		return
+	}
+
 	for _, item := range fl.Items {
 		fl.List.AddItem(item, "", 0, nil).ShowSecondaryText(false)
 	}
