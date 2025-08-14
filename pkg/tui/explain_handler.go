@@ -72,6 +72,8 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 	kindFL := widgets.NewFilteredList(kindTList, "Query kinds", []string{}, "explain_kinds_filter")
 	kindList := kindFL.List
 
+	// toggleSelect moved earlier so RenderList can reference it
+
 	// Ensure the filtered-list rendering preserves the selection prefixes inserted by toggleSelect.
 	// The RenderList closures capture the selected tables/kinds maps so prefix state is kept.
 	tablesFL.RenderList = func(list *tview.List, items []string) {
