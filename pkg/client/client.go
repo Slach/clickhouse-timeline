@@ -108,7 +108,12 @@ func (c *Client) Query(query string, args ...interface{}) (*sql.Rows, error) {
 	if len(args) > 0 {
 		log.Info().Msgf("args=%#v", args)
 	}
-	return c.db.QueryContext(context.Background(), query, args...)
+	rows, err := c.db.QueryContext(context.Background(), query, args...)
+	if err != nil {
+		log.Error().Err(err).Str("query", query).Interface("args", args).Msg("Query failed")
+		return nil, err
+	}
+	return rows, nil
 }
 
 func (c *Client) QueryRow(query string, args ...interface{}) *sql.Row {
@@ -124,7 +129,12 @@ func (c *Client) Exec(query string, args ...interface{}) (sql.Result, error) {
 	if len(args) > 0 {
 		log.Info().Msgf("args=%#v", args)
 	}
-	return c.db.ExecContext(context.Background(), query, args...)
+	res, err := c.db.ExecContext(context.Background(), query, args...)
+	if err != nil {
+		log.Error().Err(err).Str("query", query).Interface("args", args).Msg("Exec failed")
+		return nil, err
+	}
+	return res, nil
 }
 
 func (c *Client) Close() error {
