@@ -110,7 +110,7 @@ func (c *Client) Query(query string, args ...interface{}) (*sql.Rows, error) {
 	}
 	rows, err := c.db.QueryContext(context.Background(), query, args...)
 	if err != nil {
-		log.Error().Err(err).Str("query", query).Interface("args", args).Stack().Msg("Query failed")
+		log.Error().Stack().Err(err).Str("query", query).Interface("args", args).Msg("Query failed")
 		return nil, err
 	}
 	return rows, nil
@@ -121,7 +121,12 @@ func (c *Client) QueryRow(query string, args ...interface{}) *sql.Row {
 	if len(args) > 0 {
 		log.Info().Msgf("args=%#v", args)
 	}
-	return c.db.QueryRowContext(context.Background(), query, args...)
+	row := c.db.QueryRowContext(context.Background(), query, args...)
+	if row.Err() != nil {
+		log.Error().Stack().Err(row.Err()).Str("query", query).Interface("args", args).Msg("QueryRow failed")
+		return nil
+	}
+	return row
 }
 
 func (c *Client) Exec(query string, args ...interface{}) (sql.Result, error) {
@@ -131,7 +136,7 @@ func (c *Client) Exec(query string, args ...interface{}) (sql.Result, error) {
 	}
 	res, err := c.db.ExecContext(context.Background(), query, args...)
 	if err != nil {
-		log.Error().Err(err).Str("query", query).Interface("args", args).Stack().Msg("Exec failed")
+		log.Error().Stack().Err(err).Str("query", query).Interface("args", args).Msg("Exec failed")
 		return nil, err
 	}
 	return res, nil
