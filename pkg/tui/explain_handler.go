@@ -59,9 +59,18 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 	output.SetBorder(true)
 	output.SetTitle("Explain Output")
 
-	// Placeholders for lists
-	tablesList := tview.NewList().ShowSecondaryText(false)
-	kindList := tview.NewList().ShowSecondaryText(false)
+	// Placeholders for lists wrapped in FilteredList (provides filtering helpers)
+	tablesTList := tview.NewList()
+	tablesTList.SetMainTextColor(tcell.ColorWhite)
+	tablesTList.ShowSecondaryText(false)
+	tablesFL := widgets.NewFilteredList(tablesTList, "Tables", []string{}, "explain_tables_filter")
+	tablesList := tablesFL.List
+
+	kindTList := tview.NewList()
+	kindTList.SetMainTextColor(tcell.ColorWhite)
+	kindTList.ShowSecondaryText(false)
+	kindFL := widgets.NewFilteredList(kindTList, "Query kinds", []string{}, "explain_kinds_filter")
+	kindList := kindFL.List
 
 	// Helper to toggle selection in a list and reflect prefix
 	var toggleSelect func(list *tview.List, items []string, selMap map[string]bool)
@@ -152,8 +161,12 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 			kinds = append(kinds, k)
 		}
 
-		// Update UI lists
+		// Update UI lists and update underlying FilteredList items so filtering works
 		a.tviewApp.QueueUpdateDraw(func() {
+			// update filter sources
+			tablesFL.Items = tables
+			kindFL.Items = kinds
+
 			if len(tables) == 0 {
 				toggleSelect(tablesList, []string{"<no tables>"}, selectedTables)
 			} else {
@@ -164,7 +177,7 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 			} else {
 				toggleSelect(kindList, kinds, selectedKinds)
 			}
-			output.SetText("Options loaded. Toggle selections and press Search.")
+			output.SetText("Options loaded.")
 		})
 	}
 
