@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -16,7 +17,12 @@ import (
 
 func InitConsoleStdErrLog() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnixMs
+	// ErrorStackMarshaler tries to extract a short, useful stack trace for logging.
+	// First try to use pkg/errors StackTrace if present (for wrapped errors).
+	// If not present, fall back to capturing runtime.Callers at the point of logging
+	// so .Stack() produces something even for errors that don't carry a stack trace.
 	zerolog.ErrorStackMarshaler = func(err error) interface{} {
+		// Preferred: pkg/errors stacktrace extraction (if the error was created with pkg/errors).
 		if stackErr, ok := err.(interface{ StackTrace() errors.StackTrace }); ok {
 			st := stackErr.StackTrace()
 			if len(st) > 0 {
@@ -31,7 +37,33 @@ func InitConsoleStdErrLog() {
 				}
 			}
 		}
-		return nil
+
+		// Fallback: capture a short runtime stack from the point where the marshaler is invoked.
+		// Skip a few frames to avoid showing internal zerolog/runtime frames.
+		const maxFrames = 10
+		pcs := make([]uintptr, maxFrames)
+		// Skip 3 frames: runtime.Callers, this function, and zerolog internals that call into marshaler.
+		n := runtime.Callers(3, pcs)
+		if n == 0 {
+			return nil
+		}
+		var b strings.Builder
+		for i := 0; i < n; i++ {
+			pc := pcs[i] - 1
+			fn := runtime.FuncForPC(pc)
+			if fn == nil {
+				continue
+			}
+			file, line := fn.FileLine(pc)
+			file = strings.TrimPrefix(file, "github.com/Slach/clickhouse-timeline/")
+			// Use a compact representation: file:line > function;
+			fmt.Fprintf(&b, "%s:%d > %s; ", file, line, fn.Name())
+		}
+		s := b.String()
+		if s == "" {
+			return nil
+		}
+		return s
 	}
 	zerolog.CallerMarshalFunc = func(pc uintptr, file string, line int) string {
 		return strings.TrimPrefix(file, "github.com/Slach/clickhouse-timeline/") + ":" + strconv.Itoa(line)
