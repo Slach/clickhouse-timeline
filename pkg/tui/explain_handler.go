@@ -223,21 +223,9 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 		})
 	}
 
-	// Reload options when the hash input changes and load initial options immediately
-	// Use a small debounce so rapid typing doesn't trigger immediate DB loads on every keystroke.
-	var hashDebounce *time.Timer
-	const hashDebounceDuration = 500 * time.Millisecond
-	hashField.SetChangedFunc(func(text string) {
-		// Reset debounce timer on each change; actual load runs after user stops typing.
-		if hashDebounce != nil {
-			hashDebounce.Stop()
-		}
-		hashDebounce = time.AfterFunc(hashDebounceDuration, func() {
-			// Run loadFunc in a goroutine to avoid blocking UI
-			go loadFunc()
-		})
-	})
-	// Trigger initial load
+	// Do not reload options on each keystroke. Initial load only.
+	// Users can trigger searches by pressing Enter in the normalized_query_hash field.
+	// Trigger initial load of tables/kinds.
 	go loadFunc()
 
 	var searchFunc func()
