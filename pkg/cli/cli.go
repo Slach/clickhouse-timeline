@@ -82,15 +82,15 @@ func NewRootCommand(cli *types.CLI, version string) *cobra.Command {
  			return RunSubCommand(cli, version, cmd, args)
  		},
  	}
-+	memoryCmd := &cobra.Command{
-+		Use:   "memory",
-+		Short: "Start memory viewer",
-+		RunE: func(cmd *cobra.Command, args []string) error {
-+			return RunSubCommand(cli, version, cmd, args)
-+		},
-+	}
+ 	memoryCmd := &cobra.Command{
+ 		Use:   "memory",
+ 		Short: "Start memory viewer",
+ 		RunE: func(cmd *cobra.Command, args []string) error {
+ 			return RunSubCommand(cli, version, cmd, args)
+ 		},
+ 	}
  	rootCmd.AddCommand(asyncMetricLogCmd)
-+	rootCmd.AddCommand(memoryCmd)
+ 	rootCmd.AddCommand(memoryCmd)
 
 	logsCmd := &cobra.Command{
 		Use:   "logs",

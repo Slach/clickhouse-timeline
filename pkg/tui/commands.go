@@ -18,7 +18,7 @@ package tui
  	CmdMetricLog      = "metric_log"
  	CmdAsyncMetricLog = "asynchronous_metric_log"
  	CmdLogs           = "logs"
-+	CmdMemory         = "memory"
+ 	CmdMemory         = "memory"
  	CmdAudit          = "audit"
  )
 
@@ -95,7 +95,7 @@ var availableCommands = []string{
  :logs            - Show any table logs (text_log, query_log, query_thread_log)
  :metric_log              - Show system.metric_log metrics
  :asynchronous_metric_log - Show system.asynchronous_metric_log metrics
-+:memory          - Show Memory usage (grouped by host)
+ :memory          - Show Memory usage (grouped by host)
  :audit          - Run system audit and show diagnostics and suggestions
  
  Navigation:

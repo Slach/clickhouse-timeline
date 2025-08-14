@@ -260,9 +260,9 @@ func (a *App) executeCommand(commandName string) string {
  					a.ShowMetricLog(a.fromTime, a.toTime, a.cluster)
  				case CmdAsyncMetricLog:
  					a.ShowAsynchronousMetricLog(a.fromTime, a.toTime, a.cluster)
-+				case CmdMemory:
-+					a.ShowMemory()
-+				case CmdLogs:
+ 				case CmdMemory:
+ 					a.ShowMemory()
+ 				case CmdLogs:
  					// Only apply CLI params when explicitly executing logs command
  					// Initialize log panel with CLI params if available
  					a.logPanel = &LogPanel{
@@ -445,16 +445,16 @@ func (a *App) setupKeybindings() {
 					a.showScaleSelector()
  				case CmdAudit:
  					a.executeCommand(CmdAudit)
-+				case CmdMemory:
-+					mainMsg := a.executeCommand(CmdMemory)
-+					if mainMsg != "" {
-+						a.SwitchToMainPage(mainMsg)
-+					}
-+				default:
-+					mainMsg := a.executeCommand(cmd)
-+					if mainMsg != "" {
-+						a.SwitchToMainPage(mainMsg)
-+					}
+ 				case CmdMemory:
+ 					mainMsg := a.executeCommand(CmdMemory)
+ 					if mainMsg != "" {
+ 						a.SwitchToMainPage(mainMsg)
+ 					}
+ 				default:
+ 					mainMsg := a.executeCommand(cmd)
+ 					if mainMsg != "" {
+ 						a.SwitchToMainPage(mainMsg)
+ 					}
  				}
 			}
 		})
