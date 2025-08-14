@@ -89,7 +89,7 @@ SETTINGS skip_unavailable_shards=1
 			tview.NewTableCell(host),
 			tview.NewTableCell(groupName),
 			tview.NewTableCell(name),
-			tview.NewTableCell(val),
+			tview.NewTableCell(formatReadableSize(val)),
 		}
 		// Add original cells so filtering works over host, group, name
 		ft.SetRow(rowIndex, cells)
@@ -103,4 +103,31 @@ SETTINGS skip_unavailable_shards=1
 	a.pages.RemovePage("memory")
 	a.pages.AddPage("memory", ft.Table, true, true)
 	a.tviewApp.SetFocus(ft.Table)
+}
+
+// formatReadableSize returns a human-readable representation of bytes similar to
+// ClickHouse's formatReadableSize. It uses 1024-based units and returns values
+// like "123 B", "1.23 KB", "4.00 MB", etc.
+func formatReadableSize(val int64) string {
+	if val < 0 {
+		return "-" + formatReadableSize(-val)
+	}
+
+	units := []string{"B", "KB", "MB", "GB", "TB", "PB", "EB"}
+	s := float64(val)
+	i := 0
+	for s >= 1024 && i < len(units)-1 {
+		s /= 1024
+		i++
+	}
+
+	// For bytes (unit B) print as integer, for larger units use 2 decimal places,
+	// but drop decimal when value is an integer to keep output tidy.
+	if i == 0 {
+		return fmt.Sprintf("%d %s", int64(s), units[i])
+	}
+	if s == float64(int64(s)) {
+		return fmt.Sprintf("%.0f %s", s, units[i])
+	}
+	return fmt.Sprintf("%.2f %s", s, units[i])
 }
