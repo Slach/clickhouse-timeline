@@ -133,7 +133,20 @@ func InitLogFile(cliInstance *types.CLI, version string) error {
 	// Remove unnecessary quoting and control formatting of parts.
 	out.FormatMessage = func(i interface{}) string { return fmt.Sprint(i) }
 	out.FormatFieldName = func(i interface{}) string { return fmt.Sprintf("%s=", i) }
-	out.FormatFieldValue = func(i interface{}) string { return fmt.Sprint(i) }
+	out.FormatFieldValue = func(i interface{}) string {
+		s := fmt.Sprint(i)
+		// If the formatted value is wrapped in quotes, try to unquote it so we don't
+		// emit an extra pair of quotes in logs. Fall back to trimming quotes if
+		// strconv.Unquote fails.
+		if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+			if us, err := strconv.Unquote(s); err == nil {
+				s = us
+			} else {
+				s = strings.Trim(s, "\"")
+			}
+		}
+		return s
+	}
 
 	// Make stack trace multiline & readable when present.
 	out.FormatPartValueByName = func(v interface{}, name string) string {
