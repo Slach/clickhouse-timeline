@@ -19,6 +19,7 @@ const mainPackage = "github.com/Slach/clickhouse-timeline/"
 
 func InitConsoleStdErrLog() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnixMs
+
 	// ErrorStackMarshaler tries to extract a short, useful stack trace for logging.
 	// First try to use pkg/errors StackTrace if present (for wrapped errors).
 	// If not present, fall back to capturing runtime.Callers at the point of logging
@@ -121,15 +122,8 @@ func InitLogFile(cliInstance *types.CLI, version string) error {
 		NoColor:    true,
 		TimeFormat: "2006-01-02 15:04:05.000",
 		FormatFieldValue: func(i interface{}) string {
-			// Convert the value to a string.
 			val := fmt.Sprint(i)
-
-			// If the value contains escaped newline sequences (e.g. "\\n"),
-			// convert them into real newlines so they render as multiline in the log.
 			val = strings.ReplaceAll(val, `\n`, "\n")
-
-			// If the value contains any real newline characters, ensure the console
-			// writer places the field on the following line for readability.
 			if strings.Contains(val, "\n") {
 				return "\n" + val
 			}
