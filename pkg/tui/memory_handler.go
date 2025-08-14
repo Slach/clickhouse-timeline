@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
-	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
 
@@ -59,7 +58,7 @@ UNION ALL
 select hostName() AS host, 'QueryCacheBytes' as group, '' as name, formatReadableSize(toInt64(sum(result_size))) FROM cluster('%s','system','query_cache')
 UNION ALL
 SELECT hostName() AS host, 'MemoryTracking' as group, 'total' as name, formatReadableSize(toInt64(value)) FROM cluster('%s','system','metrics') WHERE metric = 'MemoryTracking'
-`, cluster, cluster, cluster, cluster, cluster, cluster, cluster, cluster, cluster, cluster, cluster, cluster, cluster, cluster, cluster))
+`), cluster, cluster, cluster, cluster, cluster, cluster, cluster, cluster, cluster, cluster, cluster, cluster, cluster, cluster, cluster, cluster, cluster)
 
 	rows, err := a.clickHouse.Query(query)
 	if err != nil {
