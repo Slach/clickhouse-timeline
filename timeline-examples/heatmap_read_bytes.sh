@@ -3,7 +3,7 @@
 METRIC_QUERY=$(cat <<EOT
 WITH
    toStartOfInterval(event_time, INTERVAL 1 MINUTE) AS query_finish,
-   toStartOfInterval(query_start_time, INTERVAL 1 MINUTE) AS query_start,
+   toStartOfInterval(if(toUInt32(query_start_time)>0, query_start_time, event_time), INTERVAL 1 MINUTE) AS query_start,
    intDiv(toUInt32(query_finish - query_start + 1),60) AS intervals,
    arrayMap( i -> ( query_start + i ), range(0, toUInt32(query_finish - query_start + 1),60) ) as timestamps
 SELECT

@@ -17,12 +17,12 @@ import (
 // SQL template for heatmap queries
 const heatmapQueryTemplate = `
 WITH
-/* broken in 25.3
+/* alias broken in 25.3
    toStartOfInterval(toTimeZone(event_time, '%s'), INTERVAL %s) AS query_finish,
    toStartOfInterval(toTimeZone(query_start_time, '%s'), INTERVAL %s) AS query_start,
 */
-   intDiv(toUInt32(toStartOfInterval(toTimeZone(event_time, '%s'), INTERVAL %s) - toStartOfInterval(toTimeZone(query_start_time, '%s'), INTERVAL %s) + 1),%d) AS intervals,
-   arrayMap(i -> (toStartOfInterval(toTimeZone(query_start_time, '%s'), INTERVAL %s) + i), range(0, toUInt32(toStartOfInterval(toTimeZone(event_time, '%s'), INTERVAL %s) - toStartOfInterval(toTimeZone(query_start_time, '%s'), INTERVAL %s) + 1),%d)) as timestamps
+   intDiv(toUInt32(toStartOfInterval(toTimeZone(event_time, '%s'), INTERVAL %s) - toStartOfInterval(toTimeZone(if(toUInt32(query_start_time)>0, query_start_time, event_time), '%s'), INTERVAL %s) + 1),%d) AS intervals,
+   arrayMap(i -> (toStartOfInterval(toTimeZone(if(toUInt32(query_start_time)>0, query_start_time, event_time), '%s'), INTERVAL %s) + i), range(0, toUInt32(toStartOfInterval(toTimeZone(event_time, '%s'), INTERVAL %s) - toStartOfInterval(toTimeZone(if(toUInt32(query_start_time)>0, query_start_time, event_time), '%s'), INTERVAL %s) + 1),%d)) as timestamps
 SELECT
     arrayJoin(timestamps) as t,
     %s AS categoryType,
