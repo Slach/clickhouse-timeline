@@ -79,7 +79,7 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 		for _, it := range items {
 			prefix := " [ ] "
 			if selMap[it] {
-				prefix = " [x] "
+				prefix = " [+] "
 			}
 			list.AddItem(prefix+it, "", 0, func(i string) func() {
 				return func() {

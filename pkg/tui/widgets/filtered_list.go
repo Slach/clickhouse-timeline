@@ -14,7 +14,7 @@ type FilteredList struct {
 	Items      []string
 	FilterPage string
 	// RenderList, if set, is used to render items into the real list.
-	// This allows callers to preserve custom prefixes (e.g. "[ ]"/"[x]") and selection behavior.
+	// This allows callers to preserve custom prefixes (e.g. "[ ]"/"[+]") and selection behavior.
 	RenderList func(list *tview.List, items []string)
 }
 
