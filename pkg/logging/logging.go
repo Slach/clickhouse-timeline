@@ -1,16 +1,13 @@
 package logging
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Slach/clickhouse-timeline/pkg/types"
 	"github.com/pkg/errors"
@@ -21,102 +18,8 @@ import (
 
 const mainPackage = "github.com/Slach/clickhouse-timeline/"
 
-// prettyWriter implements io.Writer and pretty-prints zerolog JSON events to a text writer.
-type prettyWriter struct {
-	Out io.Writer
-}
-
-func (w *prettyWriter) Write(p []byte) (int, error) {
-	// Trim surrounding whitespace/newline
-	b := bytes.TrimSpace(p)
-
-	// Try to unmarshal JSON into raw messages for stable handling of fields.
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(b, &m); err != nil {
-		// Fallback: write raw bytes if we can't parse JSON.
-		return w.Out.Write(p)
-	}
-
-	// Extract common fields.
-	var ts, level, message, caller string
-	_ = json.Unmarshal(m["time"], &ts)
-	_ = json.Unmarshal(m["level"], &level)
-	_ = json.Unmarshal(m["message"], &message)
-	_ = json.Unmarshal(m["caller"], &caller)
-
-	// Prepare deterministic key order for remaining fields.
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		if k == "time" || k == "level" || k == "message" || k == "caller" {
-			continue
-		}
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	var out strings.Builder
-	// Header: timestamp LEVEL [caller > ]message
-	if ts != "" {
-		out.WriteString(ts)
-		out.WriteString(" ")
-	}
-	if level != "" {
-		out.WriteString(strings.ToUpper(level))
-		out.WriteString(" ")
-	}
-	if caller != "" {
-		out.WriteString(caller)
-		out.WriteString(" > ")
-	}
-	out.WriteString(message)
-
-	// Append other fields. Strings that contain newlines are printed as
-	// a multiline block (key= newline + raw value).
-	for _, k := range keys {
-		raw := m[k]
-		// Try as string first.
-		var s string
-		if err := json.Unmarshal(raw, &s); err == nil {
-			// json.Unmarshal already unescaped \n sequences into real newlines.
-			// Trim a trailing newline to avoid double blank lines.
-			s = strings.TrimSuffix(s, "\n")
-			if strings.Contains(s, "\n") {
-				out.WriteString(" ")
-				out.WriteString(k)
-				out.WriteString("=")
-				out.WriteString("\n")
-				out.WriteString(s)
-				out.WriteString("\n")
-				continue
-			}
-			out.WriteString(" ")
-			out.WriteString(k)
-			out.WriteString("=")
-			out.WriteString(s)
-			continue
-		}
-
-		// Non-string fields: unmarshal into interface{} and format.
-		var iv interface{}
-		if err := json.Unmarshal(raw, &iv); err == nil {
-			out.WriteString(" ")
-			out.WriteString(k)
-			out.WriteString("=")
-			out.WriteString(fmt.Sprint(iv))
-			continue
-		}
-
-		// As a last resort, write the raw bytes.
-		out.WriteString(" ")
-		out.WriteString(k)
-		out.WriteString("=")
-		out.Write(raw)
-	}
-
-	out.WriteString("\n")
-	sout := out.String()
-	return w.Out.Write([]byte(sout))
-}
+/* Formatting is now handled by zerolog.ConsoleWriter in InitLogFile so the custom
+   prettyWriter implementation has been removed. */
 
 func InitConsoleStdErrLog() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnixMs
@@ -216,14 +119,41 @@ func InitLogFile(cliInstance *types.CLI, version string) error {
 		return errors.Wrap(err, "failed to open log file")
 	}
 
-	// Now set up the proper file logging.
-	// Use our prettyWriter (defined at package level) that converts zerolog JSON
-	// events into readable text blocks and preserves multiline fields.
-	// Instantiate it with the opened log file.
-	pw := &prettyWriter{Out: logFile}
+	// Now set up the proper file logging using zerolog.ConsoleWriter.
+	// ConsoleWriter will print a pretty, non-quoted representation while preserving time.
+	out := zerolog.ConsoleWriter{
+		Out:        logFile,
+		NoColor:    true,
+		TimeFormat: time.RFC3339Nano,
+		// Put parts in the order we prefer and avoid duplicating error fields in the trailing section.
+		PartsOrder:    []string{zerolog.TimestampFieldName, zerolog.LevelFieldName, zerolog.CallerFieldName, zerolog.MessageFieldName, zerolog.ErrorFieldName, zerolog.ErrorStackFieldName},
+		FieldsExclude: []string{zerolog.ErrorFieldName, zerolog.ErrorStackFieldName},
+	}
 
-	// Create base logger using our prettyWriter wrapped with zerolog.SyncWriter.
-	baseLogger := zerolog.New(zerolog.SyncWriter(pw)).
+	// Remove unnecessary quoting and control formatting of parts.
+	out.FormatMessage = func(i interface{}) string { return fmt.Sprint(i) }
+	out.FormatFieldName = func(i interface{}) string { return fmt.Sprintf("%s:", i) }
+	out.FormatFieldValue = func(i interface{}) string { return fmt.Sprint(i) }
+
+	// Make stack trace multiline & readable when present.
+	out.FormatPartValueByName = func(v interface{}, name string) string {
+		if name == zerolog.ErrorStackFieldName {
+			if frames, ok := v.([]interface{}); ok {
+				var b strings.Builder
+				for _, fr := range frames {
+					if m, ok := fr.(map[string]interface{}); ok {
+						// keys: "func", "source", "line"
+						fmt.Fprintf(&b, "\n    at %s (%v:%v)", m["func"], m["source"], m["line"])
+					}
+				}
+				return b.String()
+			}
+		}
+		return fmt.Sprint(v)
+	}
+
+	// Build logger that writes pretty output to the file (with timestamp and caller).
+	baseLogger := zerolog.New(out).
 		With().
 		Timestamp().
 		Caller().
@@ -232,7 +162,7 @@ func InitLogFile(cliInstance *types.CLI, version string) error {
 
 	baseLogger.Hook(fatalStackHook{})
 
-	// Wrap the logger to add stack traces for Fatal level
+	// Use this logger for package-global logging.
 	log.Logger = baseLogger
 
 	return nil
