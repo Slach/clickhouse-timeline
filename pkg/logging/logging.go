@@ -116,10 +116,6 @@ func InitLogFile(cliInstance *types.CLI, version string) error {
 
 	// Now set up the proper file logging
 	// We want to preserve multiline values (notably the "stack" field).
-	// ConsoleWriter allows customizing how field names/values are formatted.
-	// For single-line values print as =value so fields appear as name=value.
-	// For multiline values, prepend a newline so they appear on subsequent lines
-	// and their internal newlines are preserved.
 	consoleWriter := zerolog.ConsoleWriter{
 		Out:        logFile,
 		NoColor:    true,
@@ -127,9 +123,9 @@ func InitLogFile(cliInstance *types.CLI, version string) error {
 		FormatFieldValue: func(i interface{}) string {
 			val := fmt.Sprint(i)
 			if strings.Contains(val, "\n") {
-				return "\n" + val
+				return fmt.Sprintf("\n" + val)
 			}
-			return "=" + val
+			return val
 		},
 	}
 
