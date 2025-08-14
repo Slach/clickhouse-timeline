@@ -62,47 +62,59 @@ SELECT hostName() AS host, 17 AS priority, 'MemoryTracking' as group, 'total' as
 SETTINGS skip_unavailable_shards=1
 `), cluster)
 
-	rows, err := a.clickHouse.Query(query)
-	if err != nil {
-		a.SwitchToMainPage(fmt.Sprintf("Error running memory query: %v", err))
-		return
-	}
-	defer rows.Close()
+	// Inform the user that we're loading data
+	a.mainView.SetText("Loading memory data, please wait...")
 
-	// Create filtered table and populate
+	// Prepare the filtered table ahead of the goroutine so UI can be updated atomically later
 	ft := widgets.NewFilteredTable()
 	headers := []string{"Host", "Group", "Name", "Value"}
 	ft.SetupHeaders(headers)
 	ft.Table.SetBorder(true)
 	ft.Table.SetTitle("Memory usage")
 
-	rowIndex := 1
-	for rows.Next() {
-		var host, groupName, name string
-		var priority, val int64
-		if err := rows.Scan(&host, &priority, &groupName, &name, &val); err != nil {
-			// Skip malformed rows but continue
-			continue
+	// Perform the long-running query and row scanning in a goroutine,
+	// then queue a single UI update to add the page and focus the table.
+	go func() {
+		rows, err := a.clickHouse.Query(query)
+		if err != nil {
+			a.tviewApp.QueueUpdateDraw(func() {
+				a.SwitchToMainPage(fmt.Sprintf("Error running memory query: %v", err))
+			})
+			return
+		}
+		defer rows.Close()
+
+		rowIndex := 1
+		for rows.Next() {
+			var host, groupName, name string
+			var priority, val int64
+			if err := rows.Scan(&host, &priority, &groupName, &name, &val); err != nil {
+				// Skip malformed rows but continue
+				continue
+			}
+
+			cells := []*tview.TableCell{
+				tview.NewTableCell(host),
+				tview.NewTableCell(groupName),
+				tview.NewTableCell(name),
+				tview.NewTableCell(formatReadableSize(val)),
+			}
+			// Add original cells so filtering works over host, group, name
+			ft.SetRow(rowIndex, cells)
+			rowIndex++
 		}
 
-		cells := []*tview.TableCell{
-			tview.NewTableCell(host),
-			tview.NewTableCell(groupName),
-			tview.NewTableCell(name),
-			tview.NewTableCell(formatReadableSize(val)),
-		}
-		// Add original cells so filtering works over host, group, name
-		ft.SetRow(rowIndex, cells)
-		rowIndex++
-	}
-
-	// Make sure table is selectable and keyboard capture allows '/'
-	ft.Table.SetSelectable(true, true)
-	ft.Table.SetInputCapture(ft.GetInputCapture(a.tviewApp, a.pages))
-	// Remove any existing memory page and add new
-	a.pages.RemovePage("memory")
-	a.pages.AddPage("memory", ft.Table, true, true)
-	a.tviewApp.SetFocus(ft.Table)
+		// Queue a single UI update to attach the populated table and set focus/input handlers.
+		a.tviewApp.QueueUpdateDraw(func() {
+			// Make sure table is selectable and keyboard capture allows '/'
+			ft.Table.SetSelectable(true, true)
+			ft.Table.SetInputCapture(ft.GetInputCapture(a.tviewApp, a.pages))
+			// Replace any existing memory page with the new content and focus it
+			a.pages.RemovePage("memory")
+			a.pages.AddPage("memory", ft.Table, true, true)
+			a.tviewApp.SetFocus(ft.Table)
+		})
+	}()
 }
 
 // formatReadableSize returns a human-readable representation of bytes similar to
