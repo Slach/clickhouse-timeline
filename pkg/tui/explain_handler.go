@@ -314,16 +314,14 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 				output.SetText("No queries found with given filters")
 				return
 			}
-
-			// Build UI: filter input on top + filtered list
-			filterInput := tview.NewInputField().SetLabel("/").SetFieldWidth(40)
-
+	
+			// Build UI: filtered list backed by widgets.FilteredList
 			queriesTList := tview.NewList().ShowSecondaryText(false)
 			queriesTList.SetMainTextColor(tcell.ColorWhite)
 			queriesFL := widgets.NewFilteredList(queriesTList, "Queries (Enter to inspect)", []string{}, "explain_queries_filter")
 			queriesList := queriesFL.List
 			queriesList.SetBorder(true).SetTitle("Queries (Enter to inspect)")
-
+	
 			// Prepare mapping from display string to result row for selection callbacks
 			displayMap := make(map[string]qrow)
 			var items []string
@@ -333,7 +331,7 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 				displayMap[display] = r
 			}
 			queriesFL.Items = items
-
+	
 			// RenderList preserves selection behavior and attaches callbacks
 			queriesFL.RenderList = func(list *tview.List, items []string) {
 				list.Clear()
@@ -350,29 +348,30 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 					}
 				}
 			}
-
+	
 			// Initial render
 			queriesFL.ResetList()
-
+	
+			// Use the standard FilteredList input (SetupFilterInput) so we follow the shared behavior.
+			filterInput := queriesFL.SetupFilterInput(a.tviewApp, a.pages)
+			filterInput.SetFieldWidth(40)
+			// Wire real-time filtering in the visible input
 			filterInput.SetChangedFunc(func(text string) {
 				queriesFL.FilterList(text)
 			})
-			// When Enter is pressed in the filter input, move focus to the list so user can
-			// navigate with arrows and press Enter to inspect an item. Escape returns to main.
+			// Make Enter/Tab/Escape behave intuitively for this flow.
 			filterInput.SetDoneFunc(func(key tcell.Key) {
 				if key == tcell.KeyEscape {
 					a.pages.SwitchToPage("main")
 					return
 				}
 				if key == tcell.KeyEnter {
-					// Ensure the list has a current item and give it focus.
 					if queriesList.GetItemCount() > 0 {
 						queriesList.SetCurrentItem(0)
 					}
 					a.tviewApp.SetFocus(queriesList)
 				}
 			})
-			// Also allow Tab from the filter input to move focus to the list.
 			filterInput.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 				if event == nil {
 					return event
@@ -383,12 +382,12 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 				}
 				return event
 			})
-
+	
 			// Layout
 			flex := tview.NewFlex().SetDirection(tview.FlexRow).
 				AddItem(filterInput, 1, 0, true).
 				AddItem(queriesList, 0, 1, true)
-
+	
 			a.pages.AddPage("explain_queries", flex, true, true)
 			a.pages.SwitchToPage("explain_queries")
 		})
