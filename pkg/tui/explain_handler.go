@@ -13,7 +13,7 @@ import (
 
 // ShowExplain is the entry point for the explain flow.
 // If categoryType == CategoryQueryHash (called from heatmap) we'll pre-fill the normalized hash.
-// Otherwise the selection form will be shown.
+// Otherwise, the selection form will be shown.
 func (a *App) ShowExplain(categoryType CategoryType, categoryValue string, fromTime, toTime time.Time, cluster string) {
 	// If not coming from heatmap (no prefilled normalized_query_hash), show selection form
 	if categoryType != CategoryQueryHash {
@@ -154,7 +154,6 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 			a.mainView.SetText("Options loaded. Toggle selections and press Search.")
 		})
 	}
-	loadBtn := tview.NewButton("Load options").SetSelectedFunc(loadFunc)
 
 	var searchFunc func()
 	searchFunc = func() {
@@ -284,13 +283,11 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 			a.pages.SwitchToPage("explain_queries")
 		})
 	}
-	searchBtn := tview.NewButton("Search").SetSelectedFunc(searchFunc)
 
 	var cancelFunc func()
 	cancelFunc = func() {
 		a.pages.SwitchToPage("main")
 	}
-	cancelBtn := tview.NewButton("Cancel").SetSelectedFunc(cancelFunc)
 
 	form.AddButton("Load options", loadFunc)
 	form.AddButton("Search", searchFunc)
@@ -310,6 +307,7 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 
 	a.pages.AddPage("explain", mainFlex, true, true)
 	a.pages.SwitchToPage("explain")
+	a.tviewApp.SetFocus(form)
 }
 
 // truncate utility
