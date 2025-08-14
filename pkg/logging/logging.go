@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/Slach/clickhouse-timeline/pkg/types"
 	"github.com/pkg/errors"
@@ -113,10 +114,39 @@ func InitLogFile(cliInstance *types.CLI, version string) error {
 	}
 
 	// Now set up the proper file logging
+	// We want to preserve multiline values (notably the "stack" field).
+	// ConsoleWriter allows customizing how field names/values are formatted.
+	// Use a small mutex-protected lastFieldName to correlate the most-recent
+	// FormatFieldName call with the following FormatFieldValue call to detect
+	// the "stack" field and prepend a newline so the stack is written
+	// on subsequent lines (and existing newlines are preserved).
+	var fieldMu sync.Mutex
+	var lastFieldName string
 	consoleWriter := zerolog.ConsoleWriter{
 		Out:        logFile,
 		NoColor:    true,
 		TimeFormat: "2006-01-02 15:04:05.000",
+		FormatFieldName: func(i interface{}) string {
+			name := fmt.Sprint(i)
+			fieldMu.Lock()
+			lastFieldName = name
+			fieldMu.Unlock()
+			return name
+		},
+		FormatFieldValue: func(i interface{}) string {
+			fieldMu.Lock()
+			name := lastFieldName
+			fieldMu.Unlock()
+
+			val := fmt.Sprint(i)
+			// If this is the stack field or the value already contains newlines,
+			// prepend a newline so it starts on the next line and existing newlines
+			// remain intact.
+			if name == "stack" || strings.Contains(val, "\n") {
+				return "\n" + val
+			}
+			return val
+		},
 	}
 
 	// Create base logger with normal caller info
