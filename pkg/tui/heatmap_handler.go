@@ -554,9 +554,18 @@ func (a *App) ShowHeatmap() {
 						categoryValue = ""
 					}
 
+					// Build action menu dynamically: include Explain option only for normalized_query_hash category
+					menuText := "Select action:\n[f] Flamegraph\n[p] Profile Events"
+					buttons := []string{"Flamegraph (f)", "Profile Events (p)"}
+					if categoryType == CategoryQueryHash {
+						menuText += "\n[q] Explain query"
+						buttons = append(buttons, "Explain (q)")
+					}
+					buttons = append(buttons, "Cancel")
+
 					actionMenu := tview.NewModal().
-						SetText("Select action:\n[f] Flamegraph\n[p] Profile Events").
-						AddButtons([]string{"Flamegraph (f)", "Profile Events (p)", "Cancel"}).
+						SetText(menuText).
+						AddButtons(buttons).
 						SetDoneFunc(func(buttonIndex int, buttonLabel string) {
 							switch buttonLabel {
 							case "Flamegraph (f)":
@@ -565,6 +574,11 @@ func (a *App) ShowHeatmap() {
 							case "Profile Events (p)":
 								a.pages.SwitchToPage("main")
 								a.ShowProfileEvents(categoryType, categoryValue, fromTime, toTime, a.cluster)
+							case "Explain (q)":
+								// Open explain flow. Keep behaviour consistent with other actions.
+								a.pages.SwitchToPage("main")
+								// ShowExplain will add its own page(s) and switch as needed.
+								a.ShowExplain(categoryType, categoryValue, fromTime, toTime, a.cluster)
 							case "Cancel":
 								a.pages.SwitchToPage("heatmap")
 							}
@@ -579,6 +593,13 @@ func (a *App) ShowHeatmap() {
 							a.pages.SwitchToPage("main")
 							a.ShowProfileEvents(categoryType, categoryValue, fromTime, toTime, a.cluster)
 							return nil
+						case 'q', 'Q':
+							// Only respond if option is relevant (category is normalized_query_hash)
+							if categoryType == CategoryQueryHash {
+								a.pages.SwitchToPage("main")
+								a.ShowExplain(categoryType, categoryValue, fromTime, toTime, a.cluster)
+								return nil
+							}
 						case 'c', 'C':
 							a.pages.SwitchToPage("heatmap")
 							return nil
