@@ -41,10 +41,15 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 	selectedKinds := map[string]bool{}
 
 	form := tview.NewForm()
-	form.SetBorder(true).SetTitle("Explain Query - Selection").SetTitleAlign(tview.AlignLeft)
+	form.SetBorder(false)
 
 	hashField := tview.NewInputField().SetLabel("normalized_query_hash: ").SetText(prefillHash)
 	form.AddFormItem(hashField)
+
+	selectionBox := tview.NewFlex().SetDirection(tview.FlexRow).
+		SetBorder(true).
+		SetTitle("Explain Query - Selection").
+		SetTitleAlign(tview.AlignLeft)
 
 	// Separate output area for explain flow (do not use a.mainView)
 	output := tview.NewTextView()
@@ -302,12 +307,14 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 	form.AddButton("Cancel", cancelFunc)
 
 	// Layout: left = form + lists, right = mainView for messages
-	leftFlex := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(form, 7, 0, true).
-		AddItem(tview.NewTextView().SetText("Tables:"), 1, 0, false).
-		AddItem(tablesList, 0, 1, false).
-		AddItem(tview.NewTextView().SetText("Query kinds:"), 1, 0, false).
-		AddItem(kindList, 0, 1, false)
+		// assemble selection content inside bordered selectionBox
+		selectionBox.AddItem(form, 7, 0, true)
+		selectionBox.AddItem(tview.NewTextView().SetText("Tables:"), 1, 0, false)
+		selectionBox.AddItem(tablesList, 0, 1, false)
+		selectionBox.AddItem(tview.NewTextView().SetText("Query kinds:"), 1, 0, false)
+		selectionBox.AddItem(kindList, 0, 1, false)
+
+		leftFlex := selectionBox
 
 	mainFlex := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(leftFlex, 0, 2, true).
