@@ -73,7 +73,7 @@ func InitConsoleStdErrLog() {
 		return s
 	}
 	zerolog.CallerMarshalFunc = func(pc uintptr, file string, line int) string {
-		return strings.TrimPrefix(file, "github.com/Slach/clickhouse-timeline/") + ":" + strconv.Itoa(line)
+		return strings.TrimPrefix(file, mainPackage) + ":" + strconv.Itoa(line)
 	}
 
 	// First setup basic console logging in case we fail
@@ -132,7 +132,7 @@ func InitLogFile(cliInstance *types.CLI, version string) error {
 
 	// Remove unnecessary quoting and control formatting of parts.
 	out.FormatMessage = func(i interface{}) string { return fmt.Sprint(i) }
-	out.FormatFieldName = func(i interface{}) string { return fmt.Sprintf("%s:", i) }
+	out.FormatFieldName = func(i interface{}) string { return fmt.Sprintf("%s=", i) }
 	out.FormatFieldValue = func(i interface{}) string { return fmt.Sprint(i) }
 
 	// Make stack trace multiline & readable when present.
