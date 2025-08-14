@@ -308,38 +308,54 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 			results = append(results, qrow{h, q})
 		}
 
-		// Show queries list with filter input
+		// Show queries list with filter input using FilteredList widget
 		a.tviewApp.QueueUpdateDraw(func() {
 			if len(results) == 0 {
 				output.SetText("No queries found with given filters")
 				return
 			}
 
-			// Build UI: filter input on top + list
+			// Build UI: filter input on top + filtered list
 			filterInput := tview.NewInputField().SetLabel("/").SetFieldWidth(40)
-			queriesList := tview.NewList().ShowSecondaryText(false)
+
+			queriesTList := tview.NewList().ShowSecondaryText(false)
+			queriesTList.SetMainTextColor(tcell.ColorWhite)
+			queriesFL := widgets.NewFilteredList(queriesTList, "Queries (Enter to inspect)", []string{}, "explain_queries_filter")
+			queriesList := queriesFL.List
 			queriesList.SetBorder(true).SetTitle("Queries (Enter to inspect)")
 
-			// Populate
-			populate := func(filter string) {
-				queriesList.Clear()
-				lower := strings.ToLower(filter)
-				for _, r := range results {
-					if lower == "" || strings.Contains(strings.ToLower(r.q), lower) || strings.Contains(strings.ToLower(r.hash), lower) {
-						display := fmt.Sprintf("%s : %s", r.hash, truncate(r.q, 120))
-						// capture r for closure
-						r := r
-						queriesList.AddItem(display, "", 0, func() {
-							// on enter - show percentile legend and allow drilling
-							a.showExplainPercentiles(r.hash, r.q, fromTime, toTime, cluster, output)
+			// Prepare mapping from display string to result row for selection callbacks
+			displayMap := make(map[string]qrow)
+			var items []string
+			for _, r := range results {
+				display := fmt.Sprintf("%s : %s", r.hash, truncate(r.q, 120))
+				items = append(items, display)
+				displayMap[display] = r
+			}
+			queriesFL.Items = items
+
+			// RenderList preserves selection behavior and attaches callbacks
+			queriesFL.RenderList = func(list *tview.List, items []string) {
+				list.Clear()
+				for _, display := range items {
+					if r, ok := displayMap[display]; ok {
+						d := display
+						rr := r
+						list.AddItem(d, "", 0, func() {
+							a.showExplainPercentiles(rr.hash, rr.q, fromTime, toTime, cluster, output)
 						})
+					} else {
+						dd := display
+						list.AddItem(dd, "", 0, nil)
 					}
 				}
 			}
-			populate("")
+
+			// Initial render
+			queriesFL.ResetList()
 
 			filterInput.SetChangedFunc(func(text string) {
-				populate(text)
+				queriesFL.FilterList(text)
 			})
 			filterInput.SetDoneFunc(func(key tcell.Key) {
 				if key == tcell.KeyEscape {
