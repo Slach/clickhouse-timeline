@@ -347,6 +347,10 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 
 	// - From tablesList Tab -> kindList, Shift-Tab -> hashField
 	tablesList.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Rune() == '/' {
+			tablesFL.ShowFilterInput(a.tviewApp, a.pages)
+			return nil
+		}
 		if event.Key() == tcell.KeyTab {
 			a.tviewApp.SetFocus(kindList)
 			return nil
@@ -359,6 +363,10 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 
 	// - From kindList Tab -> searchBtn, Shift-Tab -> tablesList
 	kindList.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Rune() == '/' {
+			kindFL.ShowFilterInput(a.tviewApp, a.pages)
+			return nil
+		}
 		if event.Key() == tcell.KeyTab {
 			a.tviewApp.SetFocus(searchBtn)
 			return nil
