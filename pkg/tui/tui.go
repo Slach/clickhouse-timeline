@@ -233,7 +233,7 @@ func (a *App) SetConnectByName(contextName string) bool {
 // executeCommand return message if something wrong, return empty string if all OK
 func (a *App) executeCommand(commandName string) string {
 	// Check prerequisites for commands that need them
-	if slices.Contains([]string{CmdHeatmap, CmdFlamegraph, CmdProfileEvents, CmdMetricLog, CmdAsyncMetricLog, CmdLogs, CmdMemory}, commandName) {
+	if slices.Contains([]string{CmdHeatmap, CmdFlamegraph, CmdProfileEvents, CmdMetricLog, CmdAsyncMetricLog, CmdExplain, CmdLogs, CmdMemory}, commandName) {
 		if a.clickHouse == nil {
 			return "Error: Please connect to a ClickHouse instance first using :connect command\n"
 		}
@@ -247,6 +247,8 @@ func (a *App) executeCommand(commandName string) string {
 		a.ShowHeatmap()
 	case CmdFlamegraph:
 		a.ShowFlamegraphForm()
+	case CmdExplain:
+		a.ShowExplain(a.categoryType, a.categoryValue, a.fromTime, a.toTime, a.cluster)
 	case CmdProfileEvents:
 		a.ShowProfileEvents(
 			a.categoryType,
