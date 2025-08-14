@@ -277,7 +277,7 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 		whereClause := strings.Join(whereParts, " AND ")
 
 		query := fmt.Sprintf(
-			"SELECT DISTINCT normalized_query_hash, normalizedQuery(query) AS q FROM clusterAllReplicas('%s', merge(system,'^query_log')) WHERE %s ORDER BY normalized_query_hash",
+			"SELECT DISTINCT normalized_query_hash, normalizeQuery(query) AS q FROM clusterAllReplicas('%s', merge(system,'^query_log')) WHERE %s ORDER BY normalized_query_hash",
 			cluster, whereClause,
 		)
 
@@ -464,15 +464,15 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 	})
 
 	// Layout: left = form + lists + buttons, right = output area
-		// assemble selection content inside bordered selectionBox
-		selectionBox.AddItem(form, 7, 0, true)
-		selectionBox.AddItem(tview.NewTextView().SetText("Tables:"), 1, 0, false)
-		selectionBox.AddItem(tablesList, 0, 1, false)
-		selectionBox.AddItem(tview.NewTextView().SetText("Query kinds:"), 1, 0, false)
-		selectionBox.AddItem(kindList, 0, 1, false)
-		selectionBox.AddItem(buttonsFlex, 1, 0, false)
+	// assemble selection content inside bordered selectionBox
+	selectionBox.AddItem(form, 7, 0, true)
+	selectionBox.AddItem(tview.NewTextView().SetText("Tables:"), 1, 0, false)
+	selectionBox.AddItem(tablesList, 0, 1, false)
+	selectionBox.AddItem(tview.NewTextView().SetText("Query kinds:"), 1, 0, false)
+	selectionBox.AddItem(kindList, 0, 1, false)
+	selectionBox.AddItem(buttonsFlex, 1, 0, false)
 
-		leftFlex := selectionBox
+	leftFlex := selectionBox
 
 	mainFlex := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(leftFlex, 0, 2, true).
