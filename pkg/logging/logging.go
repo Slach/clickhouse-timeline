@@ -16,6 +16,8 @@ import (
 	_ "github.com/rs/zerolog/pkgerrors"
 )
 
+const mainPackage = "github.com/Slach/clickhouse-timeline/"
+
 func InitConsoleStdErrLog() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnixMs
 	// ErrorStackMarshaler tries to extract a short, useful stack trace for logging.
@@ -32,8 +34,8 @@ func InitConsoleStdErrLog() {
 				parts := strings.Split(frame, "\n\t")
 				if len(parts) >= 2 {
 					// Extract file:line and function name
-					fileLine := strings.TrimPrefix(parts[0], "github.com/Slach/clickhouse-timeline/")
-					funcName := strings.TrimPrefix(parts[1], "github.com/Slach/clickhouse-timeline/")
+					fileLine := strings.TrimPrefix(parts[0], mainPackage)
+					funcName := strings.TrimPrefix(parts[1], mainPackage)
 					return fmt.Sprintf("%s > %s", fileLine, funcName)
 				}
 			}
@@ -56,9 +58,9 @@ func InitConsoleStdErrLog() {
 				continue
 			}
 			file, line := fn.FileLine(pc)
-			file = strings.TrimPrefix(file, "github.com/Slach/clickhouse-timeline/")
+			file = strings.TrimPrefix(file, mainPackage)
 			// Use a compact representation: file:line > function;
-			fmt.Fprintf(&b, "%s:%d > %s; ", file, line, fn.Name())
+			_, _ = fmt.Fprintf(&b, "%s:%d > %s\n", file, line, strings.TrimPrefix(fn.Name(), mainPackage))
 		}
 		s := b.String()
 		if s == "" {
