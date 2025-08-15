@@ -684,37 +684,75 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold int64, fromTime
 
 			cols, _ := rows3.Columns()
 
-			for rows3.Next() {
-				// Dynamic destinations for scanning unknown column types
-				dest := make([]interface{}, len(cols))
-				for i := range dest {
-					var v interface{}
-					dest[i] = &v
+			// Prefer explicit scan when we have the expected five columns:
+			// database (string), table (string), parts (UInt64), rows (UInt64), marks (UInt64)
+			if len(cols) >= 5 {
+				type rec struct {
+					db    string
+					table string
+					parts uint64
+					rows  uint64
+					marks uint64
+				}
+				var rowsData []rec
+
+				for rows3.Next() {
+					var db, table string
+					var parts, rcount, marks uint64
+					if err := rows3.Scan(&db, &table, &parts, &rcount, &marks); err != nil {
+						log.Error().Err(err).Msg("scan explain estimate row")
+						continue
+					}
+					rowsData = append(rowsData, rec{db: db, table: table, parts: parts, rows: rcount, marks: marks})
 				}
 
-				if err := rows3.Scan(dest...); err != nil {
-					// skip rows we can't scan but continue processing others
-					continue
+				// Compute column widths for a compact aligned table
+				col0 := "database.table"
+				w0 := len(col0)
+				w1 := len("parts")
+				w2 := len("rows")
+				w3 := len("marks")
+
+				for _, r := range rowsData {
+					n := fmt.Sprintf("%s.%s", r.db, r.table)
+					if len(n) > w0 {
+						w0 = len(n)
+					}
+					if l := len(fmt.Sprintf("%d", r.parts)); l > w1 {
+						w1 = l
+					}
+					if l := len(fmt.Sprintf("%d", r.rows)); l > w2 {
+						w2 = l
+					}
+					if l := len(fmt.Sprintf("%d", r.marks)); l > w3 {
+						w3 = l
+					}
 				}
 
-				// If we have at least database and table columns, render as:
-				// "database.table colN=val colM=val"
-				if len(cols) >= 2 {
-					db := fmt.Sprintf("%v", *(dest[0].(*interface{})))
-					table := fmt.Sprintf("%v", *(dest[1].(*interface{})))
+				// Header and separator
+				fmt.Fprintf(&buf, "%-*s  %*s  %*s  %*s\n", w0, col0, w1, "parts", w2, "rows", w3, "marks")
+				fmt.Fprintf(&buf, "%s\n", strings.Repeat("-", w0+2+w1+2+w2+2+w3))
 
-					parts := make([]string, 0, len(cols)-2)
-					for i := 2; i < len(cols); i++ {
-						parts = append(parts, fmt.Sprintf("%s=%v", cols[i], *(dest[i].(*interface{}))))
+				// Rows
+				for _, r := range rowsData {
+					fmt.Fprintf(&buf, "%-*s  %*d  %*d  %*d\n",
+						w0, fmt.Sprintf("%s.%s", r.db, r.table),
+						w1, r.parts,
+						w2, r.rows,
+						w3, r.marks,
+					)
+				}
+			} else {
+				// Fallback: render generically for unknown schemas
+				for rows3.Next() {
+					dest := make([]interface{}, len(cols))
+					for i := range dest {
+						var v interface{}
+						dest[i] = &v
 					}
-
-					if len(parts) > 0 {
-						buf.WriteString(fmt.Sprintf("%s.%s %s\n", db, table, strings.Join(parts, " ")))
-					} else {
-						buf.WriteString(fmt.Sprintf("%s.%s\n", db, table))
+					if err := rows3.Scan(dest...); err != nil {
+						continue
 					}
-				} else {
-					// Fallback: generic "col: val" formatting
 					for i := range cols {
 						if i > 0 {
 							buf.WriteString("\t")
