@@ -310,7 +310,7 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 			results = append(results, qrow{h, q})
 		}
 
-		// Show queries list with filter input using FilteredList widget
+		// Show queries list (filter input is a transient overlay shown on '/')
 		a.tviewApp.QueueUpdateDraw(func() {
 			if len(results) == 0 {
 				output.SetText("No queries found with given filters")
@@ -354,44 +354,28 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 			// Initial render
 			queriesFL.ResetList()
 
-			// Use the standard FilteredList input (SetupFilterInput) so we follow the shared behavior.
-			filterInput := queriesFL.SetupFilterInput(a.tviewApp, a.pages)
-			filterInput.SetFieldWidth(40)
-			// Wire real-time filtering in the visible input
-			filterInput.SetChangedFunc(func(text string) {
-				queriesFL.FilterList(text)
-			})
-			// Make Enter/Tab/Escape behave intuitively for this flow.
-			filterInput.SetDoneFunc(func(key tcell.Key) {
-				if key == tcell.KeyEscape {
-					a.pages.SwitchToPage("explain")
-					return
-				}
-				if key == tcell.KeyEnter {
-					if queriesList.GetItemCount() > 0 {
-						queriesList.SetCurrentItem(0)
-					}
-					a.tviewApp.SetFocus(queriesList)
-				}
-			})
-			filterInput.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+			// Show filter input overlay only when user presses '/'
+			queriesList.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 				if event == nil {
 					return event
 				}
-				if event.Key() == tcell.KeyTab {
-					a.tviewApp.SetFocus(queriesList)
+				// Open transient filter overlay when user types '/'
+				if event.Rune() == '/' {
+					queriesFL.ShowFilterInput(a.tviewApp, a.pages)
+					return nil
+				}
+				// Escape returns to explain selection page
+				if event.Key() == tcell.KeyEscape {
+					a.pages.SwitchToPage("explain")
 					return nil
 				}
 				return event
 			})
 
-			// Layout
-			flex := tview.NewFlex().SetDirection(tview.FlexRow).
-				AddItem(filterInput, 1, 0, true).
-				AddItem(queriesList, 0, 1, true)
-
-			a.pages.AddPage("explain_queries", flex, true, true)
+			// Layout: only the list is visible; filter input appears as an overlay when requested.
+			a.pages.AddPage("explain_queries", queriesList, true, true)
 			a.pages.SwitchToPage("explain_queries")
+			a.tviewApp.SetFocus(queriesList)
 		})
 	}
 
