@@ -316,14 +316,14 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 				output.SetText("No queries found with given filters")
 				return
 			}
-	
+
 			// Build UI: filtered list backed by widgets.FilteredList
 			queriesTList := tview.NewList().ShowSecondaryText(false)
 			queriesTList.SetMainTextColor(tcell.ColorWhite)
 			queriesFL := widgets.NewFilteredList(queriesTList, "Queries (Enter to inspect)", []string{}, "explain_queries_filter")
 			queriesList := queriesFL.List
 			queriesList.SetBorder(true).SetTitle("Queries (Enter to inspect)")
-	
+
 			// Prepare mapping from display string to result row for selection callbacks
 			displayMap := make(map[string]qrow)
 			var items []string
@@ -333,7 +333,7 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 				displayMap[display] = r
 			}
 			queriesFL.Items = items
-	
+
 			// RenderList preserves selection behavior and attaches callbacks
 			queriesFL.RenderList = func(list *tview.List, items []string) {
 				list.Clear()
@@ -350,10 +350,10 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 					}
 				}
 			}
-	
+
 			// Initial render
 			queriesFL.ResetList()
-	
+
 			// Use the standard FilteredList input (SetupFilterInput) so we follow the shared behavior.
 			filterInput := queriesFL.SetupFilterInput(a.tviewApp, a.pages)
 			filterInput.SetFieldWidth(40)
@@ -364,7 +364,7 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 			// Make Enter/Tab/Escape behave intuitively for this flow.
 			filterInput.SetDoneFunc(func(key tcell.Key) {
 				if key == tcell.KeyEscape {
-					a.pages.SwitchToPage("main")
+					a.pages.SwitchToPage("explain")
 					return
 				}
 				if key == tcell.KeyEnter {
@@ -384,12 +384,12 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 				}
 				return event
 			})
-	
+
 			// Layout
 			flex := tview.NewFlex().SetDirection(tview.FlexRow).
 				AddItem(filterInput, 1, 0, true).
 				AddItem(queriesList, 0, 1, true)
-	
+
 			a.pages.AddPage("explain_queries", flex, true, true)
 			a.pages.SwitchToPage("explain_queries")
 		})
@@ -589,6 +589,7 @@ func (a *App) showExplainPercentiles(hash, queryText string, fromTime, toTime ti
 //   - Linux/Windows: Hold Shift and drag with mouse to select, then Ctrl+Shift+C to copy
 //   - macOS Terminal: Simply drag with mouse to select, then Cmd+C to copy
 //   - Most terminals: Right-click after selection to copy
+//
 // The selected text can then be pasted elsewhere using standard paste shortcuts.
 func (a *App) showExplainQueryByThreshold(hash string, threshold int64, fromTime, toTime time.Time, cluster string, output *tview.TextView) {
 	fromStr := fromTime.Format("2006-01-02 15:04:05 -07:00")
@@ -646,14 +647,14 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold int64, fromTime
 		SetScrollable(true).
 		SetRegions(false) // Disable regions to ensure clean text output
 	ex1.SetBorder(true).SetTitle("EXPLAIN PLAN indexes=1, projections=1")
-	
+
 	ex2 := tview.NewTextView().
 		SetWrap(true).
 		SetDynamicColors(true).
 		SetScrollable(true).
 		SetRegions(false)
 	ex2.SetBorder(true).SetTitle("EXPLAIN PIPELINE")
-	
+
 	ex3 := tview.NewTextView().
 		SetWrap(true).
 		SetDynamicColors(true).
