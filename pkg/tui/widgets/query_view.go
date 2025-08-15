@@ -3,6 +3,7 @@ package widgets
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/alecthomas/chroma/quick"
@@ -18,7 +19,8 @@ func NewQueryView() *QueryView {
 		TextView: tview.NewTextView().
 			SetDynamicColors(true).
 			SetWrap(true).
-			SetWordWrap(true),
+			SetWordWrap(true).
+			SetSelectable(true),
 	}
 	qv.SetBorder(true)
 	qv.SetTitle("Normalized Query")
@@ -70,53 +72,105 @@ func (qv *QueryView) SetSQL(sql string) {
 	fmt.Fprint(qv, formatted)
 }
 
-// ansiToTcell converts ANSI color codes to tview color tags
+ // ansiToTcell converts ANSI color codes to tview color tags
 func ansiToTcell(text string) string {
-	// Map of ANSI color codes to tview color names
-	colorMap := map[string]string{
-		// Basic colors
-		"\x1b[38;5;15m":  "[white]",    // Bright white
-		"\x1b[38;5;231m": "[white]",    // White
-		"\x1b[38;5;249m": "[gray]",     // Gray (comments)
-		"\x1b[38;5;244m": "[darkgray]", // Dark gray
+	// Replace SGR sequences like "\x1b[38;5;186m" or bare "[38;5;186m"
+	re := regexp.MustCompile(`\x1b\[((?:\d+;)*\d+)m|\[((?:\d+;)*\d+)m`)
+	out := re.ReplaceAllStringFunc(text, func(m string) string {
+		// Extract the numeric part, whether the match included the ESC or not.
+		var codesStr string
+		if strings.HasPrefix(m, "\x1b[") {
+			codesStr = strings.TrimSuffix(strings.TrimPrefix(m, "\x1b["), "m")
+		} else {
+			codesStr = strings.TrimSuffix(strings.TrimPrefix(m, "["), "m")
+		}
 
-		// Reds/Pinks
-		"\x1b[38;5;197m": "[pink]",    // Bright pink
-		"\x1b[38;5;204m": "[red]",     // Soft red (strings)
-		"\x1b[38;5;160m": "[darkred]", // Dark red
-		"\x1b[38;5;196m": "[red]",     // Bright red
+		parts := strings.Split(codesStr, ";")
 
-		// Blues
-		"\x1b[38;5;81m": "[blue]",     // Light blue (keywords)
-		"\x1b[38;5;39m": "[blue]",     // Bright blue
-		"\x1b[38;5;27m": "[darkblue]", // Dark blue
+		// If reset or default foreground, return reset tag
+		for _, p := range parts {
+			if p == "0" || p == "39" {
+				return "[-]"
+			}
+		}
 
-		// Greens
-		"\x1b[38;5;118m": "[green]",     // Bright green (functions)
-		"\x1b[38;5;46m":  "[green]",     // Neon green
-		"\x1b[38;5;34m":  "[darkgreen]", // Dark green
+		// Handle truecolor sequences: 38;2;<r>;<g>;<b>
+		for i := 0; i+4 < len(parts); i++ {
+			if parts[i] == "38" && parts[i+1] == "2" {
+				r, _ := strconv.Atoi(parts[i+2])
+				g, _ := strconv.Atoi(parts[i+3])
+				b, _ := strconv.Atoi(parts[i+4])
+				return fmt.Sprintf("[#%02x%02x%02x]", r, g, b)
+			}
+		}
 
-		// Yellows/Oranges
-		"\x1b[38;5;208m": "[orange]", // Orange (numbers)
-		"\x1b[38;5;226m": "[yellow]", // Bright yellow
-		"\x1b[38;5;220m": "[yellow]", // Gold
+		// Handle 256-color sequences: 38;5;<n>
+		for i := 0; i+2 < len(parts); i++ {
+			if parts[i] == "38" && parts[i+1] == "5" {
+				n, _ := strconv.Atoi(parts[i+2])
+				return map256ToTag(n)
+			}
+		}
 
-		// Purples
-		"\x1b[38;5;129m": "[purple]", // Purple
-		"\x1b[38;5;93m":  "[purple]", // Dark purple
+		// Handle basic SGR color codes (30-37, 90-97)
+		if len(parts) == 1 {
+			switch parts[0] {
+			case "30":
+				return "[black]"
+			case "31":
+				return "[red]"
+			case "32":
+				return "[green]"
+			case "33":
+				return "[yellow]"
+			case "34":
+				return "[blue]"
+			case "35":
+				return "[magenta]"
+			case "36":
+				return "[cyan]"
+			case "37":
+				return "[white]"
+			case "90":
+				return "[gray]"
+			}
+		}
 
-		// Special
-		"\x1b[38;5;45m":  "[cyan]",    // Cyan
-		"\x1b[38;5;51m":  "[cyan]",    // Bright cyan
-		"\x1b[38;5;201m": "[magenta]", // Magenta
+		// Unknown sequence -> strip it
+		return ""
+	})
 
-		// Reset
-		"\x1b[0m": "[-]", // Reset
+	return out
+}
+
+// map256ToTag maps a 256-color palette index to a reasonable tview tag.
+func map256ToTag(n int) string {
+	switch {
+	case n >= 196:
+		return "[red]"
+	case n >= 160:
+		return "[darkred]"
+	case n >= 129 && n < 160:
+		return "[purple]"
+	case n >= 93 && n < 129:
+		return "[purple]"
+	case n >= 81 && n < 93:
+		return "[blue]"
+	case n >= 46 && n < 81:
+		return "[green]"
+	case n >= 34 && n < 46:
+		return "[darkgreen]"
+	case n >= 226 && n < 231:
+		return "[yellow]"
+	case n >= 220 && n < 226:
+		return "[yellow]"
+	case n >= 208 && n < 220:
+		return "[orange]"
+	case n >= 118 && n < 160:
+		return "[green]"
+	case n >= 249 && n <= 255:
+		return "[gray]"
+	default:
+		return "[white]"
 	}
-
-	// Replace ANSI codes with tview tags
-	for ansi, tag := range colorMap {
-		text = strings.ReplaceAll(text, ansi, tag)
-	}
-	return text
 }
