@@ -84,7 +84,7 @@ SETTINGS skip_unavailable_shards=1
 		}
 		defer rows.Close()
 
-		rowIndex := 0
+		rowIndex := 1
 		for rows.Next() {
 			var host, groupName, name string
 			var priority, val int64
