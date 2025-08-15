@@ -71,6 +71,7 @@ SETTINGS skip_unavailable_shards=1
 	ft.SetupHeaders(headers)
 	ft.Table.SetBorder(true)
 	ft.Table.SetTitle("Memory usage")
+	ft.Table.SetFixed(1, 0)
 
 	// Perform the long-running query and row scanning in a goroutine,
 	// then queue a single UI update to add the page and focus the table.
