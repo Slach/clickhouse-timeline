@@ -52,10 +52,12 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 	selectionBox.SetTitleAlign(tview.AlignLeft)
 
 	// Separate output area for explain flow (do not use a.mainView)
-	output := tview.NewTextView()
-	output.SetDynamicColors(true)
-	output.SetWrap(true)
-	output.SetWordWrap(true)
+	output := tview.NewTextView().
+		SetDynamicColors(true).
+		SetWrap(true).
+		SetWordWrap(true).
+		SetScrollable(true).
+		SetRegions(false) // Disable regions for clean text selection
 	output.SetBorder(true)
 	output.SetTitle("Explain Output")
 
@@ -582,6 +584,12 @@ func (a *App) showExplainPercentiles(hash, queryText string, fromTime, toTime ti
 }
 
 // showExplainQueryByThreshold finds the top query above threshold and shows explain plans and query text.
+// Note: Text selection in terminal applications works through your terminal emulator, not the TUI itself.
+// To select and copy text:
+//   - Linux/Windows: Hold Shift and drag with mouse to select, then Ctrl+Shift+C to copy
+//   - macOS Terminal: Simply drag with mouse to select, then Cmd+C to copy
+//   - Most terminals: Right-click after selection to copy
+// The selected text can then be pasted elsewhere using standard paste shortcuts.
 func (a *App) showExplainQueryByThreshold(hash string, threshold int64, fromTime, toTime time.Time, cluster string, output *tview.TextView) {
 	fromStr := fromTime.Format("2006-01-02 15:04:05 -07:00")
 	toStr := toTime.Format("2006-01-02 15:04:05 -07:00")
@@ -631,12 +639,26 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold int64, fromTime
 	qv.SetBorder(true).SetTitle("Query Text")
 
 	// Three text areas for explain outputs (scrollable)
-	// Note: Text can be selected with mouse and copied using standard terminal shortcuts (e.g., Ctrl+Shift+C)
-	ex1 := tview.NewTextView().SetWrap(true).SetDynamicColors(true)
+	// Text selection: Use your terminal's native selection (mouse drag) and copy (Ctrl+Shift+C or Cmd+C)
+	ex1 := tview.NewTextView().
+		SetWrap(true).
+		SetDynamicColors(true).
+		SetScrollable(true).
+		SetRegions(false) // Disable regions to ensure clean text output
 	ex1.SetBorder(true).SetTitle("EXPLAIN PLAN indexes=1, projections=1")
-	ex2 := tview.NewTextView().SetWrap(true).SetDynamicColors(true)
+	
+	ex2 := tview.NewTextView().
+		SetWrap(true).
+		SetDynamicColors(true).
+		SetScrollable(true).
+		SetRegions(false)
 	ex2.SetBorder(true).SetTitle("EXPLAIN PIPELINE")
-	ex3 := tview.NewTextView().SetWrap(true).SetDynamicColors(true)
+	
+	ex3 := tview.NewTextView().
+		SetWrap(true).
+		SetDynamicColors(true).
+		SetScrollable(true).
+		SetRegions(false)
 	ex3.SetBorder(true).SetTitle("EXPLAIN ESTIMATE")
 
 	a.pages.AddAndSwitchToPage("explain_loading", tview.NewModal().SetText("Running EXPLAINs...").AddButtons([]string{"OK"}), true)

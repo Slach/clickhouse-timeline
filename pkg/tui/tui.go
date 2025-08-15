@@ -335,7 +335,8 @@ func (a *App) setupUI() {
 	a.mainView = tview.NewTextView().
 		SetDynamicColors(true).
 		SetTextAlign(tview.AlignLeft).
-		SetText(logo + "\nWelcome to ClickHouse Timeline\nPress ':' to enter command mode")
+		SetScrollable(true).
+		SetText(logo + "\nWelcome to ClickHouse Timeline\nPress ':' to enter command mode\n\nTip: To copy text from any view, use your terminal's selection (mouse drag) and copy (Ctrl+Shift+C or Cmd+C)")
 
 	a.connectList = tview.NewList()
 	a.connectList.SetMainTextColor(tcell.ColorWhite)
