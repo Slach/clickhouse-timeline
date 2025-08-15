@@ -646,10 +646,17 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold int64, fromTime
 		SetRegions(false)
 	ex3.SetBorder(true).SetTitle("EXPLAIN ESTIMATE")
 
-	a.pages.AddAndSwitchToPage("explain_loading", tview.NewModal().SetText("Running EXPLAINs...").AddButtons([]string{"OK"}), true)
+	a.tviewApp.QueueUpdateDraw(func() {
+		modal := tview.NewModal().SetText("Running EXPLAINs...").AddButtons([]string{"OK"})
+		// Ensure any previous loading page is removed, then show the loading modal.
+		a.pages.RemovePage("explain_loading")
+		a.pages.AddPage("explain_loading", modal, true, true)
+		a.pages.SwitchToPage("explain_loading")
+	})
 
 	// Run explains (best-effort)
 	go func() {
+		log.Info().Msgf("running explain1: %s", explain1)
 		if rows1, err1 := a.clickHouse.Query(explain1); err1 == nil {
 			var buf strings.Builder
 			for rows1.Next() {
@@ -668,6 +675,7 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold int64, fromTime
 			})
 		}
 
+		log.Info().Msgf("running explain2: %s", explain2)
 		if rows2, err2 := a.clickHouse.Query(explain2); err2 == nil {
 			var buf strings.Builder
 			for rows2.Next() {
@@ -686,6 +694,7 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold int64, fromTime
 			})
 		}
 
+		log.Info().Msgf("running explain3: %s", explain3)
 		if rows3, err3 := a.clickHouse.Query(explain3); err3 == nil {
 			var buf strings.Builder
 
@@ -792,6 +801,8 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold int64, fromTime
 				AddItem(qv, 0, 1, false).
 				AddItem(rightFlex, 0, 2, false)
 
+			// Remove loading modal if present, then show results.
+			a.pages.RemovePage("explain_loading")
 			a.pages.AddPage("explain_result", mainFlex, true, true)
 			a.pages.SwitchToPage("explain_result")
 		})
