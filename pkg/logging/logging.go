@@ -123,7 +123,6 @@ func InitLogFile(cliInstance *types.CLI, version string) error {
 		Out:        logFile,
 		NoColor:    true,
 		TimeFormat: "2006-01-02 15:04:05.000",
-		PartsOrder: []string{zerolog.TimestampFieldName, zerolog.LevelFieldName, zerolog.CallerFieldName, zerolog.ErrorFieldName, zerolog.MessageFieldName, zerolog.ErrorStackFieldName},
 	}).
 		With().
 		Timestamp().
