@@ -631,11 +631,11 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold int64, fromTime
 	qv.SetBorder(true).SetTitle("Query Text")
 
 	// Three text areas for explain outputs (scrollable)
-	ex1 := tview.NewTextView().SetWrap(true).SetDynamicColors(true)
+	ex1 := tview.NewTextView().SetWrap(true).SetDynamicColors(true).SetSelectable(true)
 	ex1.SetBorder(true).SetTitle("EXPLAIN PLAN indexes=1, projections=1")
-	ex2 := tview.NewTextView().SetWrap(true).SetDynamicColors(true)
+	ex2 := tview.NewTextView().SetWrap(true).SetDynamicColors(true).SetSelectable(true)
 	ex2.SetBorder(true).SetTitle("EXPLAIN PIPELINE")
-	ex3 := tview.NewTextView().SetWrap(true).SetDynamicColors(true)
+	ex3 := tview.NewTextView().SetWrap(true).SetDynamicColors(true).SetSelectable(true)
 	ex3.SetBorder(true).SetTitle("EXPLAIN ESTIMATE")
 
 	a.pages.AddAndSwitchToPage("explain_loading", tview.NewModal().SetText("Running EXPLAINs...").AddButtons([]string{"OK"}), true)
