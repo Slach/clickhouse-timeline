@@ -600,9 +600,9 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold int64, fromTime
 	var queryText string
 	var duration float64
 	if rows.Next() {
-		if err := rows.Scan(&queryText, &duration); err != nil {
+		if scanErr := rows.Scan(&queryText, &duration); scanErr != nil {
 			a.tviewApp.QueueUpdateDraw(func() {
-				output.SetText(fmt.Sprintf("Error scanning top query: %v", err))
+				output.SetText(fmt.Sprintf("Error scanning top query: %v", scanErr))
 			})
 			return
 		}
@@ -650,7 +650,6 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold int64, fromTime
 
 	// Run explains (best-effort)
 	go func() {
-		// EXPLAIN PLAN (may be heavy); we just attempt to fetch textual output via clickhouse
 		if rows1, err1 := a.clickHouse.Query(explain1); err1 == nil {
 			var buf strings.Builder
 			for rows1.Next() {
