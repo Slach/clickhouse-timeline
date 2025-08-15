@@ -37,8 +37,8 @@ func (qv *QueryView) formatSQL(sql string) string {
 		{regexp.MustCompile(`(?i)\bwhere\b`), "\nWHERE\n"},
 		{regexp.MustCompile(`(?i)\bgroup by\b`), "\nGROUP BY\n"},
 		{regexp.MustCompile(`(?i)\border by\b`), "\nORDER BY\n"},
-		{regexp.MustCompile(`(?i)\blimit\b`), "\nLIMIT\n"},
 		{regexp.MustCompile(`(?i)\bhaving\b`), "\nHAVING\n"},
+		{regexp.MustCompile(`(?i)\blimit\b`), "\nLIMIT"},
 		{regexp.MustCompile(`(?i)\bjoin\b`), "JOIN\n"},
 		{regexp.MustCompile(`(?i)\bunion\b`), "\nUNION "},
 	}
