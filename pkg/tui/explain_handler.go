@@ -51,15 +51,15 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 	selectionBox.SetTitle("Explain Query - Selection")
 	selectionBox.SetTitleAlign(tview.AlignLeft)
 
-	// Separate output area for explain flow (do not use a.mainView)
-	output := tview.NewTextView().
+	// Separate explainOutput area for explain flow (do not use a.mainView)
+	explainOutput := tview.NewTextView().
 		SetDynamicColors(true).
 		SetWrap(true).
 		SetWordWrap(true).
 		SetScrollable(true).
 		SetRegions(false) // Disable regions for clean text selection
-	output.SetBorder(true)
-	output.SetTitle("Explain Output")
+	explainOutput.SetBorder(true)
+	explainOutput.SetTitle("Explain Output")
 
 	// Placeholders for lists wrapped in FilteredList (provides filtering helpers)
 	tablesTList := tview.NewList()
@@ -139,7 +139,7 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 	var loadFunc func()
 	loadFunc = func() {
 		a.tviewApp.QueueUpdateDraw(func() {
-			output.SetText("Loading tables and query kinds...")
+			explainOutput.SetText("Loading tables and query kinds...")
 		})
 
 		// Build optional hash filter
@@ -157,7 +157,7 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 		rows, err := a.clickHouse.Query(tablesQuery)
 		if err != nil {
 			a.tviewApp.QueueUpdateDraw(func() {
-				output.SetText(fmt.Sprintf("Error loading tables: %v\n%s", err, tablesQuery))
+				explainOutput.SetText(fmt.Sprintf("Error loading tables: %v\n%s", err, tablesQuery))
 			})
 			return
 		}
@@ -185,7 +185,7 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 		kindRows, err := a.clickHouse.Query(kindQuery)
 		if err != nil {
 			a.tviewApp.QueueUpdateDraw(func() {
-				output.SetText(fmt.Sprintf("Error loading query kinds: %v\n%s", err, kindQuery))
+				explainOutput.SetText(fmt.Sprintf("Error loading query kinds: %v\n%s", err, kindQuery))
 			})
 			return
 		}
@@ -221,7 +221,7 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 			} else {
 				toggleSelect(kindList, kinds, selectedKinds)
 			}
-			output.SetText("Options loaded.")
+			explainOutput.SetText("Options loaded.")
 		})
 	}
 
@@ -286,7 +286,7 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 		rows, err := a.clickHouse.Query(query)
 		if err != nil {
 			a.tviewApp.QueueUpdateDraw(func() {
-				output.SetText(fmt.Sprintf("Error executing query: %v\n%s", err, query))
+				explainOutput.SetText(fmt.Sprintf("Error executing query: %v\n%s", err, query))
 			})
 			return
 		}
@@ -313,7 +313,7 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 		// Show queries list (filter input is a transient overlay shown on '/')
 		a.tviewApp.QueueUpdateDraw(func() {
 			if len(results) == 0 {
-				output.SetText("No queries found with given filters")
+				explainOutput.SetText("No queries found with given filters")
 				return
 			}
 
@@ -342,7 +342,7 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 						d := display
 						rr := r
 						list.AddItem(d, "", 0, func() {
-							a.showExplainPercentiles(rr.hash, rr.q, fromTime, toTime, cluster, output)
+							a.showExplainPercentiles(rr.hash, rr.q, fromTime, toTime, cluster, explainOutput)
 						})
 					} else {
 						dd := display
@@ -485,7 +485,7 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 		return event
 	})
 
-	// Layout: left = form + lists + buttons, right = output area
+	// Layout: left = form + lists + buttons, right = explainOutput area
 	// assemble selection content inside bordered selectionBox
 	selectionBox.AddItem(form, 7, 0, true)
 	selectionBox.AddItem(tview.NewTextView().SetText("Tables:"), 1, 0, false)
@@ -498,7 +498,7 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 
 	mainFlex := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(leftFlex, 0, 2, true).
-		AddItem(output, 0, 1, false)
+		AddItem(explainOutput, 0, 1, false)
 
 	a.pages.AddPage("explain", mainFlex, true, true)
 	a.pages.SwitchToPage("explain")
@@ -515,7 +515,7 @@ func truncate(s string, l int) string {
 }
 
 // showExplainPercentiles queries p50/p90/p99 and shows a simple legend modal, allowing to drill into percentile value.
-func (a *App) showExplainPercentiles(hash, queryText string, fromTime, toTime time.Time, cluster string, output *tview.TextView) {
+func (a *App) showExplainPercentiles(hash, queryText string, fromTime, toTime time.Time, cluster string, explainOutput *tview.TextView) {
 	fromStr := fromTime.Format("2006-01-02 15:04:05 -07:00")
 	toStr := toTime.Format("2006-01-02 15:04:05 -07:00")
 
@@ -526,7 +526,9 @@ func (a *App) showExplainPercentiles(hash, queryText string, fromTime, toTime ti
 	rows, err := a.clickHouse.Query(q)
 	if err != nil {
 		a.tviewApp.QueueUpdateDraw(func() {
-			output.SetText(fmt.Sprintf("Error fetching percentiles: %v\n%s", err, q))
+			explainOutput.SetText(fmt.Sprintf("Error fetching percentiles: %v\n%s", err, q))
+			a.SwitchToMainPage("explain")
+			a.tviewApp.SetFocus(explainOutput)
 		})
 		return
 	}
@@ -538,9 +540,10 @@ func (a *App) showExplainPercentiles(hash, queryText string, fromTime, toTime ti
 
 	var p50, p90, p99 float64
 	if rows.Next() {
-		if err := rows.Scan(&p50, &p90, &p99); err != nil {
+		if scanErr := rows.Scan(&p50, &p90, &p99); scanErr != nil {
 			a.tviewApp.QueueUpdateDraw(func() {
-				output.SetText(fmt.Sprintf("Error scanning percentiles: %v", err))
+				explainOutput.SetText(fmt.Sprintf("Error scanning percentiles: %v", scanErr))
+				a.pages.SwitchToPage("explain_percentiles")
 			})
 			return
 		}
@@ -553,11 +556,11 @@ func (a *App) showExplainPercentiles(hash, queryText string, fromTime, toTime ti
 		SetDoneFunc(func(idx int, label string) {
 			switch label {
 			case "p50":
-				a.showExplainQueryByThreshold(hash, int64(p50), fromTime, toTime, cluster, output)
+				a.showExplainQueryByThreshold(hash, int64(p50), fromTime, toTime, cluster, explainOutput)
 			case "p90":
-				a.showExplainQueryByThreshold(hash, int64(p90), fromTime, toTime, cluster, output)
+				a.showExplainQueryByThreshold(hash, int64(p90), fromTime, toTime, cluster, explainOutput)
 			case "p99":
-				a.showExplainQueryByThreshold(hash, int64(p99), fromTime, toTime, cluster, output)
+				a.showExplainQueryByThreshold(hash, int64(p99), fromTime, toTime, cluster, explainOutput)
 			default:
 				a.pages.SwitchToPage("explain_queries")
 			}
@@ -575,7 +578,7 @@ func (a *App) showExplainPercentiles(hash, queryText string, fromTime, toTime ti
 //   - Most terminals: Right-click after selection to copy
 //
 // The selected text can then be pasted elsewhere using standard paste shortcuts.
-func (a *App) showExplainQueryByThreshold(hash string, threshold int64, fromTime, toTime time.Time, cluster string, output *tview.TextView) {
+func (a *App) showExplainQueryByThreshold(hash string, threshold int64, fromTime, toTime time.Time, cluster string, explainOutput *tview.TextView) {
 	fromStr := fromTime.Format("2006-01-02 15:04:05 -07:00")
 	toStr := toTime.Format("2006-01-02 15:04:05 -07:00")
 
@@ -583,11 +586,15 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold int64, fromTime
 	q := fmt.Sprintf("SELECT query, query_duration_ms FROM clusterAllReplicas('%s', merge(system,'^query_log')) WHERE event_date >= toDate(parseDateTimeBestEffort('%s')) AND event_date <= toDate(parseDateTimeBestEffort('%s')) AND event_time >= parseDateTimeBestEffort('%s') AND event_time <= parseDateTimeBestEffort('%s') AND normalized_query_hash = '%s' AND query_duration_ms > %d ORDER BY query_duration_ms DESC LIMIT 1",
 		cluster, fromStr, toStr, fromStr, toStr, strings.ReplaceAll(hash, "'", "''"), threshold,
 	)
-
 	rows, err := a.clickHouse.Query(q)
+	log.Error().Stack().Msg("BLA!!!!")
 	if err != nil {
+		log.Error().Stack().Msg("BLA1!!!!")
 		a.tviewApp.QueueUpdateDraw(func() {
-			output.SetText(fmt.Sprintf("Error fetching query: %v\n%s", err, q))
+			log.Error().Stack().Msg("SUKA0")
+			explainOutput.SetText(fmt.Sprintf("Error fetching query: %v\n%s", err, q))
+			a.pages.SwitchToPage("explain")
+			a.tviewApp.SetFocus(explainOutput)
 		})
 		return
 	}
@@ -599,20 +606,30 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold int64, fromTime
 
 	var queryText string
 	var duration float64
+	log.Error().Stack().Msg("BLA2!!!!")
 	if rows.Next() {
+		log.Error().Stack().Msg("BLA3!!!!")
 		if scanErr := rows.Scan(&queryText, &duration); scanErr != nil {
 			a.tviewApp.QueueUpdateDraw(func() {
-				output.SetText(fmt.Sprintf("Error scanning top query: %v", scanErr))
+				log.Error().Stack().Msg("SUKA1")
+				explainOutput.SetText(fmt.Sprintf("Error scanning top query: %v", scanErr))
+				a.pages.SwitchToPage("explain")
+				a.tviewApp.SetFocus(explainOutput)
 			})
 			return
 		}
 	} else {
+		log.Error().Stack().Msg("BLA4!!!!")
 		a.tviewApp.QueueUpdateDraw(func() {
-			output.SetText("No query found above threshold")
+			log.Error().Stack().Msg("SUKA2")
+			explainOutput.SetText("No query found above threshold")
+			a.pages.SwitchToPage("explain")
+			a.tviewApp.SetFocus(explainOutput)
 		})
 		return
 	}
 
+	log.Error().Stack().Msg("BLA5!!!!")
 	// Build explain queries
 	explain1 := fmt.Sprintf("EXPLAIN PLAN indexes=1, projections=1 %s", queryText)
 	explain2 := fmt.Sprintf("EXPLAIN PIPELINE %s", queryText)
@@ -629,7 +646,7 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold int64, fromTime
 		SetWrap(true).
 		SetDynamicColors(true).
 		SetScrollable(true).
-		SetRegions(false) // Disable regions to ensure clean text output
+		SetRegions(false) // Disable regions to ensure clean text explainOutput
 	ex1.SetBorder(true).SetTitle("EXPLAIN PLAN indexes=1, projections=1")
 
 	ex2 := tview.NewTextView().
