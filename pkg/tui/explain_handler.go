@@ -633,13 +633,10 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold int64, fromTime
 	// Three text areas for explain outputs (scrollable)
 	// Note: Text can be selected with mouse and copied using standard terminal shortcuts (e.g., Ctrl+Shift+C)
 	ex1 := tview.NewTextView().SetWrap(true).SetDynamicColors(true)
-	ex1.SetSelectable(true)
 	ex1.SetBorder(true).SetTitle("EXPLAIN PLAN indexes=1, projections=1")
 	ex2 := tview.NewTextView().SetWrap(true).SetDynamicColors(true)
-	ex2.SetSelectable(true)
 	ex2.SetBorder(true).SetTitle("EXPLAIN PIPELINE")
 	ex3 := tview.NewTextView().SetWrap(true).SetDynamicColors(true)
-	ex3.SetSelectable(true)
 	ex3.SetBorder(true).SetTitle("EXPLAIN ESTIMATE")
 
 	a.pages.AddAndSwitchToPage("explain_loading", tview.NewModal().SetText("Running EXPLAINs...").AddButtons([]string{"OK"}), true)

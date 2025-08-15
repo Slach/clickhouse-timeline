@@ -19,8 +19,7 @@ func NewQueryView() *QueryView {
 		TextView: tview.NewTextView().
 			SetDynamicColors(true).
 			SetWrap(true).
-			SetWordWrap(true).
-			SetSelectable(true),
+			SetWordWrap(true),
 	}
 	qv.SetBorder(true)
 	qv.SetTitle("Normalized Query")
