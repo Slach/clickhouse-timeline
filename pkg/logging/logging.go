@@ -83,12 +83,12 @@ func InitConsoleStdErrLog() {
 		Logger()
 }
 
-// fatalStackHook adds stack traces to Fatal level logs
-type fatalStackHook struct{}
+// errorStackHook adds stack traces to Fatal, Error level logs
+type errorStackHook struct{}
 
-func (h fatalStackHook) Run(e *zerolog.Event, level zerolog.Level, _ string) {
-	if level == zerolog.FatalLevel {
-		e.Stack() // Add stack trace only for Fatal level
+func (h errorStackHook) Run(e *zerolog.Event, level zerolog.Level, _ string) {
+	if level == zerolog.FatalLevel || level == zerolog.ErrorLevel {
+		e.Stack()
 	}
 }
 
@@ -118,22 +118,20 @@ func InitLogFile(cliInstance *types.CLI, version string) error {
 		return errors.Wrap(err, "failed to open log file")
 	}
 
-	out := zerolog.ConsoleWriter{
-		Out:           logFile,
-		NoColor:       true,
-		PartsOrder:    []string{zerolog.TimestampFieldName, zerolog.LevelFieldName, zerolog.CallerFieldName, zerolog.MessageFieldName, zerolog.ErrorFieldName, zerolog.ErrorStackFieldName},
-		FieldsExclude: []string{zerolog.ErrorFieldName, zerolog.ErrorStackFieldName},
-	}
-
 	// Build logger that writes pretty output to the file (with timestamp and caller).
-	baseLogger := zerolog.New(out).
+	baseLogger := zerolog.New(zerolog.ConsoleWriter{
+		Out:        logFile,
+		NoColor:    true,
+		TimeFormat: "2006-01-02 15:04:05.000",
+		PartsOrder: []string{zerolog.TimestampFieldName, zerolog.LevelFieldName, zerolog.CallerFieldName, zerolog.ErrorFieldName, zerolog.MessageFieldName, zerolog.ErrorStackFieldName},
+	}).
 		With().
 		Timestamp().
 		Caller().
 		Str("version", version).
 		Logger()
 
-	baseLogger.Hook(fatalStackHook{})
+	baseLogger.Hook(errorStackHook{})
 
 	// Use this logger for package-global logging.
 	log.Logger = baseLogger
