@@ -681,12 +681,50 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold int64, fromTime
 
 		if rows3, err3 := a.clickHouse.Query(explain3); err3 == nil {
 			var buf strings.Builder
+
+			cols, _ := rows3.Columns()
+
 			for rows3.Next() {
-				var s string
-				_ = rows3.Scan(&s)
-				buf.WriteString(s)
-				buf.WriteString("\n")
+				// Dynamic destinations for scanning unknown column types
+				dest := make([]interface{}, len(cols))
+				for i := range dest {
+					var v interface{}
+					dest[i] = &v
+				}
+
+				if err := rows3.Scan(dest...); err != nil {
+					// skip rows we can't scan but continue processing others
+					continue
+				}
+
+				// If we have at least database and table columns, render as:
+				// "database.table colN=val colM=val"
+				if len(cols) >= 2 {
+					db := fmt.Sprintf("%v", *(dest[0].(*interface{})))
+					table := fmt.Sprintf("%v", *(dest[1].(*interface{})))
+
+					parts := make([]string, 0, len(cols)-2)
+					for i := 2; i < len(cols); i++ {
+						parts = append(parts, fmt.Sprintf("%s=%v", cols[i], *(dest[i].(*interface{}))))
+					}
+
+					if len(parts) > 0 {
+						buf.WriteString(fmt.Sprintf("%s.%s %s\n", db, table, strings.Join(parts, " ")))
+					} else {
+						buf.WriteString(fmt.Sprintf("%s.%s\n", db, table))
+					}
+				} else {
+					// Fallback: generic "col: val" formatting
+					for i := range cols {
+						if i > 0 {
+							buf.WriteString("\t")
+						}
+						buf.WriteString(fmt.Sprintf("%s: %v", cols[i], *(dest[i].(*interface{}))))
+					}
+					buf.WriteString("\n")
+				}
 			}
+
 			rows3.Close()
 			a.tviewApp.QueueUpdateDraw(func() {
 				ex3.SetText(buf.String())
