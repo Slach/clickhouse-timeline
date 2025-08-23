@@ -1,3 +1,13 @@
+# v0.0.2
+FEATURES
+- [Add your new features here based on the git log]
+
+BUG FIXES
+- [Add any bug fixes here]
+
+IMPROVEMENTS
+- [Add any improvements here]
+
 # v0.0.1
 FEATURES
 - Initial release of ClickHouse Timeline, an interactive performance analysis tool
