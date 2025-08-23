@@ -58,7 +58,7 @@ UNION ALL
 SELECT hostName() AS host, 16 AS priority, 'ThreadStacksVirtual' as group, metric as name, toInt64(value * 8*1024*1024) FROM cluster('%[1]s','system','metrics') WHERE metric = 'GlobalThread'
 UNION ALL
 SELECT hostName() AS host, 17 AS priority, 'MemoryTracking' as group, 'total' as name, toInt64(value) FROM cluster('%[1]s','system','metrics') WHERE metric = 'MemoryTracking'
-) ORDER BY priority,"val" DESC
+) ORDER BY host, priority,"val" DESC
 SETTINGS skip_unavailable_shards=1
 `), cluster)
 
@@ -84,8 +84,9 @@ SETTINGS skip_unavailable_shards=1
 		defer rows.Close()
 
 		// Collect data for pivot table
-		hostSet := make(map[string]bool)
-		rowKeys := make(map[string][]string) // group,name -> [hosts]
+		hosts := []string{}
+		prevHost := ""
+		rowKeys := make(map[string]bool) // track unique group,name combinations
 		data := make(map[string]map[string]int64) // host -> (group,name) -> value
 
 		for rows.Next() {
@@ -96,30 +97,19 @@ SETTINGS skip_unavailable_shards=1
 				continue
 			}
 
-			hostSet[host] = true
+			// Collect hosts in order
+			if host != prevHost {
+				hosts = append(hosts, host)
+				prevHost = host
+			}
+
 			key := fmt.Sprintf("%s,%s", groupName, name)
-			rowKeys[key] = nil // Just track the keys
+			rowKeys[key] = true
 
 			if data[host] == nil {
 				data[host] = make(map[string]int64)
 			}
 			data[host][key] = val
-		}
-
-		// Convert hostSet to sorted slice
-		hosts := make([]string, 0, len(hostSet))
-		for host := range hostSet {
-			hosts = append(hosts, host)
-		}
-
-		// Sort hosts for consistent column order
-		// (simple alphabetical sort)
-		for i := 0; i < len(hosts)-1; i++ {
-			for j := i + 1; j < len(hosts); j++ {
-				if hosts[i] > hosts[j] {
-					hosts[i], hosts[j] = hosts[j], hosts[i]
-				}
-			}
 		}
 
 		// Set up headers: Host, Group, Name, then each host column
