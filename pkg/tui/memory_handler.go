@@ -58,7 +58,7 @@ UNION ALL
 SELECT hostName() AS host, 16 AS priority, 'ThreadStacksVirtual' as group, metric as name, toInt64(value * 8*1024*1024) FROM cluster('%[1]s','system','metrics') WHERE metric = 'GlobalThread'
 UNION ALL
 SELECT hostName() AS host, 17 AS priority, 'MemoryTracking' as group, 'total' as name, toInt64(value) FROM cluster('%[1]s','system','metrics') WHERE metric = 'MemoryTracking'
-) ORDER BY host, priority,"val" DESC
+) ORDER BY host, priority, "val" DESC
 SETTINGS skip_unavailable_shards=1
 `), cluster)
 
@@ -86,7 +86,7 @@ SETTINGS skip_unavailable_shards=1
 		// Collect data for pivot table
 		hosts := []string{}
 		prevHost := ""
-		rowKeys := make(map[string]bool) // track unique group,name combinations
+		rowKeys := make(map[string]bool)          // track unique group,name combinations
 		data := make(map[string]map[string]int64) // host -> (group,name) -> value
 
 		for rows.Next() {
