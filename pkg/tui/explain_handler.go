@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
+	"github.com/Slach/clickhouse-timeline/pkg/utils"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/rs/zerolog/log"
@@ -750,10 +751,10 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold float64, fromTi
 						if l := len(fmt.Sprintf("%d", r.parts)); l > w1 {
 							w1 = l
 						}
-						if l := len(fmt.Sprintf("%d", r.rows)); l > w2 {
+						if l := len(utils.FormatReadable(float64(r.rows), 0)); l > w2 {
 							w2 = l
 						}
-						if l := len(fmt.Sprintf("%d", r.marks)); l > w3 {
+						if l := len(utils.FormatReadable(float64(r.marks), 0)); l > w3 {
 							w3 = l
 						}
 					}
@@ -766,9 +767,9 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold float64, fromTi
 					for _, r := range rowsData {
 						fmt.Fprintf(&buf, "%-*s  %*s  %*s  %*s\n",
 							w0, fmt.Sprintf("%s.%s", r.db, r.table),
-							w1, widgets.FormatReadable(float64(r.parts), true),
-							w2, widgets.FormatReadable(float64(r.rows), true),
-							w3, widgets.FormatReadable(float64(r.marks), true),
+							w1, fmt.Sprintf("%d", r.parts),
+							w2, utils.FormatReadable(float64(r.rows), 0),
+							w3, utils.FormatReadable(float64(r.marks), 0),
 						)
 					}
 				} else {

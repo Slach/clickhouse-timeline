@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/Slach/clickhouse-timeline/pkg/utils"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
@@ -86,8 +87,12 @@ func (a *App) generateLegend(minValue, maxValue float64) *tview.Table {
 		stepValue := minValue + (maxValue-minValue)*float64(i)/float64(steps-1)
 
 		// Format the value
-		isCount := a.heatmapMetric == MetricCount
-		displayValue := widgets.FormatReadable(stepValue, isCount)
+		var displayValue string
+		if a.heatmapMetric == MetricCount {
+			displayValue = fmt.Sprintf("%.0f", stepValue)
+		} else {
+			displayValue = utils.FormatReadable(stepValue, 1)
+		}
 
 		// Calculate normalized value for color
 		normalizedValue := a.applyScaling(stepValue, minValue, maxValue)
