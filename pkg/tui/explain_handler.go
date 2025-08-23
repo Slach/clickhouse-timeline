@@ -621,31 +621,16 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold int64, fromTime
 	} else {
 		log.Error().Stack().Msg("BLA4!!!!")
 
-		// If the tview application exists, queue the UI update on the application's goroutine.
-		// Also emit an immediate log so we can see the intent in logs even if the queued job fails for some reason.
-		if a.tviewApp != nil {
-			log.Debug().Msg("Queuing UI update for no-query-found")
-			a.tviewApp.QueueUpdateDraw(func() {
-				log.Error().Stack().Msg("SUKA2")
-				explainOutput.SetText("No query found above threshold")
-				a.pages.SwitchToPage("explain")
-				// Make sure the page is visible and focus is set
-				a.pages.SendToFront("explain")
-				if a.tviewApp != nil {
-					a.tviewApp.SetFocus(explainOutput)
-					a.tviewApp.Draw()
-				}
-			})
-		} else {
-			log.Debug().Msg("tviewApp is nil; applying UI update synchronously")
+		log.Debug().Msg("Queuing UI update for no-query-found")
+		a.tviewApp.QueueUpdateDraw(func() {
 			log.Error().Stack().Msg("SUKA2")
 			explainOutput.SetText("No query found above threshold")
 			a.pages.SwitchToPage("explain")
-			// Guard against nil tviewApp to avoid panics when tests or non-UI contexts call this function.
-			if a.tviewApp != nil {
-				a.tviewApp.SetFocus(explainOutput)
-			}
-		}
+			// Make sure the page is visible and focus is set
+			a.pages.SendToFront("explain")
+			a.tviewApp.SetFocus(explainOutput)
+			a.tviewApp.Draw()
+		})
 		return
 	}
 
