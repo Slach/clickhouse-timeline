@@ -629,9 +629,11 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold int64, fromTime
 				log.Error().Stack().Msg("SUKA2")
 				explainOutput.SetText("No query found above threshold")
 				a.pages.SwitchToPage("explain")
-				// Guard against nil tviewApp to avoid panics when tests or non-UI contexts call this function.
+				// Make sure the page is visible and focus is set
+				a.pages.SendToFront("explain")
 				if a.tviewApp != nil {
 					a.tviewApp.SetFocus(explainOutput)
+					a.tviewApp.Draw()
 				}
 			})
 		} else {
