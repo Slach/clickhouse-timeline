@@ -556,11 +556,11 @@ func (a *App) showExplainPercentiles(hash, queryText string, fromTime, toTime ti
 		SetDoneFunc(func(idx int, label string) {
 			switch label {
 			case "p50":
-				a.showExplainQueryByThreshold(hash, int64(p50), fromTime, toTime, cluster, explainOutput)
+				a.showExplainQueryByThreshold(hash, p50, fromTime, toTime, cluster, explainOutput)
 			case "p90":
-				a.showExplainQueryByThreshold(hash, int64(p90), fromTime, toTime, cluster, explainOutput)
+				a.showExplainQueryByThreshold(hash, p90, fromTime, toTime, cluster, explainOutput)
 			case "p99":
-				a.showExplainQueryByThreshold(hash, int64(p99), fromTime, toTime, cluster, explainOutput)
+				a.showExplainQueryByThreshold(hash, p99, fromTime, toTime, cluster, explainOutput)
 			default:
 				a.pages.SwitchToPage("explain_queries")
 			}
@@ -578,14 +578,14 @@ func (a *App) showExplainPercentiles(hash, queryText string, fromTime, toTime ti
 //   - Most terminals: Right-click after selection to copy
 //
 // The selected text can then be pasted elsewhere using standard paste shortcuts.
-func (a *App) showExplainQueryByThreshold(hash string, threshold int64, fromTime, toTime time.Time, cluster string, explainOutput *tview.TextView) {
+func (a *App) showExplainQueryByThreshold(hash string, threshold float64, fromTime, toTime time.Time, cluster string, explainOutput *tview.TextView) {
 	fromStr := fromTime.Format("2006-01-02 15:04:05 -07:00")
 	toStr := toTime.Format("2006-01-02 15:04:05 -07:00")
 
 	// Run the database query in a goroutine to avoid blocking the UI thread
 	go func() {
 		// Get top query above threshold
-		q := fmt.Sprintf("SELECT query, query_duration_ms FROM clusterAllReplicas('%s', merge(system,'^query_log')) WHERE event_date >= toDate(parseDateTimeBestEffort('%s')) AND event_date <= toDate(parseDateTimeBestEffort('%s')) AND event_time >= parseDateTimeBestEffort('%s') AND event_time <= parseDateTimeBestEffort('%s') AND normalized_query_hash = '%s' AND query_duration_ms > %d ORDER BY query_duration_ms DESC LIMIT 1",
+		q := fmt.Sprintf("SELECT query, query_duration_ms FROM clusterAllReplicas('%s', merge(system,'^query_log')) WHERE event_date >= toDate(parseDateTimeBestEffort('%s')) AND event_date <= toDate(parseDateTimeBestEffort('%s')) AND event_time >= parseDateTimeBestEffort('%s') AND event_time <= parseDateTimeBestEffort('%s') AND normalized_query_hash = '%s' AND query_duration_ms <= %f ORDER BY query_duration_ms DESC LIMIT 1",
 			cluster, fromStr, toStr, fromStr, toStr, strings.ReplaceAll(hash, "'", "''"), threshold,
 		)
 		rows, err := a.clickHouse.Query(q)
