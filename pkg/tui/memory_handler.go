@@ -8,6 +8,12 @@ import (
 	"github.com/rivo/tview"
 )
 
+type memoryRow struct {
+	group string
+	name  string
+	val   int64
+}
+
 // ShowMemory displays memory usage aggregated from various system tables across the selected cluster.
 // It builds a single UNION ALL SQL query using cluster('<cluster>','system','table') and adds hostName()
 // as the first column. The resulting table has columns: Host, Group, Name, Value.
@@ -86,9 +92,10 @@ SETTINGS skip_unavailable_shards=1
 		// Collect data for pivot table
 		hosts := []string{}
 		prevHost := ""
-		rowKeys := make(map[string]bool)          // track unique group,name combinations
+		groupData := make(map[string][]memoryRow) // group -> rows
 		data := make(map[string]map[string]int64) // host -> (group,name) -> value
 
+		// First pass: collect all data
 		for rows.Next() {
 			var host, groupName, name string
 			var priority, val int64
@@ -103,44 +110,70 @@ SETTINGS skip_unavailable_shards=1
 				prevHost = host
 			}
 
-			key := fmt.Sprintf("%s,%s", groupName, name)
-			rowKeys[key] = true
+			// Store row data
+			row := memoryRow{
+				group: groupName,
+				name:  name,
+				val:   val,
+			}
+			
+			groupData[groupName] = append(groupData[groupName], row)
 
+			key := fmt.Sprintf("%s,%s", groupName, name)
 			if data[host] == nil {
 				data[host] = make(map[string]int64)
 			}
 			data[host][key] = val
 		}
 
-		// Set up headers: Host, Group, Name, then each host column
+		// Sort rows within each group by value descending
+		for group := range groupData {
+			rows := groupData[group]
+			// Simple bubble sort by value descending
+			for i := 0; i < len(rows)-1; i++ {
+				for j := i + 1; j < len(rows); j++ {
+					if rows[i].val < rows[j].val {
+						rows[i], rows[j] = rows[j], rows[i]
+					}
+				}
+			}
+		}
+
+		// Set up headers: Group, Name, then each host column
 		headers := append([]string{"Group", "Name"}, hosts...)
 		ft.SetupHeaders(headers)
 
-		// Create rows for each unique group,name combination
+		// Create rows grouped by group and sorted by value
 		rowIndex := 1
-		for key := range rowKeys {
-			parts := strings.SplitN(key, ",", 2)
-			groupName := parts[0]
-			name := parts[1]
-
-			// Create cells for this row
-			cells := make([]*tview.TableCell, len(headers))
-			cells[0] = tview.NewTableCell(groupName)
-			cells[1] = tview.NewTableCell(name)
-
-			// Add value for each host
-			for i, host := range hosts {
-				val := int64(0)
-				if hostData, exists := data[host]; exists {
-					if v, exists := hostData[key]; exists {
-						val = v
-					}
+		processedKeys := make(map[string]bool) // track processed (group,name) combinations
+		
+		for _, groupRows := range groupData {
+			for _, row := range groupRows {
+				key := fmt.Sprintf("%s,%s", row.group, row.name)
+				if processedKeys[key] {
+					continue // skip duplicates
 				}
-				cells[i+2] = tview.NewTableCell(formatReadableSize(val))
-			}
+				processedKeys[key] = true
 
-			ft.SetRow(rowIndex, cells)
-			rowIndex++
+				// Create cells for this row
+				cells := make([]*tview.TableCell, len(headers))
+				cells[0] = tview.NewTableCell(row.group)
+				cells[1] = tview.NewTableCell(row.name)
+
+				// Add value for each host
+				for i, host := range hosts {
+					val := int64(0)
+					if hostData, exists := data[host]; exists {
+						if v, exists := hostData[key]; exists {
+							val = v
+						}
+					}
+					cells[i+2] = tview.NewTableCell(formatReadableSize(val))
+				}
+
+				ft.SetRow(rowIndex, cells)
+				rowIndex++
+			}
 		}
 
 		// Queue a single UI update to attach the populated table and set focus/input handlers.
