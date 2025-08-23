@@ -582,250 +582,253 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold int64, fromTime
 	fromStr := fromTime.Format("2006-01-02 15:04:05 -07:00")
 	toStr := toTime.Format("2006-01-02 15:04:05 -07:00")
 
-	// Get top query above threshold
-	q := fmt.Sprintf("SELECT query, query_duration_ms FROM clusterAllReplicas('%s', merge(system,'^query_log')) WHERE event_date >= toDate(parseDateTimeBestEffort('%s')) AND event_date <= toDate(parseDateTimeBestEffort('%s')) AND event_time >= parseDateTimeBestEffort('%s') AND event_time <= parseDateTimeBestEffort('%s') AND normalized_query_hash = '%s' AND query_duration_ms > %d ORDER BY query_duration_ms DESC LIMIT 1",
-		cluster, fromStr, toStr, fromStr, toStr, strings.ReplaceAll(hash, "'", "''"), threshold,
-	)
-	rows, err := a.clickHouse.Query(q)
-	log.Error().Stack().Msg("BLA!!!!")
-	if err != nil {
-		log.Error().Stack().Msg("BLA1!!!!")
-		a.tviewApp.QueueUpdateDraw(func() {
-			log.Error().Stack().Msg("SUKA0")
-			explainOutput.SetText(fmt.Sprintf("Error fetching query: %v\n%s", err, q))
-			a.pages.SwitchToPage("explain")
-			a.tviewApp.SetFocus(explainOutput)
-		})
-		return
-	}
-	defer func() {
-		if closeErr := rows.Close(); closeErr != nil {
-			log.Error().Err(closeErr).Msg("can't close top query rows")
-		}
-	}()
-
-	var queryText string
-	var duration float64
-	log.Error().Stack().Msg("BLA2!!!!")
-	if rows.Next() {
-		log.Error().Stack().Msg("BLA3!!!!")
-		if scanErr := rows.Scan(&queryText, &duration); scanErr != nil {
-			a.tviewApp.QueueUpdateDraw(func() {
-				log.Error().Stack().Msg("SUKA1")
-				explainOutput.SetText(fmt.Sprintf("Error scanning top query: %v", scanErr))
+	// Run the database query in a goroutine to avoid blocking the UI thread
+	go func() {
+		// Get top query above threshold
+		q := fmt.Sprintf("SELECT query, query_duration_ms FROM clusterAllReplicas('%s', merge(system,'^query_log')) WHERE event_date >= toDate(parseDateTimeBestEffort('%s')) AND event_date <= toDate(parseDateTimeBestEffort('%s')) AND event_time >= parseDateTimeBestEffort('%s') AND event_time <= parseDateTimeBestEffort('%s') AND normalized_query_hash = '%s' AND query_duration_ms > %d ORDER BY query_duration_ms DESC LIMIT 1",
+			cluster, fromStr, toStr, fromStr, toStr, strings.ReplaceAll(hash, "'", "''"), threshold,
+		)
+		rows, err := a.clickHouse.Query(q)
+		log.Error().Stack().Msg("BLA!!!!")
+		if err != nil {
+			log.Error().Stack().Msg("BLA1!!!!")
+			a.tviewApp.QueueUpdate(func() {
+				log.Error().Stack().Msg("SUKA0")
+				explainOutput.SetText(fmt.Sprintf("Error fetching query: %v\n%s", err, q))
 				a.pages.SwitchToPage("explain")
 				a.tviewApp.SetFocus(explainOutput)
 			})
 			return
 		}
-	} else {
-		log.Error().Stack().Msg("BLA4!!!!")
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close top query rows")
+			}
+		}()
 
-		log.Debug().Msg("Queuing UI update for no-query-found")
+		var queryText string
+		var duration float64
+		log.Error().Stack().Msg("BLA2!!!!")
+		if rows.Next() {
+			log.Error().Stack().Msg("BLA3!!!!")
+			if scanErr := rows.Scan(&queryText, &duration); scanErr != nil {
+				a.tviewApp.QueueUpdate(func() {
+					log.Error().Stack().Msg("SUKA1")
+					explainOutput.SetText(fmt.Sprintf("Error scanning top query: %v", scanErr))
+					a.pages.SwitchToPage("explain")
+					a.tviewApp.SetFocus(explainOutput)
+				})
+				return
+			}
+		} else {
+			log.Error().Stack().Msg("BLA4!!!!")
+
+			log.Debug().Msg("Queuing UI update for no-query-found")
+			a.tviewApp.QueueUpdate(func() {
+				log.Error().Stack().Msg("SUKA2")
+				explainOutput.SetText("No query found above threshold")
+				a.pages.SwitchToPage("explain")
+				// Make sure the page is visible and focus is set
+				a.pages.SendToFront("explain")
+				a.tviewApp.SetFocus(explainOutput)
+			})
+			return
+		}
+
+		log.Error().Stack().Msg("BLA5!!!!")
+		// Build explain queries
+		explain1 := fmt.Sprintf("EXPLAIN PLAN indexes=1, projections=1 %s", queryText)
+		explain2 := fmt.Sprintf("EXPLAIN PIPELINE %s", queryText)
+		explain3 := fmt.Sprintf("EXPLAIN ESTIMATE %s", queryText)
+
+		// Use QueryView to show the normalized query
+		qv := widgets.NewQueryView()
+		qv.SetSQL(queryText)
+		qv.SetBorder(true).SetTitle("Query Text")
+
+		// Three text areas for explain outputs (scrollable)
+		// Text selection: Use your terminal's native selection (mouse drag) and copy (Ctrl+Shift+C or Cmd+C)
+		ex1 := tview.NewTextView().
+			SetWrap(true).
+			SetDynamicColors(true).
+			SetScrollable(true).
+			SetRegions(false) // Disable regions to ensure clean text explainOutput
+		ex1.SetBorder(true).SetTitle("EXPLAIN PLAN indexes=1, projections=1")
+
+		ex2 := tview.NewTextView().
+			SetWrap(true).
+			SetDynamicColors(true).
+			SetScrollable(true).
+			SetRegions(false)
+		ex2.SetBorder(true).SetTitle("EXPLAIN PIPELINE")
+
+		ex3 := tview.NewTextView().
+			SetWrap(true).
+			SetDynamicColors(true).
+			SetScrollable(true).
+			SetRegions(false)
+		ex3.SetBorder(true).SetTitle("EXPLAIN ESTIMATE")
+
 		a.tviewApp.QueueUpdate(func() {
-			log.Error().Stack().Msg("SUKA2")
-			explainOutput.SetText("No query found above threshold")
-			a.pages.SwitchToPage("explain")
-			// Make sure the page is visible and focus is set
-			a.pages.SendToFront("explain")
-			a.tviewApp.SetFocus(explainOutput)
+			modal := tview.NewModal().SetText("Running EXPLAINs...").AddButtons([]string{"OK"})
+			// Ensure any previous loading page is removed, then show the loading modal.
+			a.pages.RemovePage("explain_loading")
+			a.pages.AddPage("explain_loading", modal, true, true)
+			a.pages.SwitchToPage("explain_loading")
 		})
-		return
-	}
 
-	log.Error().Stack().Msg("BLA5!!!!")
-	// Build explain queries
-	explain1 := fmt.Sprintf("EXPLAIN PLAN indexes=1, projections=1 %s", queryText)
-	explain2 := fmt.Sprintf("EXPLAIN PIPELINE %s", queryText)
-	explain3 := fmt.Sprintf("EXPLAIN ESTIMATE %s", queryText)
-
-	// Use QueryView to show the normalized query
-	qv := widgets.NewQueryView()
-	qv.SetSQL(queryText)
-	qv.SetBorder(true).SetTitle("Query Text")
-
-	// Three text areas for explain outputs (scrollable)
-	// Text selection: Use your terminal's native selection (mouse drag) and copy (Ctrl+Shift+C or Cmd+C)
-	ex1 := tview.NewTextView().
-		SetWrap(true).
-		SetDynamicColors(true).
-		SetScrollable(true).
-		SetRegions(false) // Disable regions to ensure clean text explainOutput
-	ex1.SetBorder(true).SetTitle("EXPLAIN PLAN indexes=1, projections=1")
-
-	ex2 := tview.NewTextView().
-		SetWrap(true).
-		SetDynamicColors(true).
-		SetScrollable(true).
-		SetRegions(false)
-	ex2.SetBorder(true).SetTitle("EXPLAIN PIPELINE")
-
-	ex3 := tview.NewTextView().
-		SetWrap(true).
-		SetDynamicColors(true).
-		SetScrollable(true).
-		SetRegions(false)
-	ex3.SetBorder(true).SetTitle("EXPLAIN ESTIMATE")
-
-	a.tviewApp.QueueUpdateDraw(func() {
-		modal := tview.NewModal().SetText("Running EXPLAINs...").AddButtons([]string{"OK"})
-		// Ensure any previous loading page is removed, then show the loading modal.
-		a.pages.RemovePage("explain_loading")
-		a.pages.AddPage("explain_loading", modal, true, true)
-		a.pages.SwitchToPage("explain_loading")
-	})
-
-	// Run explains (best-effort)
-	go func() {
-		log.Info().Msgf("running explain1: %s", explain1)
-		if rows1, err1 := a.clickHouse.Query(explain1); err1 == nil {
-			var buf strings.Builder
-			for rows1.Next() {
-				var s string
-				_ = rows1.Scan(&s)
-				buf.WriteString(s)
-				buf.WriteString("\n")
-			}
-			rows1.Close()
-			a.tviewApp.QueueUpdateDraw(func() {
-				ex1.SetText(buf.String())
-			})
-		} else {
-			a.tviewApp.QueueUpdateDraw(func() {
-				ex1.SetText(fmt.Sprintf("Error running explain: %v", err1))
-			})
-		}
-
-		log.Info().Msgf("running explain2: %s", explain2)
-		if rows2, err2 := a.clickHouse.Query(explain2); err2 == nil {
-			var buf strings.Builder
-			for rows2.Next() {
-				var s string
-				_ = rows2.Scan(&s)
-				buf.WriteString(s)
-				buf.WriteString("\n")
-			}
-			rows2.Close()
-			a.tviewApp.QueueUpdateDraw(func() {
-				ex2.SetText(buf.String())
-			})
-		} else {
-			a.tviewApp.QueueUpdateDraw(func() {
-				ex2.SetText(fmt.Sprintf("Error running explain: %v", err2))
-			})
-		}
-
-		log.Info().Msgf("running explain3: %s", explain3)
-		if rows3, err3 := a.clickHouse.Query(explain3); err3 == nil {
-			var buf strings.Builder
-
-			cols, _ := rows3.Columns()
-
-			// Prefer explicit scan when we have the expected five columns:
-			// database (string), table (string), parts (UInt64), rows (UInt64), marks (UInt64)
-			if len(cols) >= 5 {
-				type rec struct {
-					db    string
-					table string
-					parts uint64
-					rows  uint64
-					marks uint64
-				}
-				var rowsData []rec
-
-				for rows3.Next() {
-					var db, table string
-					var parts, rcount, marks uint64
-					if err := rows3.Scan(&db, &table, &parts, &rcount, &marks); err != nil {
-						log.Error().Err(err).Msg("scan explain estimate row")
-						continue
-					}
-					rowsData = append(rowsData, rec{db: db, table: table, parts: parts, rows: rcount, marks: marks})
-				}
-
-				// Compute column widths for a compact aligned table
-				col0 := "database.table"
-				w0 := len(col0)
-				w1 := len("parts")
-				w2 := len("rows")
-				w3 := len("marks")
-
-				for _, r := range rowsData {
-					n := fmt.Sprintf("%s.%s", r.db, r.table)
-					if len(n) > w0 {
-						w0 = len(n)
-					}
-					if l := len(fmt.Sprintf("%d", r.parts)); l > w1 {
-						w1 = l
-					}
-					if l := len(fmt.Sprintf("%d", r.rows)); l > w2 {
-						w2 = l
-					}
-					if l := len(fmt.Sprintf("%d", r.marks)); l > w3 {
-						w3 = l
-					}
-				}
-
-				// Header and separator
-				fmt.Fprintf(&buf, "%-*s  %*s  %*s  %*s\n", w0, col0, w1, "parts", w2, "rows", w3, "marks")
-				fmt.Fprintf(&buf, "%s\n", strings.Repeat("-", w0+2+w1+2+w2+2+w3))
-
-				// Rows
-				for _, r := range rowsData {
-					fmt.Fprintf(&buf, "%-*s  %*d  %*d  %*d\n",
-						w0, fmt.Sprintf("%s.%s", r.db, r.table),
-						w1, r.parts,
-						w2, r.rows,
-						w3, r.marks,
-					)
-				}
-			} else {
-				// Fallback: render generically for unknown schemas
-				for rows3.Next() {
-					dest := make([]interface{}, len(cols))
-					for i := range dest {
-						var v interface{}
-						dest[i] = &v
-					}
-					if err := rows3.Scan(dest...); err != nil {
-						continue
-					}
-					for i := range cols {
-						if i > 0 {
-							buf.WriteString("\t")
-						}
-						buf.WriteString(fmt.Sprintf("%s: %v", cols[i], *(dest[i].(*interface{}))))
-					}
+		// Run explains (best-effort)
+		go func() {
+			log.Info().Msgf("running explain1: %s", explain1)
+			if rows1, err1 := a.clickHouse.Query(explain1); err1 == nil {
+				var buf strings.Builder
+				for rows1.Next() {
+					var s string
+					_ = rows1.Scan(&s)
+					buf.WriteString(s)
 					buf.WriteString("\n")
 				}
+				rows1.Close()
+				a.tviewApp.QueueUpdateDraw(func() {
+					ex1.SetText(buf.String())
+				})
+			} else {
+				a.tviewApp.QueueUpdateDraw(func() {
+					ex1.SetText(fmt.Sprintf("Error running explain: %v", err1))
+				})
 			}
 
-			rows3.Close()
+			log.Info().Msgf("running explain2: %s", explain2)
+			if rows2, err2 := a.clickHouse.Query(explain2); err2 == nil {
+				var buf strings.Builder
+				for rows2.Next() {
+					var s string
+					_ = rows2.Scan(&s)
+					buf.WriteString(s)
+					buf.WriteString("\n")
+				}
+				rows2.Close()
+				a.tviewApp.QueueUpdateDraw(func() {
+					ex2.SetText(buf.String())
+				})
+			} else {
+				a.tviewApp.QueueUpdateDraw(func() {
+					ex2.SetText(fmt.Sprintf("Error running explain: %v", err2))
+				})
+			}
+
+			log.Info().Msgf("running explain3: %s", explain3)
+			if rows3, err3 := a.clickHouse.Query(explain3); err3 == nil {
+				var buf strings.Builder
+
+				cols, _ := rows3.Columns()
+
+				// Prefer explicit scan when we have the expected five columns:
+				// database (string), table (string), parts (UInt64), rows (UInt64), marks (UInt64)
+				if len(cols) >= 5 {
+					type rec struct {
+						db    string
+						table string
+						parts uint64
+						rows  uint64
+						marks uint64
+					}
+					var rowsData []rec
+
+					for rows3.Next() {
+						var db, table string
+						var parts, rcount, marks uint64
+						if err := rows3.Scan(&db, &table, &parts, &rcount, &marks); err != nil {
+							log.Error().Err(err).Msg("scan explain estimate row")
+							continue
+						}
+						rowsData = append(rowsData, rec{db: db, table: table, parts: parts, rows: rcount, marks: marks})
+					}
+
+					// Compute column widths for a compact aligned table
+					col0 := "database.table"
+					w0 := len(col0)
+					w1 := len("parts")
+					w2 := len("rows")
+					w3 := len("marks")
+
+					for _, r := range rowsData {
+						n := fmt.Sprintf("%s.%s", r.db, r.table)
+						if len(n) > w0 {
+							w0 = len(n)
+						}
+						if l := len(fmt.Sprintf("%d", r.parts)); l > w1 {
+							w1 = l
+						}
+						if l := len(fmt.Sprintf("%d", r.rows)); l > w2 {
+							w2 = l
+						}
+						if l := len(fmt.Sprintf("%d", r.marks)); l > w3 {
+							w3 = l
+						}
+					}
+
+					// Header and separator
+					fmt.Fprintf(&buf, "%-*s  %*s  %*s  %*s\n", w0, col0, w1, "parts", w2, "rows", w3, "marks")
+					fmt.Fprintf(&buf, "%s\n", strings.Repeat("-", w0+2+w1+2+w2+2+w3))
+
+					// Rows
+					for _, r := range rowsData {
+						fmt.Fprintf(&buf, "%-*s  %*d  %*d  %*d\n",
+							w0, fmt.Sprintf("%s.%s", r.db, r.table),
+							w1, r.parts,
+							w2, r.rows,
+							w3, r.marks,
+						)
+					}
+				} else {
+					// Fallback: render generically for unknown schemas
+					for rows3.Next() {
+						dest := make([]interface{}, len(cols))
+						for i := range dest {
+							var v interface{}
+							dest[i] = &v
+						}
+						if err := rows3.Scan(dest...); err != nil {
+							continue
+						}
+						for i := range cols {
+							if i > 0 {
+								buf.WriteString("\t")
+							}
+							buf.WriteString(fmt.Sprintf("%s: %v", cols[i], *(dest[i].(*interface{}))))
+						}
+						buf.WriteString("\n")
+					}
+				}
+
+				rows3.Close()
+				a.tviewApp.QueueUpdateDraw(func() {
+					ex3.SetText(buf.String())
+				})
+			} else {
+				a.tviewApp.QueueUpdateDraw(func() {
+					ex3.SetText(fmt.Sprintf("Error running explain: %v", err3))
+				})
+			}
+
+			// Build final layout on UI goroutine
 			a.tviewApp.QueueUpdateDraw(func() {
-				ex3.SetText(buf.String())
+				// Three columns with query view on top or left
+				rightFlex := tview.NewFlex().SetDirection(tview.FlexRow).
+					AddItem(ex1, 0, 1, false).
+					AddItem(ex2, 0, 1, false).
+					AddItem(ex3, 0, 1, false)
+
+				mainFlex := tview.NewFlex().SetDirection(tview.FlexColumn).
+					AddItem(qv, 0, 1, false).
+					AddItem(rightFlex, 0, 2, false)
+
+				// Remove loading modal if present, then show results.
+				a.pages.RemovePage("explain_loading")
+				a.pages.AddPage("explain_result", mainFlex, true, true)
+				a.pages.SwitchToPage("explain_result")
 			})
-		} else {
-			a.tviewApp.QueueUpdateDraw(func() {
-				ex3.SetText(fmt.Sprintf("Error running explain: %v", err3))
-			})
-		}
-
-		// Build final layout on UI goroutine
-		a.tviewApp.QueueUpdateDraw(func() {
-			// Three columns with query view on top or left
-			rightFlex := tview.NewFlex().SetDirection(tview.FlexRow).
-				AddItem(ex1, 0, 1, false).
-				AddItem(ex2, 0, 1, false).
-				AddItem(ex3, 0, 1, false)
-
-			mainFlex := tview.NewFlex().SetDirection(tview.FlexColumn).
-				AddItem(qv, 0, 1, false).
-				AddItem(rightFlex, 0, 2, false)
-
-			// Remove loading modal if present, then show results.
-			a.pages.RemovePage("explain_loading")
-			a.pages.AddPage("explain_result", mainFlex, true, true)
-			a.pages.SwitchToPage("explain_result")
-		})
+		}()
 	}()
 }
