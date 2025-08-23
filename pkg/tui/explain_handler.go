@@ -622,14 +622,13 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold int64, fromTime
 		log.Error().Stack().Msg("BLA4!!!!")
 
 		log.Debug().Msg("Queuing UI update for no-query-found")
-		a.tviewApp.QueueUpdateDraw(func() {
+		a.tviewApp.QueueUpdate(func() {
 			log.Error().Stack().Msg("SUKA2")
 			explainOutput.SetText("No query found above threshold")
 			a.pages.SwitchToPage("explain")
 			// Make sure the page is visible and focus is set
 			a.pages.SendToFront("explain")
 			a.tviewApp.SetFocus(explainOutput)
-			a.tviewApp.Draw()
 		})
 		return
 	}
