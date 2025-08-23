@@ -67,11 +67,9 @@ SETTINGS skip_unavailable_shards=1
 
 	// Prepare the filtered table ahead of the goroutine so UI can be updated atomically later
 	ft := widgets.NewFilteredTable()
-	headers := []string{"Host", "Group", "Name", "Value"}
-	ft.SetupHeaders(headers)
 	ft.Table.SetBorder(true)
 	ft.Table.SetTitle("Memory usage")
-	ft.Table.SetFixed(1, 0)
+	ft.Table.SetFixed(1, 1) // Fix first row and column
 
 	// Perform the long-running query and row scanning in a goroutine,
 	// then queue a single UI update to add the page and focus the table.
@@ -85,7 +83,11 @@ SETTINGS skip_unavailable_shards=1
 		}
 		defer rows.Close()
 
-		rowIndex := 1
+		// Collect data for pivot table
+		hostSet := make(map[string]bool)
+		rowKeys := make(map[string][]string) // group,name -> [hosts]
+		data := make(map[string]map[string]int64) // host -> (group,name) -> value
+
 		for rows.Next() {
 			var host, groupName, name string
 			var priority, val int64
@@ -94,13 +96,59 @@ SETTINGS skip_unavailable_shards=1
 				continue
 			}
 
-			cells := []*tview.TableCell{
-				tview.NewTableCell(host),
-				tview.NewTableCell(groupName),
-				tview.NewTableCell(name),
-				tview.NewTableCell(formatReadableSize(val)),
+			hostSet[host] = true
+			key := fmt.Sprintf("%s,%s", groupName, name)
+			rowKeys[key] = nil // Just track the keys
+
+			if data[host] == nil {
+				data[host] = make(map[string]int64)
 			}
-			// Add original cells so filtering works over host, group, name
+			data[host][key] = val
+		}
+
+		// Convert hostSet to sorted slice
+		hosts := make([]string, 0, len(hostSet))
+		for host := range hostSet {
+			hosts = append(hosts, host)
+		}
+
+		// Sort hosts for consistent column order
+		// (simple alphabetical sort)
+		for i := 0; i < len(hosts)-1; i++ {
+			for j := i + 1; j < len(hosts); j++ {
+				if hosts[i] > hosts[j] {
+					hosts[i], hosts[j] = hosts[j], hosts[i]
+				}
+			}
+		}
+
+		// Set up headers: Host, Group, Name, then each host column
+		headers := append([]string{"Group", "Name"}, hosts...)
+		ft.SetupHeaders(headers)
+
+		// Create rows for each unique group,name combination
+		rowIndex := 1
+		for key := range rowKeys {
+			parts := strings.SplitN(key, ",", 2)
+			groupName := parts[0]
+			name := parts[1]
+
+			// Create cells for this row
+			cells := make([]*tview.TableCell, len(headers))
+			cells[0] = tview.NewTableCell(groupName)
+			cells[1] = tview.NewTableCell(name)
+
+			// Add value for each host
+			for i, host := range hosts {
+				val := int64(0)
+				if hostData, exists := data[host]; exists {
+					if v, exists := hostData[key]; exists {
+						val = v
+					}
+				}
+				cells[i+2] = tview.NewTableCell(formatReadableSize(val))
+			}
+
 			ft.SetRow(rowIndex, cells)
 			rowIndex++
 		}
