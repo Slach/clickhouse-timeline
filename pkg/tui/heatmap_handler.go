@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/Slach/clickhouse-timeline/pkg/timezone"
-	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
 	"github.com/rs/zerolog/log"
 
 	"github.com/gdamore/tcell/v2"
