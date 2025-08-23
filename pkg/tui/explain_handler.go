@@ -589,11 +589,8 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold float64, fromTi
 			cluster, fromStr, toStr, fromStr, toStr, strings.ReplaceAll(hash, "'", "''"), threshold,
 		)
 		rows, err := a.clickHouse.Query(q)
-		log.Error().Stack().Msg("BLA!!!!")
 		if err != nil {
-			log.Error().Stack().Msg("BLA1!!!!")
 			a.tviewApp.QueueUpdate(func() {
-				log.Error().Stack().Msg("SUKA0")
 				explainOutput.SetText(fmt.Sprintf("Error fetching query: %v\n%s", err, q))
 				a.pages.SwitchToPage("explain")
 				a.tviewApp.SetFocus(explainOutput)
@@ -608,12 +605,9 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold float64, fromTi
 
 		var queryText string
 		var duration float64
-		log.Error().Stack().Msg("BLA2!!!!")
 		if rows.Next() {
-			log.Error().Stack().Msg("BLA3!!!!")
 			if scanErr := rows.Scan(&queryText, &duration); scanErr != nil {
 				a.tviewApp.QueueUpdate(func() {
-					log.Error().Stack().Msg("SUKA1")
 					explainOutput.SetText(fmt.Sprintf("Error scanning top query: %v", scanErr))
 					a.pages.SwitchToPage("explain")
 					a.tviewApp.SetFocus(explainOutput)
@@ -621,11 +615,8 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold float64, fromTi
 				return
 			}
 		} else {
-			log.Error().Stack().Msg("BLA4!!!!")
-
 			log.Debug().Msg("Queuing UI update for no-query-found")
 			a.tviewApp.QueueUpdateDraw(func() {
-				log.Error().Stack().Msg("SUKA2")
 				explainOutput.SetText("[red]No query found above threshold[-]")
 				a.pages.SwitchToPage("explain")
 				// Make sure the page is visible and focus is set
@@ -635,7 +626,6 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold float64, fromTi
 			return
 		}
 
-		log.Error().Stack().Msg("BLA5!!!!")
 		// Build explain queries
 		explain1 := fmt.Sprintf("EXPLAIN PLAN indexes=1, projections=1 %s", queryText)
 		explain2 := fmt.Sprintf("EXPLAIN PIPELINE %s", queryText)
