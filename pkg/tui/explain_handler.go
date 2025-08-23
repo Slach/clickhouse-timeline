@@ -764,11 +764,11 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold float64, fromTi
 
 					// Rows
 					for _, r := range rowsData {
-						fmt.Fprintf(&buf, "%-*s  %*d  %*d  %*d\n",
+						fmt.Fprintf(&buf, "%-*s  %*s  %*s  %*s\n",
 							w0, fmt.Sprintf("%s.%s", r.db, r.table),
-							w1, r.parts,
-							w2, r.rows,
-							w3, r.marks,
+							w1, widgets.FormatReadable(float64(r.parts), true),
+							w2, widgets.FormatReadable(float64(r.rows), true),
+							w3, widgets.FormatReadable(float64(r.marks), true),
 						)
 					}
 				} else {

@@ -86,18 +86,8 @@ func (a *App) generateLegend(minValue, maxValue float64) *tview.Table {
 		stepValue := minValue + (maxValue-minValue)*float64(i)/float64(steps-1)
 
 		// Format the value
-		var displayValue string
-		if a.heatmapMetric == MetricCount {
-			displayValue = fmt.Sprintf("%.0f", stepValue)
-		} else if stepValue >= 1000000000 {
-			displayValue = fmt.Sprintf("%.1fG", stepValue/1000000000)
-		} else if stepValue >= 1000000 {
-			displayValue = fmt.Sprintf("%.1fM", stepValue/1000000)
-		} else if stepValue >= 1000 {
-			displayValue = fmt.Sprintf("%.1fK", stepValue/1000)
-		} else {
-			displayValue = fmt.Sprintf("%.1f", stepValue)
-		}
+		isCount := a.heatmapMetric == MetricCount
+		displayValue := widgets.FormatReadable(stepValue, isCount)
 
 		// Calculate normalized value for color
 		normalizedValue := a.applyScaling(stepValue, minValue, maxValue)
