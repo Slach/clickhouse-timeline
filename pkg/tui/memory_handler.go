@@ -93,7 +93,8 @@ SETTINGS skip_unavailable_shards=1
 		hosts := []string{}
 		prevHost := ""
 		groupData := make(map[string][]memoryRow) // group -> rows
-		data := make(map[string]map[string]int64) // host -> (group,name) -> value
+		groupPriority := make(map[string]int64)    // group -> priority
+		data := make(map[string]map[string]int64)  // host -> (group,name) -> value
 
 		// First pass: collect all data
 		for rows.Next() {
@@ -118,6 +119,11 @@ SETTINGS skip_unavailable_shards=1
 			}
 			
 			groupData[groupName] = append(groupData[groupName], row)
+			
+			// Store priority for group (first occurrence will be the priority from SQL)
+			if _, exists := groupPriority[groupName]; !exists {
+				groupPriority[groupName] = priority
+			}
 
 			key := fmt.Sprintf("%s,%s", groupName, name)
 			if data[host] == nil {
@@ -139,15 +145,36 @@ SETTINGS skip_unavailable_shards=1
 			}
 		}
 
+		// Create sorted list of groups by priority
+		type groupInfo struct {
+			name     string
+			priority int64
+		}
+		
+		groups := make([]groupInfo, 0, len(groupData))
+		for groupName := range groupData {
+			groups = append(groups, groupInfo{name: groupName, priority: groupPriority[groupName]})
+		}
+		
+		// Sort groups by priority
+		for i := 0; i < len(groups)-1; i++ {
+			for j := i + 1; j < len(groups); j++ {
+				if groups[i].priority > groups[j].priority {
+					groups[i], groups[j] = groups[j], groups[i]
+				}
+			}
+		}
+
 		// Set up headers: Group, Name, then each host column
 		headers := append([]string{"Group", "Name"}, hosts...)
 		ft.SetupHeaders(headers)
 
-		// Create rows grouped by group and sorted by value
+		// Create rows grouped by group (sorted by priority) and sorted by value within each group
 		rowIndex := 1
 		processedKeys := make(map[string]bool) // track processed (group,name) combinations
 		
-		for _, groupRows := range groupData {
+		for _, groupInfo := range groups {
+			groupRows := groupData[groupInfo.name]
 			for _, row := range groupRows {
 				key := fmt.Sprintf("%s,%s", row.group, row.name)
 				if processedKeys[key] {
