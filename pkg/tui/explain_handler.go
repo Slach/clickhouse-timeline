@@ -422,6 +422,7 @@ func (a *App) ShowExplainQuerySelectionFormWithPrefill(prefillHash string, fromT
 	})
 	buttonsFlex := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(searchBtn, 0, 1, false).
+		AddItem(nil, 1, 0, false). // Margin between buttons
 		AddItem(cancelBtn, 0, 1, false)
 
 	// Make Tab/Shift-Tab navigation work:
