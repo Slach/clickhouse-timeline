@@ -505,6 +505,56 @@ func (a *App) ShowHeatmap() {
 						}
 						return nil
 					}
+					
+					// Handle zoom functions with Ctrl+Plus/Minus/0
+					switch event.Rune() {
+					case '+', '=': // Zoom in
+						row, col := table.GetSelection()
+						// Only zoom in on data cells
+						if row > 0 && col > 0 && row <= len(categories) && col <= len(timestamps) {
+							timestamp := timestamps[col-1]
+							fromTime := timestamp
+							toTime := timestamp.Add(time.Duration(intervalSeconds) * time.Second)
+							
+							// Zoom in by reducing the time range to the selected cell's interval
+							zoomFactor := 0.5
+							currentRange := toTime.Sub(fromTime)
+							newRange := time.Duration(float64(currentRange) * zoomFactor)
+							center := fromTime.Add(currentRange / 2)
+							a.fromTime = center.Add(-newRange / 2)
+							a.toTime = center.Add(newRange / 2)
+							
+							// Regenerate heatmap with new time range
+							a.ShowHeatmap()
+						}
+						return nil
+					case '-': // Zoom out
+						// Zoom out by expanding the time range
+						currentRange := a.toTime.Sub(a.fromTime)
+						zoomFactor := 2.0
+						newRange := time.Duration(float64(currentRange) * zoomFactor)
+						center := a.fromTime.Add(currentRange / 2)
+						a.fromTime = center.Add(-newRange / 2)
+						a.toTime = center.Add(newRange / 2)
+						
+						// But don't exceed the initial range
+						if a.fromTime.Before(a.initialFromTime) {
+							a.fromTime = a.initialFromTime
+						}
+						if a.toTime.After(a.initialToTime) {
+							a.toTime = a.initialToTime
+						}
+						
+						// Regenerate heatmap with new time range
+						a.ShowHeatmap()
+						return nil
+					case '0': // Reset to initial range
+						a.fromTime = a.initialFromTime
+						a.toTime = a.initialToTime
+						// Regenerate heatmap with initial time range
+						a.ShowHeatmap()
+						return nil
+					}
 				}
 
 				// When Enter is pressed, show action menu

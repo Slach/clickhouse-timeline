@@ -62,9 +62,11 @@ type App struct {
 	CLI          *types.CLI
 
 	// Date range fields
-	fromTime  time.Time
-	toTime    time.Time
-	rangeForm *tview.Form
+	fromTime      time.Time
+	toTime        time.Time
+	initialFromTime time.Time
+	initialToTime   time.Time
+	rangeForm     *tview.Form
 
 	// Heatmap fields
 	categoryType  CategoryType
@@ -89,15 +91,17 @@ type App struct {
 func NewApp(cfg *config.Config, version string) *App {
 	now := time.Now()
 	app := &App{
-		cfg:           cfg,
-		tviewApp:      tview.NewApplication(),
-		version:       version,
-		fromTime:      now.Add(-24 * time.Hour), // Default: 24 hours ago
-		toTime:        now,                      // Default: now
-		categoryType:  CategoryQueryHash,        // Default categoryType
-		heatmapMetric: MetricCount,              // Default metric
-		scaleType:     ScaleLinear,              // Default scale
-		CLI:           &types.CLI{},             // Initialize empty CLI
+		cfg:             cfg,
+		tviewApp:        tview.NewApplication(),
+		version:         version,
+		fromTime:        now.Add(-24 * time.Hour), // Default: 24 hours ago
+		toTime:          now,                      // Default: now
+		initialFromTime: now.Add(-24 * time.Hour), // Store initial range
+		initialToTime:   now,                      // Store initial range
+		categoryType:    CategoryQueryHash,        // Default categoryType
+		heatmapMetric:   MetricCount,              // Default metric
+		scaleType:       ScaleLinear,              // Default scale
+		CLI:             &types.CLI{},             // Initialize empty CLI
 	}
 
 	app.setupUI()
@@ -188,10 +192,18 @@ func (a *App) ApplyCLIParameters(c *types.CLI, commandName string) {
 
 func (a *App) SetFromTime(t time.Time) {
 	a.fromTime = t
+	// Update initial time if this is the first setting or a reset
+	if a.initialFromTime.IsZero() || a.initialToTime.IsZero() {
+		a.initialFromTime = t
+	}
 }
 
 func (a *App) SetToTime(t time.Time) {
 	a.toTime = t
+	// Update initial time if this is the first setting or a reset
+	if a.initialFromTime.IsZero() || a.initialToTime.IsZero() {
+		a.initialToTime = t
+	}
 }
 
 func (a *App) SetCluster(cluster string) {
