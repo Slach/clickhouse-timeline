@@ -62,11 +62,11 @@ type App struct {
 	CLI          *types.CLI
 
 	// Date range fields
-	fromTime      time.Time
-	toTime        time.Time
+	fromTime        time.Time
+	toTime          time.Time
 	initialFromTime time.Time
 	initialToTime   time.Time
-	rangeForm     *tview.Form
+	rangeForm       *tview.Form
 
 	// Heatmap fields
 	categoryType  CategoryType
@@ -163,6 +163,10 @@ func (a *App) ApplyCLIParameters(c *types.CLI, commandName string) {
 		a.ApplyPredefinedRange(c.RangeOption)
 		mainMsg += fmt.Sprintf("Set time range '%s' from: '%s' to: '%s'\n", c.RangeOption, a.fromTime.Format("2006-01-02 15:04:05 -07:00"), a.toTime.Format("2006-01-02 15:04:05 -07:00"))
 	}
+
+	// Update initial time range after applying CLI parameters
+	a.initialFromTime = a.fromTime
+	a.initialToTime = a.toTime
 
 	if c.Cluster != "" {
 		a.SetCluster(c.Cluster)
