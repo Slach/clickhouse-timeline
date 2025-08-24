@@ -506,11 +506,11 @@ func (a *App) ShowHeatmap() {
 						return nil
 					}
 
-					// Handle zoom functions with Ctrl+Alt+Plus/Minus/0
-					if event.Modifiers()&tcell.ModCtrl != 0 && event.Modifiers()&tcell.ModAlt != 0 {
+					// Handle zoom functions with Ctrl+Plus/Minus/0 (more reliable than Ctrl+Alt)
+					if event.Modifiers()&tcell.ModCtrl != 0 {
 						switch event.Rune() {
-						case '+', '=': // Zoom in
-							log.Info().Msg("SUKA ZOOM-IN")
+						case '+', '=': // Zoom in (Ctrl++)
+							log.Info().Msg("ZOOM-IN")
 							row, col := table.GetSelection()
 							// Only zoom in on data cells
 							if row > 0 && col > 0 && row <= len(categories) && col <= len(timestamps) {
@@ -530,8 +530,8 @@ func (a *App) ShowHeatmap() {
 								a.ShowHeatmap()
 							}
 							return nil
-						case '-':
-							log.Info().Msg("SUKA ZOOM-OUT")
+						case '-': // Zoom out (Ctrl+-)
+							log.Info().Msg("ZOOM-OUT")
 							// Zoom out by expanding the time range
 							currentRange := a.toTime.Sub(a.fromTime)
 							zoomFactor := 2.0
@@ -551,8 +551,8 @@ func (a *App) ShowHeatmap() {
 							// Regenerate heatmap with new time range
 							a.ShowHeatmap()
 							return nil
-						case '0': // Reset to initial range
-							log.Info().Msg("SUKA ZOOM-RESET")
+						case '0': // Reset to initial range (Ctrl+0)
+							log.Info().Msg("ZOOM-RESET")
 							a.fromTime = a.initialFromTime
 							a.toTime = a.initialToTime
 							// Regenerate heatmap with initial time range
