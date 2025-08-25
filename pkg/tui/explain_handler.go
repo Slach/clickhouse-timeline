@@ -816,10 +816,56 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold float64, fromTi
 					AddItem(qv, 0, 1, false).
 					AddItem(rightFlex, 0, 2, false)
 
+				// Add tab navigation between views
+				qv.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+					if event.Key() == tcell.KeyTab {
+						a.tviewApp.SetFocus(ex1)
+						return nil
+					} else if event.Key() == tcell.KeyBacktab {
+						a.tviewApp.SetFocus(ex3)
+						return nil
+					}
+					return event
+				})
+
+				ex1.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+					if event.Key() == tcell.KeyTab {
+						a.tviewApp.SetFocus(ex2)
+						return nil
+					} else if event.Key() == tcell.KeyBacktab {
+						a.tviewApp.SetFocus(qv)
+						return nil
+					}
+					return event
+				})
+
+				ex2.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+					if event.Key() == tcell.KeyTab {
+						a.tviewApp.SetFocus(ex3)
+						return nil
+					} else if event.Key() == tcell.KeyBacktab {
+						a.tviewApp.SetFocus(ex1)
+						return nil
+					}
+					return event
+				})
+
+				ex3.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+					if event.Key() == tcell.KeyTab {
+						a.tviewApp.SetFocus(qv)
+						return nil
+					} else if event.Key() == tcell.KeyBacktab {
+						a.tviewApp.SetFocus(ex2)
+						return nil
+					}
+					return event
+				})
+
 				// Remove loading modal if present, then show results.
 				a.pages.RemovePage("explain_loading")
 				a.pages.AddPage("explain_result", mainFlex, true, true)
 				a.pages.SwitchToPage("explain_result")
+				a.tviewApp.SetFocus(ex1)
 			})
 		}()
 	}()
