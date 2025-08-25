@@ -327,7 +327,7 @@ func (a *App) ShowHeatmap() {
 					value, exists := valueMap[category][timestamp]
 					if exists {
 						// Restore original colors
-						color := getColorForValue(value, minValue, maxValue, a)
+						color := a.getColorForValue(value, minValue, maxValue)
 						table.SetCell(prevRow, prevCol, tview.NewTableCell("█").
 							SetBackgroundColor(color).
 							SetTextColor(color).
@@ -343,7 +343,7 @@ func (a *App) ShowHeatmap() {
 					value, exists := valueMap[category][timestamp]
 					if exists {
 						// Invert colors for selected cell
-						originalColor := getColorForValue(value, minValue, maxValue, a)
+						originalColor := a.getColorForValue(value, minValue, maxValue)
 						// Create inverted color (swap background and text)
 						table.SetCell(row, column, tview.NewTableCell("█").
 							SetBackgroundColor(tcell.ColorWhite).
@@ -719,7 +719,7 @@ func (a *App) ShowHeatmap() {
 }
 
 // Helper function to calculate color for a value based on min/max values and scaling
-func getColorForValue(value, minValue, maxValue float64, a *App) tcell.Color {
+func (a *App) getColorForValue(value, minValue, maxValue float64) tcell.Color {
 	normalizedValue := a.applyScaling(value, minValue, maxValue)
 	if normalizedValue < 0.5 {
 		green := 255
