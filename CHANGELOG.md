@@ -11,6 +11,7 @@ FEATURES
 - Added / filter input for tablesList and kindList in explain
 - Always show header line in filtered memory usage table during scrolling
 - Display memory values using formatReadableSize in ShowMemory
+- Moved heatmap zoom controls (in/out/reset) to action menu for better Windows compatibility
 
 BUG FIXES
 - Fixed heatmap errors when query_start_time equals '1970-01-01'
