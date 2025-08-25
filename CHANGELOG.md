@@ -1,17 +1,16 @@
 # v0.0.2
 FEATURES
 - Added memory viewer command and UI integration
+- Added heatmap zoom controls (zoom in/zoom out/zoom reset) to action menu
 - Implemented Explain query flow with hash filtering and percentiles
 - Added explain command and explain mode in CLI and TUI
 - Enhanced logging format with unquoted values and stack traces
-- Added JSON->text pretty writer for file logging
 - Implemented overlay filter input for filtered list
 - Enabled text selection for explain outputs and QueryView
 - Added RenderList hook to preserve prefixes and selection state
 - Added / filter input for tablesList and kindList in explain
 - Always show header line in filtered memory usage table during scrolling
 - Display memory values using formatReadableSize in ShowMemory
-- Moved heatmap zoom controls (in/out/reset) to action menu for better Windows compatibility
 
 BUG FIXES
 - Fixed heatmap errors when query_start_time equals '1970-01-01'
@@ -25,7 +24,7 @@ BUG FIXES
 - Fixed small SQL errors in various handlers
 - Preserved multiline logs by converting escaped \\n to real newlines
 
-IMPROVEMENTS
+Small IMPROVEMENTS
 - Overhauled Explain UI flow and percentile drilldown
 - Refactored to show only queries list; reveal filter on '/'
 - Enhanced tab navigation for explain query form and hash field input
