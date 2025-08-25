@@ -559,13 +559,13 @@ func (a *App) ShowHeatmap() {
 					menuText := "Select action:\n[f] Flamegraph\n[p] Profile Events"
 					buttons := []string{"Flamegraph (f)", "Profile Events (p)"}
 					if categoryType == CategoryQueryHash {
-						menuText += "\n[q] Explain query"
-						buttons = append(buttons, "Explain (q)")
+						menuText += "\n[e] Explain query"
+						buttons = append(buttons, "Explain (e)")
 					}
-					
+
 					// Add zoom options
 					menuText += "\n[z] Zoom in\n[Z] Zoom out\n[r] Reset zoom"
-					buttons = append(buttons, "Zoom in (z)", "Zoom out (Z)", "Reset (r)")
+					buttons = append(buttons, "Zoom in (z)", "Zoom out (Z)", "Zoom Reset (r)")
 					buttons = append(buttons, "Cancel")
 
 					actionMenu := tview.NewModal().
@@ -579,7 +579,7 @@ func (a *App) ShowHeatmap() {
 							case "Profile Events (p)":
 								a.pages.SwitchToPage("main")
 								a.ShowProfileEvents(categoryType, categoryValue, fromTime, toTime, a.cluster)
-							case "Explain (q)":
+							case "Explain (e)":
 								// Open explain flow. Keep behaviour consistent with other actions.
 								a.pages.SwitchToPage("main")
 								// ShowExplain will add its own page(s) and switch as needed.
@@ -590,14 +590,14 @@ func (a *App) ShowHeatmap() {
 									timestamp := timestamps[col-1]
 									fromTime := timestamp
 									toTime := timestamp.Add(time.Duration(intervalSeconds) * time.Second)
-									
+
 									zoomFactor := 0.5
 									currentRange := toTime.Sub(fromTime)
 									newRange := time.Duration(float64(currentRange) * zoomFactor)
 									center := fromTime.Add(currentRange / 2)
 									a.fromTime = center.Add(-newRange / 2)
 									a.toTime = center.Add(newRange / 2)
-									
+
 									// Regenerate heatmap with new time range
 									a.pages.SwitchToPage("main")
 									a.ShowHeatmap()
@@ -612,7 +612,7 @@ func (a *App) ShowHeatmap() {
 								center := a.fromTime.Add(currentRange / 2)
 								a.fromTime = center.Add(-newRange / 2)
 								a.toTime = center.Add(newRange / 2)
-								
+
 								// But don't exceed the initial range
 								if a.fromTime.Before(a.initialFromTime) {
 									a.fromTime = a.initialFromTime
@@ -620,11 +620,11 @@ func (a *App) ShowHeatmap() {
 								if a.toTime.After(a.initialToTime) {
 									a.toTime = a.initialToTime
 								}
-								
+
 								// Regenerate heatmap with new time range
 								a.pages.SwitchToPage("main")
 								a.ShowHeatmap()
-							case "Reset (r)":
+							case "Zoom Reset (r)":
 								// Reset to initial range
 								a.fromTime = a.initialFromTime
 								a.toTime = a.initialToTime
@@ -645,27 +645,27 @@ func (a *App) ShowHeatmap() {
 							a.pages.SwitchToPage("main")
 							a.ShowProfileEvents(categoryType, categoryValue, fromTime, toTime, a.cluster)
 							return nil
-						case 'q', 'Q':
+						case 'e', 'E':
 							// Only respond if option is relevant (category is normalized_query_hash)
 							if categoryType == CategoryQueryHash {
 								a.pages.SwitchToPage("main")
 								a.ShowExplain(categoryType, categoryValue, fromTime, toTime, a.cluster)
 								return nil
 							}
-						case 'z': // Zoom in
+						case 'z':
 							// Zoom in by reducing the time range to the selected cell's interval
 							if row > 0 && col > 0 && row <= len(categories) && col <= len(timestamps) {
 								timestamp := timestamps[col-1]
 								fromTime := timestamp
 								toTime := timestamp.Add(time.Duration(intervalSeconds) * time.Second)
-								
+
 								zoomFactor := 0.5
 								currentRange := toTime.Sub(fromTime)
 								newRange := time.Duration(float64(currentRange) * zoomFactor)
 								center := fromTime.Add(currentRange / 2)
 								a.fromTime = center.Add(-newRange / 2)
 								a.toTime = center.Add(newRange / 2)
-								
+
 								// Regenerate heatmap with new time range
 								a.pages.SwitchToPage("main")
 								a.ShowHeatmap()
@@ -673,7 +673,7 @@ func (a *App) ShowHeatmap() {
 								a.pages.SwitchToPage("heatmap")
 							}
 							return nil
-						case 'Z': // Zoom out
+						case 'Z':
 							// Zoom out by expanding the time range
 							currentRange := a.toTime.Sub(a.fromTime)
 							zoomFactor := 2.0
@@ -681,7 +681,7 @@ func (a *App) ShowHeatmap() {
 							center := a.fromTime.Add(currentRange / 2)
 							a.fromTime = center.Add(-newRange / 2)
 							a.toTime = center.Add(newRange / 2)
-							
+
 							// But don't exceed the initial range
 							if a.fromTime.Before(a.initialFromTime) {
 								a.fromTime = a.initialFromTime
@@ -689,7 +689,7 @@ func (a *App) ShowHeatmap() {
 							if a.toTime.After(a.initialToTime) {
 								a.toTime = a.initialToTime
 							}
-							
+
 							// Regenerate heatmap with new time range
 							a.pages.SwitchToPage("main")
 							a.ShowHeatmap()
