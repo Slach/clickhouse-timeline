@@ -671,7 +671,7 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold float64, fromTi
 
 		// Run explains (best-effort)
 		go func() {
-			log.Info().Msgf("running explain1: %s", explain1)
+			log.Debug().Msgf("running explain1: %s", explain1)
 			if rows1, err1 := a.clickHouse.Query(explain1); err1 == nil {
 				var buf strings.Builder
 				for rows1.Next() {
@@ -690,7 +690,7 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold float64, fromTi
 				})
 			}
 
-			log.Info().Msgf("running explain2: %s", explain2)
+			log.Debug().Msgf("running explain2: %s", explain2)
 			if rows2, err2 := a.clickHouse.Query(explain2); err2 == nil {
 				var buf strings.Builder
 				for rows2.Next() {
@@ -709,7 +709,7 @@ func (a *App) showExplainQueryByThreshold(hash string, threshold float64, fromTi
 				})
 			}
 
-			log.Info().Msgf("running explain3: %s", explain3)
+			log.Debug().Msgf("running explain3: %s", explain3)
 			if rows3, err3 := a.clickHouse.Query(explain3); err3 == nil {
 				var buf strings.Builder
 
