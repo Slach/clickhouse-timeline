@@ -327,17 +327,7 @@ func (a *App) ShowHeatmap() {
 					value, exists := valueMap[category][timestamp]
 					if exists {
 						// Restore original colors
-						normalizedValue := a.applyScaling(value, minValue, maxValue)
-						var color tcell.Color
-						if normalizedValue < 0.5 {
-							green := 255
-							red := uint8(255 * normalizedValue * 2)
-							color = tcell.NewRGBColor(int32(red), int32(green), 0)
-						} else {
-							red := 255
-							green := uint8(255 * (1 - (normalizedValue-0.5)*2))
-							color = tcell.NewRGBColor(int32(red), int32(green), 0)
-						}
+						color := getColorForValue(value, minValue, maxValue, a)
 						table.SetCell(prevRow, prevCol, tview.NewTableCell("█").
 							SetBackgroundColor(color).
 							SetTextColor(color).
@@ -353,18 +343,7 @@ func (a *App) ShowHeatmap() {
 					value, exists := valueMap[category][timestamp]
 					if exists {
 						// Invert colors for selected cell
-						normalizedValue := a.applyScaling(value, minValue, maxValue)
-						var originalColor tcell.Color
-						if normalizedValue < 0.5 {
-							green := 255
-							red := uint8(255 * normalizedValue * 2)
-							originalColor = tcell.NewRGBColor(int32(red), int32(green), 0)
-						} else {
-							red := 255
-							green := uint8(255 * (1 - (normalizedValue-0.5)*2))
-							originalColor = tcell.NewRGBColor(int32(red), int32(green), 0)
-						}
-
+						originalColor := getColorForValue(value, minValue, maxValue, a)
 						// Create inverted color (swap background and text)
 						table.SetCell(row, column, tview.NewTableCell("█").
 							SetBackgroundColor(tcell.ColorWhite).
@@ -737,4 +716,18 @@ func (a *App) ShowHeatmap() {
 			a.pages.SwitchToPage("heatmap")
 		})
 	}()
+}
+
+// Helper function to calculate color for a value based on min/max values and scaling
+func getColorForValue(value, minValue, maxValue float64, a *App) tcell.Color {
+	normalizedValue := a.applyScaling(value, minValue, maxValue)
+	if normalizedValue < 0.5 {
+		green := 255
+		red := uint8(255 * normalizedValue * 2)
+		return tcell.NewRGBColor(int32(red), int32(green), 0)
+	} else {
+		red := 255
+		green := uint8(255 * (1 - (normalizedValue-0.5)*2))
+		return tcell.NewRGBColor(int32(red), int32(green), 0)
+	}
 }
