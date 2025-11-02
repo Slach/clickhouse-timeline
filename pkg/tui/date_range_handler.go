@@ -2,17 +2,18 @@ package tui
 
 import (
 	"fmt"
-	"github.com/Slach/clickhouse-timeline/pkg/timezone"
-	"golang.org/x/text/message"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
 	_ "time/tzdata" // Import tzdata to embed timezone database
 
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
+	"github.com/Slach/clickhouse-timeline/pkg/timezone"
+	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"golang.org/x/text/message"
 )
 
 // Predefined ranges similar to Grafana
@@ -40,58 +41,87 @@ var predefinedRanges = []string{
 	"This year",
 }
 
-// showFromDatePicker displays a date picker for the "from" time
-func (a *App) showFromDatePicker() {
-	a.showDatePicker("From Date/Time", a.fromTime, func(t time.Time) {
-		a.fromTime = t
-		a.mainView.SetText(fmt.Sprintf("From time set to: %s", t.Format(time.RFC3339)))
-	})
+// DateSelectedMsg is sent when a date is selected from the date picker
+type DateSelectedMsg struct {
+	Time     time.Time
+	IsFrom   bool // true if setting "from" time, false if setting "to" time
+	Canceled bool
 }
 
-// showToDatePicker displays a date picker for the "to" time
-func (a *App) showToDatePicker() {
-	a.showDatePicker("To Date/Time", a.toTime, func(t time.Time) {
-		a.toTime = t
-		a.mainView.SetText(fmt.Sprintf("To time set to: %s", t.Format(time.RFC3339)))
-	})
+// RangeSelectedMsg is sent when a range is selected from the range picker
+type RangeSelectedMsg struct {
+	FromTime time.Time
+	ToTime   time.Time
+	Canceled bool
 }
 
-// showDatePicker displays a date and time picker with a calendar widget
-func (a *App) showDatePicker(title string, initialTime time.Time, onSelect func(time.Time)) {
-	// Create a calendar widget
-	calendar := tview.NewTable().
-		SetBorders(false).
-		SetSelectable(true, true)
+// datePickerMode represents the current input focus
+type datePickerMode int
 
-	// Time input field in hh:mm:ss format
-	timeField := tview.NewInputField().
-		SetLabel("Time (hh:mm:ss): ").
-		SetText(fmt.Sprintf("%02d:%02d:%02d", initialTime.Hour(), initialTime.Minute(), initialTime.Second())).
-		SetFieldWidth(10).
-		SetAcceptanceFunc(func(textToCheck string, lastChar rune) bool {
-			// Validate time format
-			matched, _ := regexp.MatchString(`^([0-1]?[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$`, textToCheck)
-			return matched || textToCheck == "" || lastChar == ':' || (lastChar >= '0' && lastChar <= '9')
-		})
+const (
+	modeCalendar datePickerMode = iota
+	modeTimeInput
+	modeTimezoneInput
+	modeButtons
+)
 
-	// Get timezone information from initialTime first
+// datePicker is a bubbletea model for date/time selection with calendar
+type datePicker struct {
+	title       string
+	initialTime time.Time
+	isFrom      bool
+	width       int
+	height      int
+
+	// Calendar state
+	selectedYear  int
+	selectedMonth time.Month
+	selectedDay   int
+	calendarRows  int
+	calendarCols  int
+	cursorRow     int
+	cursorCol     int
+
+	// Time input
+	timeInput textinput.Model
+
+	// Timezone input
+	timezoneInput     textinput.Model
+	selectedTimeZone  string
+	tzMatches         []string
+	tzDisplayText     string
+	showTzSuggestions bool
+
+	// UI state
+	mode           datePickerMode
+	buttonIndex    int // 0=Now, 1=Save, 2=Cancel
+	firstDayOfWeek time.Weekday
+	err            error
+}
+
+func newDatePicker(title string, initialTime time.Time, isFrom bool, width, height int) datePicker {
+	// Create time input
+	timeInput := textinput.New()
+	timeInput.Placeholder = "HH:MM:SS"
+	timeInput.SetValue(fmt.Sprintf("%02d:%02d:%02d", initialTime.Hour(), initialTime.Minute(), initialTime.Second()))
+	timeInput.CharLimit = 8
+
+	// Create timezone input
+	timezoneInput := textinput.New()
+	timezoneInput.Placeholder = "Type to search..."
+	timezoneInput.CharLimit = 50
+
+	// Get timezone information
 	tzName, tzOffset := initialTime.Zone()
 	tzOffset = tzOffset / 60 // Convert to minutes
 
-	// Time zone input field with autocomplete
-	timeZoneInput := tview.NewInputField().
-		SetLabel("Time Zone: ").
-		SetFieldWidth(40).
-		SetPlaceholder("Type to search...")
-
-	// Store the currently selected timezone
-	var selectedTimeZone = tzName
-	var tzDisplayText string
-
-	// Try to find the timezone in our list first
+	// Try to find the timezone in our list
+	selectedTimeZone := tzName
+	tzDisplayText := ""
 	tzFound := false
+
 	for _, zone := range timezone.TimeZones {
-		if zone.Name == tzName || runtime.GOOS == "windows" && zone.WindowsName == tzName {
+		if zone.Name == tzName {
 			selectedTimeZone = zone.Name
 			tzDisplayText = zone.DisplayText
 			tzFound = true
@@ -99,94 +129,30 @@ func (a *App) showDatePicker(title string, initialTime time.Time, onSelect func(
 		}
 	}
 
-	// If still not found, try to get current timezone info
+	// If not found, try current timezone
 	if !tzFound {
-		currentTZ, err := timezone.GetCurrentTimeZone()
-		if err == nil {
+		if currentTZ, err := timezone.GetCurrentTimeZone(); err == nil {
 			selectedTimeZone = currentTZ.Name
 			tzDisplayText = currentTZ.DisplayText
 			tzFound = true
 		}
 	}
 
-	// If not found by name, try by offset
+	// If still not found, try by offset
 	if !tzFound {
 		for _, zone := range timezone.TimeZones {
 			if zone.Offset == tzOffset {
 				selectedTimeZone = zone.Name
 				tzDisplayText = zone.DisplayText
-				tzFound = true
 				break
 			}
 		}
 	}
 
-	// Set the timezone display text
-	timeZoneInput.SetText(tzDisplayText)
-
-	// Set up autocomplete function
-	timeZoneInput.SetAutocompleteFunc(func(currentText string) []string {
-		// If empty, show some common timezones or return empty list
-		if currentText == "" {
-			return nil
-		}
-
-		// Filter time zones based on the search text
-		var matches []string
-		lowerText := strings.ToLower(currentText)
-
-		for _, tz := range timezone.TimeZones {
-			lowerTz := strings.ToLower(tz.DisplayText)
-			if strings.Contains(lowerTz, lowerText) {
-				matches = append(matches, tz.DisplayText)
-				// Limit results to avoid overwhelming the UI
-				if len(matches) >= 15 {
-					break
-				}
-			}
-		}
-
-		return matches
-	})
-
-	var saveButton, cancelButton *tview.Button
-	// Handle selection from autocomplete
-	timeZoneInput.SetDoneFunc(func(key tcell.Key) {
-		if key == tcell.KeyEnter {
-			// Find the matching timezone
-			currentText := timeZoneInput.GetText()
-			for _, tz := range timezone.TimeZones {
-				if tz.DisplayText == currentText {
-					selectedTimeZone = tz.Name
-					break
-				}
-			}
-			a.tviewApp.SetFocus(saveButton)
-		} else if key == tcell.KeyEscape {
-			a.tviewApp.SetFocus(cancelButton)
-		}
-	})
-
-	// Status text to show selected date
-	statusText := tview.NewTextView().
-		SetDynamicColors(true).
-		SetText(fmt.Sprintf("Selected: [green]%s[white]", initialTime.Format("2006-01-02 15:04:05 -07:00")))
-
-	// Variables to track current view state
-	selectedYear := initialTime.Year()
-	selectedMonth := initialTime.Month()
-	selectedDay := initialTime.Day()
-
-	// Create a header for month and year
-	headerText := tview.NewTextView().
-		SetTextAlign(tview.AlignLeft).
-		SetDynamicColors(true)
+	timezoneInput.SetValue(tzDisplayText)
 
 	// Determine first day of week based on locale
-	// Default to Monday (1) as first day of week for most locales
 	firstDayOfWeek := time.Monday
-
-	// Get system locale and check if it's US-like (Sunday first)
 	tag := message.MatchLanguage("")
 	tagStr := tag.String()
 	if tagStr == "en-US" || tagStr == "en-CA" ||
@@ -194,661 +160,755 @@ func (a *App) showDatePicker(title string, initialTime time.Time, onSelect func(
 		firstDayOfWeek = time.Sunday
 	}
 
-	// Function to update the calendar display
-	updateCalendar := func() {
-		calendar.Clear()
-
-		// Update header with month and year
-		monthYearHeader := fmt.Sprintf("[yellow]%s %d[white]", selectedMonth.String(), selectedYear)
-		headerText.SetText(monthYearHeader)
-
-		// Set day headers based on first day of week
-		var days []string
-		if firstDayOfWeek == time.Monday {
-			days = []string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
-		} else {
-			days = []string{"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}
-		}
-
-		for i, day := range days {
-			calendar.SetCell(0, i, tview.NewTableCell(day).
-				SetTextColor(tcell.ColorAqua).
-				SetAlign(tview.AlignCenter).
-				SetSelectable(false))
-		}
-
-		// Get the first day of the month
-		firstDay := time.Date(selectedYear, selectedMonth, 1, 0, 0, 0, 0, time.Local)
-		lastDay := time.Date(selectedYear, selectedMonth+1, 0, 0, 0, 0, 0, time.Local).Day()
-
-		// Calculate the starting position based on the first day of week
-		startPos := int(firstDay.Weekday())
-		if firstDayOfWeek == time.Monday {
-			// Convert from Sunday=0 to Monday=0 based system
-			startPos = (startPos + 6) % 7
-		}
-
-		// Fill in the calendar
-		row, col := 1, startPos
-		for day := 1; day <= lastDay; day++ {
-			// Highlight the selected day
-			cell := tview.NewTableCell(fmt.Sprintf("%2d", day)).
-				SetAlign(tview.AlignCenter).
-				SetSelectable(true)
-
-			// Highlight current day
-			if day == selectedDay &&
-				selectedMonth == initialTime.Month() &&
-				selectedYear == initialTime.Year() {
-				cell.SetBackgroundColor(tcell.ColorGreen).SetTextColor(tcell.ColorBlack)
-			}
-
-			calendar.SetCell(row, col, cell)
-
-			// Move to the next position
-			col++
-			if col > 6 {
-				col = 0
-				row++
-			}
-		}
-
-		// Update status text
-		selectedDate := time.Date(selectedYear, selectedMonth, selectedDay,
-			initialTime.Hour(), initialTime.Minute(), initialTime.Second(), 0, time.Local)
-		statusText.SetText(fmt.Sprintf("Selected: [green]%s[white]", selectedDate.Format("2006-01-02 15:04:05 -07:00")))
+	return datePicker{
+		title:            title,
+		initialTime:      initialTime,
+		isFrom:           isFrom,
+		width:            width,
+		height:           height,
+		selectedYear:     initialTime.Year(),
+		selectedMonth:    initialTime.Month(),
+		selectedDay:      initialTime.Day(),
+		calendarRows:     6,
+		calendarCols:     7,
+		cursorRow:        0,
+		cursorCol:        0,
+		timeInput:        timeInput,
+		timezoneInput:    timezoneInput,
+		selectedTimeZone: selectedTimeZone,
+		tzDisplayText:    tzDisplayText,
+		mode:             modeCalendar,
+		firstDayOfWeek:   firstDayOfWeek,
 	}
+}
 
-	// Navigation buttons for the calendar
-	prevMonthBtn := tview.NewButton("◀ Prev Month").SetSelectedFunc(func() {
-		if selectedMonth == 1 {
-			selectedMonth = 12
-			selectedYear--
-		} else {
-			selectedMonth--
-		}
-		updateCalendar()
-	})
+func (m datePicker) Init() tea.Cmd {
+	return nil
+}
 
-	nextMonthBtn := tview.NewButton("Next Month ▶").SetSelectedFunc(func() {
-		if selectedMonth == 12 {
-			selectedMonth = 1
-			selectedYear++
-		} else {
-			selectedMonth++
-		}
-		updateCalendar()
-	})
+func (m datePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
 
-	// Add navigation buttons to a flex container with margins
-	navFlex := tview.NewFlex().
-		AddItem(nil, 1, 0, false).         // Left margin
-		AddItem(prevMonthBtn, 0, 2, true). // Button with weight 2
-		AddItem(nil, 1, 0, false).         // Margin between buttons
-		AddItem(nextMonthBtn, 0, 2, true). // Button with weight 2
-		AddItem(nil, 1, 0, false)          // Right margin
-
-	// Create buttons
-	nowButton := tview.NewButton("Set to Now").SetSelectedFunc(func() {
-		now := time.Now()
-		selectedYear = now.Year()
-		selectedMonth = now.Month()
-		selectedDay = now.Day()
-		selectedTimeZone, _ = now.Zone()
-		timeField.SetText(fmt.Sprintf("%02d:%02d:%02d", now.Hour(), now.Minute(), now.Second()))
-		updateCalendar()
-	})
-
-	saveButton = tview.NewButton("Save").SetSelectedFunc(func() {
-		// Parse time from the input field
-		timeStr := timeField.GetText()
-		var hour, minute, sec int
-
-		// Default to current time if parsing fails
-		if _, err := fmt.Sscanf(timeStr, "%d:%d:%d", &hour, &minute, &sec); err != nil {
-			hour, minute, sec = initialTime.Clock()
-		}
-
-		// Get the selected timezone
-		location := time.Local
-		if selectedTimeZone != "" {
-			loc, err := time.LoadLocation(selectedTimeZone)
-			if err == nil {
-				location = loc
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			// Cancel
+			return m, func() tea.Msg {
+				return DateSelectedMsg{Canceled: true}
 			}
-		}
 
-		// Create the final time with the selected time zone
-		selectedTime := time.Date(selectedYear, selectedMonth, selectedDay, hour, minute, sec, 0, location)
-		onSelect(selectedTime)
-		a.pages.RemovePage("datepicker")
-		a.pages.SwitchToPage("main")
-	})
-
-	cancelButton = tview.NewButton("Cancel").SetSelectedFunc(func() {
-		a.pages.RemovePage("datepicker")
-		a.pages.SwitchToPage("main")
-	})
-
-	// Create button flex with margins
-	buttonFlex := tview.NewFlex().
-		AddItem(nil, 1, 0, false).         // Left margin
-		AddItem(nowButton, 0, 2, true).    // Button with weight 2
-		AddItem(nil, 1, 0, false).         // Margin between buttons
-		AddItem(saveButton, 0, 2, true).   // Button with weight 2
-		AddItem(nil, 1, 0, false).         // Margin between buttons
-		AddItem(cancelButton, 0, 2, true). // Button with weight 2
-		AddItem(nil, 1, 0, false)          // Right margin
-
-	// Set up calendar selection handler
-	calendar.SetSelectedFunc(func(row, col int) {
-		// Only process clicks on actual days (row >= 1)
-		cell := calendar.GetCell(row, col)
-		if cell != nil && cell.Text != "" {
-			day, err := strconv.Atoi(strings.TrimSpace(cell.Text))
-			if err == nil && day > 0 {
-				selectedDay = day
-
-				// Update the calendar immediately
-				a.tviewApp.QueueUpdateDraw(func() {
-					updateCalendar()
-					timeField.SetText(fmt.Sprintf("%02d:%02d:%02d", initialTime.Hour(), initialTime.Minute(), initialTime.Second()))
-					a.tviewApp.SetFocus(timeField)
-				})
+		case "tab":
+			// Cycle through modes
+			m.mode = (m.mode + 1) % 4
+			switch m.mode {
+			case modeTimeInput:
+				m.timeInput.Focus()
+			case modeTimezoneInput:
+				m.timezoneInput.Focus()
+			default:
+				m.timeInput.Blur()
+				m.timezoneInput.Blur()
 			}
-		}
-	})
+			return m, nil
 
-	// Set up calendar keyboard navigation
-	calendar.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		// Add month navigation with various key combinations
-		if (event.Key() == tcell.KeyLeft && (event.Modifiers()&tcell.ModAlt != 0)) ||
-			(event.Key() == tcell.KeyLeft && (event.Modifiers()&tcell.ModCtrl != 0)) ||
-			(event.Rune() == 16) { // Ctrl+P
-			if selectedMonth == 1 {
-				selectedMonth = 12
-				selectedYear--
-			} else {
-				selectedMonth--
+		case "shift+tab":
+			// Cycle backwards
+			m.mode = (m.mode + 3) % 4
+			switch m.mode {
+			case modeTimeInput:
+				m.timeInput.Focus()
+			case modeTimezoneInput:
+				m.timezoneInput.Focus()
+			default:
+				m.timeInput.Blur()
+				m.timezoneInput.Blur()
 			}
-			updateCalendar()
-			return nil
-		} else if (event.Key() == tcell.KeyRight && (event.Modifiers()&tcell.ModAlt != 0)) ||
-			(event.Key() == tcell.KeyRight && (event.Modifiers()&tcell.ModCtrl != 0)) ||
-			(event.Rune() == 14) { // Ctrl+N
-			if selectedMonth == 12 {
-				selectedMonth = 1
-				selectedYear++
-			} else {
-				selectedMonth++
-			}
-			updateCalendar()
-			return nil
-		}
+			return m, nil
 
-		// Prevent arrow keys from causing focus loss
-		if event.Key() == tcell.KeyUp || event.Key() == tcell.KeyDown ||
-			event.Key() == tcell.KeyLeft || event.Key() == tcell.KeyRight {
-			// Let the table handle these keys internally
-			return event
-		}
+		case "enter":
+			switch m.mode {
+			case modeCalendar:
+				// Select day and move to time input
+				m.mode = modeTimeInput
+				m.timeInput.Focus()
+				return m, nil
 
-		return event
-	})
+			case modeTimeInput:
+				// Move to timezone input
+				m.mode = modeTimezoneInput
+				m.timeInput.Blur()
+				m.timezoneInput.Focus()
+				return m, nil
 
-	// Make calendar selectable again when clicked
-	calendar.SetMouseCapture(func(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
-		if action == tview.MouseLeftClick {
-			a.tviewApp.SetFocus(calendar)
-		}
-		return action, event
-	})
+			case modeTimezoneInput:
+				// Move to buttons
+				m.mode = modeButtons
+				m.timezoneInput.Blur()
+				m.buttonIndex = 1 // Save
+				return m, nil
 
-	// Set up time field keyboard navigation
-	timeField.SetDoneFunc(func(key tcell.Key) {
-		if key == tcell.KeyEnter {
-			a.tviewApp.SetFocus(saveButton)
-		} else if key == tcell.KeyEscape {
-			a.pages.RemovePage("datepicker")
-			a.pages.SwitchToPage("main")
-		}
-	})
+			case modeButtons:
+				// Execute button action
+				switch m.buttonIndex {
+				case 0: // Now
+					now := time.Now()
+					m.selectedYear = now.Year()
+					m.selectedMonth = now.Month()
+					m.selectedDay = now.Day()
+					m.timeInput.SetValue(fmt.Sprintf("%02d:%02d:%02d", now.Hour(), now.Minute(), now.Second()))
+					return m, nil
 
-	// Prevent ':' from triggering command mode while editing time
-	timeField.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Rune() == ':' {
-			return event // Allow ':' character in the time field
-		}
-		return event
-	})
+				case 1: // Save
+					// Parse time
+					timeStr := m.timeInput.Value()
+					var hour, minute, sec int
+					if _, err := fmt.Sscanf(timeStr, "%d:%d:%d", &hour, &minute, &sec); err != nil {
+						hour, minute, sec = m.initialTime.Clock()
+					}
 
-	// Create a flex for time input and timezone input field (horizontal layout)
-	timeInputFlex := tview.NewFlex().
-		SetDirection(tview.FlexColumn).
-		AddItem(timeField, 0, 1, false).
-		AddItem(nil, 1, 0, false).          // Add a small space between fields
-		AddItem(timeZoneInput, 0, 2, false) // Give timezone input more space
+					// Get timezone
+					location := time.Local
+					if m.selectedTimeZone != "" {
+						if loc, err := time.LoadLocation(m.selectedTimeZone); err == nil {
+							location = loc
+						}
+					}
 
-	// Create layout with padding
-	flex := tview.NewFlex().
-		SetDirection(tview.FlexRow).
-		AddItem(statusText, 1, 0, false).
-		AddItem(headerText, 1, 0, false).
-		AddItem(calendar, 0, 1, true).
-		AddItem(nil, 1, 0, false). // Add padding
-		AddItem(timeInputFlex, 2, 0, false).
-		AddItem(nil, 1, 0, false). // Add padding
-		AddItem(navFlex, 1, 0, false).
-		AddItem(nil, 1, 0, false). // Add padding
-		AddItem(buttonFlex, 1, 0, false)
+					// Create final time
+					selectedTime := time.Date(m.selectedYear, m.selectedMonth, m.selectedDay, hour, minute, sec, 0, location)
+					return m, func() tea.Msg {
+						return DateSelectedMsg{
+							Time:   selectedTime,
+							IsFrom: m.isFrom,
+						}
+					}
 
-	// Set border and title
-	flex.SetBorder(true).SetTitle(title)
-
-	// Initial calendar update
-	updateCalendar()
-
-	// Add page and show
-	a.pages.AddPage("datepicker", flex, true, true)
-	a.pages.SwitchToPage("datepicker")
-	a.tviewApp.SetFocus(calendar)
-
-	// Make all components in the flex capture mouse events to restore focus
-	flex.SetMouseCapture(func(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
-		// On any click, check if we need to restore focus to a component
-		if action == tview.MouseLeftClick {
-			x, y := event.Position()
-			if calendar.InRect(x, y) {
-				a.tviewApp.SetFocus(calendar)
-			} else if prevMonthBtn.InRect(x, y) {
-				a.tviewApp.SetFocus(prevMonthBtn)
-			} else if nextMonthBtn.InRect(x, y) {
-				a.tviewApp.SetFocus(nextMonthBtn)
-			} else if timeField.InRect(x, y) {
-				a.tviewApp.SetFocus(timeField)
-			} else if timeZoneInput.InRect(x, y) {
-				a.tviewApp.SetFocus(timeZoneInput)
-			} else if nowButton.InRect(x, y) {
-				a.tviewApp.SetFocus(nowButton)
-			} else if saveButton.InRect(x, y) {
-				a.tviewApp.SetFocus(saveButton)
-			} else if cancelButton.InRect(x, y) {
-				a.tviewApp.SetFocus(cancelButton)
-			}
-		}
-		return action, event
-	})
-
-	// Handle keyboard events
-	flex.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Key() == tcell.KeyEscape {
-			a.pages.RemovePage("datepicker")
-			a.pages.SwitchToPage("main")
-			return nil
-		}
-
-		// Handle Enter key when calendar is focused
-		if event.Key() == tcell.KeyEnter && a.tviewApp.GetFocus() == calendar {
-			row, col := calendar.GetSelection()
-			cell := calendar.GetCell(row, col)
-			if cell != nil && cell.Text != "" {
-				day, err := strconv.Atoi(strings.TrimSpace(cell.Text))
-				if err == nil && day > 0 {
-					selectedDay = day
-					updateCalendar()
-					a.tviewApp.SetFocus(timeField)
-					return nil
+				case 2: // Cancel
+					return m, func() tea.Msg {
+						return DateSelectedMsg{Canceled: true}
+					}
 				}
 			}
 		}
 
-		// Tab key navigation
-		if event.Key() == tcell.KeyTab {
-			currentFocus := a.tviewApp.GetFocus()
-			if currentFocus == calendar {
-				a.tviewApp.SetFocus(timeZoneInput)
-			} else if currentFocus == timeField {
-				a.tviewApp.SetFocus(timeZoneInput)
-			} else if currentFocus == timeZoneInput {
-				a.tviewApp.SetFocus(prevMonthBtn)
-			} else if currentFocus == prevMonthBtn {
-				a.tviewApp.SetFocus(nextMonthBtn)
-			} else if currentFocus == nextMonthBtn {
-				a.tviewApp.SetFocus(saveButton)
-			} else if currentFocus == nowButton {
-				a.tviewApp.SetFocus(saveButton)
-			} else if currentFocus == saveButton {
-				a.tviewApp.SetFocus(cancelButton)
-			} else if currentFocus == cancelButton {
-				a.tviewApp.SetFocus(calendar)
-			} else {
-				// If focus is lost or on an unknown element, return it to calendar
-				a.tviewApp.SetFocus(calendar)
+		// Mode-specific key handling
+		switch m.mode {
+		case modeCalendar:
+			return m.handleCalendarKeys(msg)
+		case modeTimeInput:
+			m.timeInput, cmd = m.timeInput.Update(msg)
+			return m, cmd
+		case modeTimezoneInput:
+			oldValue := m.timezoneInput.Value()
+			m.timezoneInput, cmd = m.timezoneInput.Update(msg)
+			newValue := m.timezoneInput.Value()
+
+			// Update timezone matches if value changed
+			if oldValue != newValue {
+				m.updateTimezoneMatches(newValue)
 			}
-			return nil
+			return m, cmd
+		case modeButtons:
+			switch msg.String() {
+			case "left", "h":
+				m.buttonIndex = (m.buttonIndex + 2) % 3
+			case "right", "l":
+				m.buttonIndex = (m.buttonIndex + 1) % 3
+			}
+			return m, nil
 		}
-
-		// Ctrl+C to return focus to calendar
-		if event.Key() == tcell.KeyCtrlC {
-			a.tviewApp.SetFocus(calendar)
-			return nil
-		}
-
-		// Arrow key navigation - only for non-calendar components
-		currentFocus := a.tviewApp.GetFocus()
-
-		// Skip arrow key navigation when calendar has focus
-		if currentFocus == calendar {
-			return event
-		}
-
-		if event.Key() == tcell.KeyDown {
-			if currentFocus == prevMonthBtn || currentFocus == nextMonthBtn {
-				a.tviewApp.SetFocus(saveButton)
-				return nil
-			} else if currentFocus == timeField {
-				a.tviewApp.SetFocus(timeZoneInput)
-				return nil
-			} else if currentFocus == timeZoneInput {
-				a.tviewApp.SetFocus(nowButton)
-				return nil
-			}
-		} else if event.Key() == tcell.KeyUp {
-			if currentFocus == nowButton || currentFocus == saveButton || currentFocus == cancelButton {
-				a.tviewApp.SetFocus(nextMonthBtn)
-				return nil
-			} else if currentFocus == timeZoneInput {
-				a.tviewApp.SetFocus(timeField)
-				return nil
-			} else if currentFocus == timeField {
-				a.tviewApp.SetFocus(calendar)
-				return nil
-			} else if currentFocus == prevMonthBtn || currentFocus == nextMonthBtn {
-				a.tviewApp.SetFocus(timeZoneInput)
-				return nil
-			}
-		} else if event.Key() == tcell.KeyRight {
-			if currentFocus == prevMonthBtn {
-				a.tviewApp.SetFocus(nextMonthBtn)
-				return nil
-			} else if currentFocus == nowButton {
-				a.tviewApp.SetFocus(saveButton)
-				return nil
-			} else if currentFocus == saveButton {
-				a.tviewApp.SetFocus(cancelButton)
-				return nil
-			}
-		} else if event.Key() == tcell.KeyLeft {
-			if currentFocus == nextMonthBtn {
-				a.tviewApp.SetFocus(prevMonthBtn)
-				return nil
-			} else if currentFocus == cancelButton {
-				a.tviewApp.SetFocus(saveButton)
-				return nil
-			} else if currentFocus == saveButton {
-				a.tviewApp.SetFocus(nowButton)
-				return nil
-			}
-		}
-
-		return event
-	})
-}
-
-// showRangePicker displays a form to set a time range with Grafana-like expressions
-func (a *App) showRangePicker() {
-	// Dropdown for predefined ranges
-	rangeDropdown := tview.NewDropDown().
-		SetLabel("Predefined Range").
-		SetFieldWidth(30)
-
-	for _, r := range predefinedRanges {
-		rangeDropdown.AddOption(r, nil)
 	}
 
+	return m, nil
+}
+
+func (m datePicker) handleCalendarKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		m.cursorRow--
+		if m.cursorRow < 0 {
+			m.cursorRow = 0
+		}
+	case "down", "j":
+		m.cursorRow++
+		if m.cursorRow >= m.calendarRows {
+			m.cursorRow = m.calendarRows - 1
+		}
+	case "left", "h":
+		m.cursorCol--
+		if m.cursorCol < 0 {
+			m.cursorCol = 0
+		}
+	case "right", "l":
+		m.cursorCol++
+		if m.cursorCol >= m.calendarCols {
+			m.cursorCol = m.calendarCols - 1
+		}
+	case "ctrl+p", "ctrl+left":
+		// Previous month
+		if m.selectedMonth == 1 {
+			m.selectedMonth = 12
+			m.selectedYear--
+		} else {
+			m.selectedMonth--
+		}
+	case "ctrl+n", "ctrl+right":
+		// Next month
+		if m.selectedMonth == 12 {
+			m.selectedMonth = 1
+			m.selectedYear++
+		} else {
+			m.selectedMonth++
+		}
+	}
+	return m, nil
+}
+
+func (m *datePicker) updateTimezoneMatches(search string) {
+	m.tzMatches = []string{}
+	if search == "" {
+		m.showTzSuggestions = false
+		return
+	}
+
+	lowerSearch := strings.ToLower(search)
+	for _, tz := range timezone.TimeZones {
+		if strings.Contains(strings.ToLower(tz.DisplayText), lowerSearch) {
+			m.tzMatches = append(m.tzMatches, tz.DisplayText)
+			if len(m.tzMatches) >= 5 {
+				break
+			}
+		}
+	}
+	m.showTzSuggestions = len(m.tzMatches) > 0
+
+	// Update selected timezone if exact match
+	for _, tz := range timezone.TimeZones {
+		if tz.DisplayText == search {
+			m.selectedTimeZone = tz.Name
+			break
+		}
+	}
+}
+
+func (m datePicker) View() string {
+	var sb strings.Builder
+
+	// Title
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+	sb.WriteString(titleStyle.Render(m.title))
+	sb.WriteString("\n\n")
+
+	// Status line
+	selectedDate := time.Date(m.selectedYear, m.selectedMonth, m.selectedDay,
+		m.initialTime.Hour(), m.initialTime.Minute(), m.initialTime.Second(), 0, time.Local)
+	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	sb.WriteString("Selected: ")
+	sb.WriteString(statusStyle.Render(selectedDate.Format("2006-01-02 15:04:05 -07:00")))
+	sb.WriteString("\n\n")
+
+	// Month/Year header
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("3"))
+	sb.WriteString(headerStyle.Render(fmt.Sprintf("%s %d", m.selectedMonth.String(), m.selectedYear)))
+	sb.WriteString("\n")
+
+	// Render calendar
+	sb.WriteString(m.renderCalendar())
+	sb.WriteString("\n")
+
+	// Month navigation hint
+	navHintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	sb.WriteString(navHintStyle.Render("  ◀ Ctrl+P: Prev Month  |  Ctrl+N: Next Month ▶"))
+	sb.WriteString("\n\n")
+
+	// Time input
+	timeLabel := "Time (HH:MM:SS): "
+	if m.mode == modeTimeInput {
+		timeLabel = "> " + timeLabel
+	} else {
+		timeLabel = "  " + timeLabel
+	}
+	sb.WriteString(timeLabel)
+	sb.WriteString(m.timeInput.View())
+	sb.WriteString("\n")
+
+	// Timezone input
+	tzLabel := "Time Zone: "
+	if m.mode == modeTimezoneInput {
+		tzLabel = "> " + tzLabel
+	} else {
+		tzLabel = "  " + tzLabel
+	}
+	sb.WriteString(tzLabel)
+	sb.WriteString(m.timezoneInput.View())
+	sb.WriteString("\n")
+
+	// Show timezone suggestions
+	if m.showTzSuggestions && m.mode == modeTimezoneInput {
+		suggStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+		for i, match := range m.tzMatches {
+			if i < 5 {
+				sb.WriteString("    ")
+				sb.WriteString(suggStyle.Render(match))
+				sb.WriteString("\n")
+			}
+		}
+	}
+	sb.WriteString("\n")
+
+	// Buttons
+	sb.WriteString(m.renderButtons())
+	sb.WriteString("\n\n")
+
+	// Help
+	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	sb.WriteString(helpStyle.Render("Tab: Next field  |  Enter: Select  |  Esc: Cancel"))
+
+	// Wrap in border
+	borderStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("6")).
+		Padding(1, 2)
+
+	return borderStyle.Render(sb.String())
+}
+
+func (m datePicker) renderCalendar() string {
+	var sb strings.Builder
+
+	// Day headers
+	dayHeaderStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
+	var days []string
+	if m.firstDayOfWeek == time.Monday {
+		days = []string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
+	} else {
+		days = []string{"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}
+	}
+
+	sb.WriteString("  ")
+	for _, day := range days {
+		sb.WriteString(dayHeaderStyle.Render(fmt.Sprintf("%-4s", day)))
+	}
+	sb.WriteString("\n")
+
+	// Get first day of month
+	firstDay := time.Date(m.selectedYear, m.selectedMonth, 1, 0, 0, 0, 0, time.Local)
+	lastDay := time.Date(m.selectedYear, m.selectedMonth+1, 0, 0, 0, 0, 0, time.Local).Day()
+
+	// Calculate starting position
+	startPos := int(firstDay.Weekday())
+	if m.firstDayOfWeek == time.Monday {
+		startPos = (startPos + 6) % 7
+	}
+
+	// Render calendar grid
+	normalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
+	selectedStyle := lipgloss.NewStyle().Background(lipgloss.Color("2")).Foreground(lipgloss.Color("0")).Bold(true)
+	cursorStyle := lipgloss.NewStyle().Background(lipgloss.Color("8")).Foreground(lipgloss.Color("15"))
+
+	row, col := 0, startPos
+	sb.WriteString("  ")
+
+	// Empty cells before first day
+	for i := 0; i < startPos; i++ {
+		sb.WriteString("    ")
+	}
+
+	// Days of month
+	for day := 1; day <= lastDay; day++ {
+		dayStr := fmt.Sprintf("%-4d", day)
+
+		isSelected := day == m.selectedDay &&
+			m.selectedMonth == m.initialTime.Month() &&
+			m.selectedYear == m.initialTime.Year()
+
+		isCursor := (m.mode == modeCalendar && row == m.cursorRow && col == m.cursorCol)
+
+		if isSelected {
+			sb.WriteString(selectedStyle.Render(dayStr))
+		} else if isCursor {
+			sb.WriteString(cursorStyle.Render(dayStr))
+			// Update selected day based on cursor position
+			if m.mode == modeCalendar {
+				m.selectedDay = day
+			}
+		} else {
+			sb.WriteString(normalStyle.Render(dayStr))
+		}
+
+		col++
+		if col >= 7 {
+			col = 0
+			row++
+			sb.WriteString("\n  ")
+		}
+	}
+
+	return sb.String()
+}
+
+func (m datePicker) renderButtons() string {
+	normalStyle := lipgloss.NewStyle().
+		Padding(0, 2).
+		Foreground(lipgloss.Color("15"))
+
+	selectedStyle := lipgloss.NewStyle().
+		Padding(0, 2).
+		Background(lipgloss.Color("6")).
+		Foreground(lipgloss.Color("0")).
+		Bold(true)
+
+	buttons := []string{"Set to Now", "Save", "Cancel"}
+	var rendered []string
+
+	for i, btn := range buttons {
+		if m.mode == modeButtons && i == m.buttonIndex {
+			rendered = append(rendered, selectedStyle.Render(btn))
+		} else {
+			rendered = append(rendered, normalStyle.Render(btn))
+		}
+	}
+
+	return "  " + strings.Join(rendered, "  ")
+}
+
+// rangePicker is a bubbletea model for selecting time ranges
+type rangePicker struct {
+	width  int
+	height int
+
+	// Predefined range list
+	predefinedList list.Model
+
 	// Custom range input
-	customRangeInput := tview.NewInputField().
-		SetLabel("Custom Range").
-		SetFieldWidth(30).
-		SetPlaceholder("e.g., now-1h or now-7d")
+	customInput textinput.Model
 
-	// Status text
-	statusText := tview.NewTextView().
-		SetDynamicColors(true).
-		SetText("Current range: " + a.formatTimeRange())
+	// UI state
+	mode        int // 0=predefined list, 1=custom input, 2=buttons
+	buttonIndex int // 0=Apply Predefined, 1=Apply Custom, 2=Cancel
 
-	// Create buttons
-	applyPredefinedButton := tview.NewButton("Apply Predefined").SetSelectedFunc(func() {
-		_, option := rangeDropdown.GetCurrentOption()
-		if option != "" {
-			a.applyPredefinedRange(option)
-			a.mainView.SetText(fmt.Sprintf("Time range set to: %s", a.formatTimeRange()))
-			a.pages.RemovePage("rangepicker")
-			a.pages.SwitchToPage("main")
-		}
-	})
+	// Current range for display
+	currentFrom time.Time
+	currentTo   time.Time
 
-	applyCustomButton := tview.NewButton("Apply Custom").SetSelectedFunc(func() {
-		expr := customRangeInput.GetText()
-		if expr != "" {
-			if a.applyCustomRange(expr) {
-				a.mainView.SetText(fmt.Sprintf("Time range set to: %s", a.formatTimeRange()))
-				a.pages.RemovePage("rangepicker")
-				a.pages.SwitchToPage("main")
+	err error
+}
+
+func newRangePicker(currentFrom, currentTo time.Time, width, height int) rangePicker {
+	// Create list items
+	items := make([]list.Item, len(predefinedRanges))
+	for i, r := range predefinedRanges {
+		items[i] = rangeItem{title: r}
+	}
+
+	// Create list
+	delegate := list.NewDefaultDelegate()
+	predefinedList := list.New(items, delegate, width-4, height/2)
+	predefinedList.Title = "Predefined Ranges"
+	predefinedList.SetShowHelp(false)
+
+	// Create custom input
+	customInput := textinput.New()
+	customInput.Placeholder = "e.g., now-1h or now-7d"
+	customInput.CharLimit = 50
+	customInput.Width = 40
+
+	return rangePicker{
+		width:          width,
+		height:         height,
+		predefinedList: predefinedList,
+		customInput:    customInput,
+		mode:           0,
+		currentFrom:    currentFrom,
+		currentTo:      currentTo,
+	}
+}
+
+// rangeItem implements list.Item
+type rangeItem struct {
+	title string
+}
+
+func (i rangeItem) FilterValue() string { return i.title }
+func (i rangeItem) Title() string       { return i.title }
+func (i rangeItem) Description() string { return "" }
+
+func (m rangePicker) Init() tea.Cmd {
+	return nil
+}
+
+func (m rangePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			return m, func() tea.Msg {
+				return RangeSelectedMsg{Canceled: true}
+			}
+
+		case "tab":
+			m.mode = (m.mode + 1) % 3
+			if m.mode == 1 {
+				m.customInput.Focus()
 			} else {
-				statusText.SetText("[red]Invalid range expression[white]\nFormat: now-1h, now-7d, etc.")
+				m.customInput.Blur()
 			}
-		}
-	})
+			return m, nil
 
-	cancelButton := tview.NewButton("Cancel").SetSelectedFunc(func() {
-		a.pages.RemovePage("rangepicker")
-		a.pages.SwitchToPage("main")
-	})
-
-	// Create button flex with margins
-	buttonFlex := tview.NewFlex().
-		AddItem(nil, 1, 0, false).                  // Left margin
-		AddItem(applyPredefinedButton, 0, 2, true). // Button with weight 2
-		AddItem(nil, 1, 0, false).                  // Margin between buttons
-		AddItem(applyCustomButton, 0, 2, true).     // Button with weight 2
-		AddItem(nil, 1, 0, false).                  // Margin between buttons
-		AddItem(cancelButton, 0, 2, true).          // Button with weight 2
-		AddItem(nil, 1, 0, false)                   // Right margin
-
-	// Set up input field keyboard navigation
-	customRangeInput.SetDoneFunc(func(key tcell.Key) {
-		if key == tcell.KeyEnter {
-			a.tviewApp.SetFocus(applyCustomButton)
-		} else if key == tcell.KeyEscape {
-			a.pages.RemovePage("rangepicker")
-			a.pages.SwitchToPage("main")
-		}
-	})
-
-	// Create a flex layout for the entire form with padding
-	flex := tview.NewFlex().
-		SetDirection(tview.FlexRow).
-		AddItem(statusText, 3, 0, false).
-		AddItem(rangeDropdown, 1, 0, true).
-		AddItem(nil, 1, 0, false). // Add padding
-		AddItem(customRangeInput, 1, 0, false).
-		AddItem(nil, 1, 0, false). // Add padding
-		AddItem(buttonFlex, 1, 0, false)
-
-	// Set border and title
-	flex.SetBorder(true).SetTitle("Set Time Range")
-
-	// Add page and show
-	a.pages.AddPage("rangepicker", flex, true, true)
-	a.pages.SwitchToPage("rangepicker")
-	a.tviewApp.SetFocus(rangeDropdown)
-
-	// Handle keyboard events
-	flex.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		// Handle command mode with ':'
-		if event.Rune() == ':' {
-			a.pages.RemovePage("rangepicker")
-			a.pages.SwitchToPage("main")
-			a.mainFlex.ResizeItem(a.commandInput, 1, 0) // Show command input
-			a.commandInput.SetText("")
-			a.tviewApp.SetFocus(a.commandInput)
-			return nil
-		}
-
-		if event.Key() == tcell.KeyEscape {
-			a.pages.RemovePage("rangepicker")
-			a.pages.SwitchToPage("main")
-			return nil
-		}
-
-		// Tab key navigation
-		if event.Key() == tcell.KeyTab {
-			currentFocus := a.tviewApp.GetFocus()
-			if currentFocus == rangeDropdown {
-				a.tviewApp.SetFocus(customRangeInput)
-			} else if currentFocus == customRangeInput {
-				a.tviewApp.SetFocus(applyPredefinedButton)
-			} else if currentFocus == applyPredefinedButton {
-				a.tviewApp.SetFocus(applyCustomButton)
-			} else if currentFocus == applyCustomButton {
-				a.tviewApp.SetFocus(cancelButton)
-			} else if currentFocus == cancelButton {
-				a.tviewApp.SetFocus(rangeDropdown)
+		case "shift+tab":
+			m.mode = (m.mode + 2) % 3
+			if m.mode == 1 {
+				m.customInput.Focus()
+			} else {
+				m.customInput.Blur()
 			}
-			return nil
-		}
+			return m, nil
 
-		// Arrow key navigation
-		if event.Key() == tcell.KeyDown {
-			currentFocus := a.tviewApp.GetFocus()
-			if currentFocus == rangeDropdown {
-				a.tviewApp.SetFocus(customRangeInput)
-				return nil
-			} else if currentFocus == customRangeInput {
-				a.tviewApp.SetFocus(applyPredefinedButton)
-				return nil
-			}
-		} else if event.Key() == tcell.KeyUp {
-			currentFocus := a.tviewApp.GetFocus()
-			if currentFocus == applyPredefinedButton || currentFocus == applyCustomButton || currentFocus == cancelButton {
-				a.tviewApp.SetFocus(customRangeInput)
-				return nil
-			} else if currentFocus == customRangeInput {
-				a.tviewApp.SetFocus(rangeDropdown)
-				return nil
-			}
-		} else if event.Key() == tcell.KeyRight {
-			currentFocus := a.tviewApp.GetFocus()
-			if currentFocus == applyPredefinedButton {
-				a.tviewApp.SetFocus(applyCustomButton)
-				return nil
-			} else if currentFocus == applyCustomButton {
-				a.tviewApp.SetFocus(cancelButton)
-				return nil
-			}
-		} else if event.Key() == tcell.KeyLeft {
-			currentFocus := a.tviewApp.GetFocus()
-			if currentFocus == cancelButton {
-				a.tviewApp.SetFocus(applyCustomButton)
-				return nil
-			} else if currentFocus == applyCustomButton {
-				a.tviewApp.SetFocus(applyPredefinedButton)
-				return nil
+		case "enter":
+			switch m.mode {
+			case 0: // Apply predefined
+				if item, ok := m.predefinedList.SelectedItem().(rangeItem); ok {
+					from, to := applyPredefinedRange(item.title)
+					return m, func() tea.Msg {
+						return RangeSelectedMsg{FromTime: from, ToTime: to}
+					}
+				}
+
+			case 1: // Apply custom
+				expr := m.customInput.Value()
+				if expr != "" {
+					from, to, ok := applyCustomRange(expr)
+					if ok {
+						return m, func() tea.Msg {
+							return RangeSelectedMsg{FromTime: from, ToTime: to}
+						}
+					}
+					m.err = fmt.Errorf("invalid range expression")
+				}
+
+			case 2: // Buttons
+				switch m.buttonIndex {
+				case 0: // Apply Predefined
+					if item, ok := m.predefinedList.SelectedItem().(rangeItem); ok {
+						from, to := applyPredefinedRange(item.title)
+						return m, func() tea.Msg {
+							return RangeSelectedMsg{FromTime: from, ToTime: to}
+						}
+					}
+				case 1: // Apply Custom
+					expr := m.customInput.Value()
+					if expr != "" {
+						from, to, ok := applyCustomRange(expr)
+						if ok {
+							return m, func() tea.Msg {
+								return RangeSelectedMsg{FromTime: from, ToTime: to}
+							}
+						}
+						m.err = fmt.Errorf("invalid range expression")
+					}
+				case 2: // Cancel
+					return m, func() tea.Msg {
+						return RangeSelectedMsg{Canceled: true}
+					}
+				}
 			}
 		}
 
-		return event
-	})
+		// Mode-specific handling
+		switch m.mode {
+		case 0:
+			m.predefinedList, cmd = m.predefinedList.Update(msg)
+			return m, cmd
+		case 1:
+			m.customInput, cmd = m.customInput.Update(msg)
+			return m, cmd
+		case 2:
+			switch msg.String() {
+			case "left", "h":
+				m.buttonIndex = (m.buttonIndex + 2) % 3
+			case "right", "l":
+				m.buttonIndex = (m.buttonIndex + 1) % 3
+			}
+			return m, nil
+		}
+	}
+
+	return m, nil
 }
 
-// formatTimeRange returns a formatted string of the current time range
-func (a *App) formatTimeRange() string {
-	return fmt.Sprintf("From: %s\nTo: %s",
-		a.fromTime.Format("2006-01-02 15:04:05 -07:00"),
-		a.toTime.Format("2006-01-02 15:04:05 -07:00"))
+func (m rangePicker) View() string {
+	var sb strings.Builder
+
+	// Title
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+	sb.WriteString(titleStyle.Render("Set Time Range"))
+	sb.WriteString("\n\n")
+
+	// Current range
+	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	sb.WriteString(statusStyle.Render(fmt.Sprintf("Current: %s to %s",
+		m.currentFrom.Format("2006-01-02 15:04:05"),
+		m.currentTo.Format("2006-01-02 15:04:05"))))
+	sb.WriteString("\n\n")
+
+	// Predefined list
+	listLabel := "Predefined Ranges:"
+	if m.mode == 0 {
+		listLabel = "> " + listLabel
+	} else {
+		listLabel = "  " + listLabel
+	}
+	sb.WriteString(listLabel)
+	sb.WriteString("\n")
+	sb.WriteString(m.predefinedList.View())
+	sb.WriteString("\n\n")
+
+	// Custom input
+	customLabel := "Custom Range: "
+	if m.mode == 1 {
+		customLabel = "> " + customLabel
+	} else {
+		customLabel = "  " + customLabel
+	}
+	sb.WriteString(customLabel)
+	sb.WriteString(m.customInput.View())
+	sb.WriteString("\n")
+
+	// Error message
+	if m.err != nil {
+		errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+		sb.WriteString("\n")
+		sb.WriteString(errStyle.Render(fmt.Sprintf("Error: %v", m.err)))
+	}
+	sb.WriteString("\n\n")
+
+	// Buttons
+	sb.WriteString(m.renderRangeButtons())
+	sb.WriteString("\n\n")
+
+	// Help
+	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	sb.WriteString(helpStyle.Render("Tab: Next field  |  Enter: Apply  |  Esc: Cancel"))
+
+	// Wrap in border
+	borderStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("6")).
+		Padding(1, 2)
+
+	return borderStyle.Render(sb.String())
 }
 
-// applyPredefinedRange sets the time range based on a predefined option
-func (a *App) applyPredefinedRange(option string) {
+func (m rangePicker) renderRangeButtons() string {
+	normalStyle := lipgloss.NewStyle().
+		Padding(0, 2).
+		Foreground(lipgloss.Color("15"))
+
+	selectedStyle := lipgloss.NewStyle().
+		Padding(0, 2).
+		Background(lipgloss.Color("6")).
+		Foreground(lipgloss.Color("0")).
+		Bold(true)
+
+	buttons := []string{"Apply Predefined", "Apply Custom", "Cancel"}
+	var rendered []string
+
+	for i, btn := range buttons {
+		if m.mode == 2 && i == m.buttonIndex {
+			rendered = append(rendered, selectedStyle.Render(btn))
+		} else {
+			rendered = append(rendered, normalStyle.Render(btn))
+		}
+	}
+
+	return "  " + strings.Join(rendered, "  ")
+}
+
+// Helper functions for range calculation
+
+func applyPredefinedRange(option string) (time.Time, time.Time) {
 	now := time.Now()
-	a.toTime = now
+	toTime := now
+	var fromTime time.Time
 
 	switch option {
 	case "Last 5 minutes":
-		a.fromTime = now.Add(-5 * time.Minute)
+		fromTime = now.Add(-5 * time.Minute)
 	case "Last 15 minutes":
-		a.fromTime = now.Add(-15 * time.Minute)
+		fromTime = now.Add(-15 * time.Minute)
 	case "Last 30 minutes":
-		a.fromTime = now.Add(-30 * time.Minute)
+		fromTime = now.Add(-30 * time.Minute)
 	case "Last 1 hour":
-		a.fromTime = now.Add(-1 * time.Hour)
+		fromTime = now.Add(-1 * time.Hour)
 	case "Last 3 hours":
-		a.fromTime = now.Add(-3 * time.Hour)
+		fromTime = now.Add(-3 * time.Hour)
 	case "Last 6 hours":
-		a.fromTime = now.Add(-6 * time.Hour)
+		fromTime = now.Add(-6 * time.Hour)
 	case "Last 12 hours":
-		a.fromTime = now.Add(-12 * time.Hour)
+		fromTime = now.Add(-12 * time.Hour)
 	case "Last 24 hours":
-		a.fromTime = now.Add(-24 * time.Hour)
+		fromTime = now.Add(-24 * time.Hour)
 	case "Last 2 days":
-		a.fromTime = now.Add(-48 * time.Hour)
+		fromTime = now.Add(-48 * time.Hour)
 	case "Last 7 days":
-		a.fromTime = now.Add(-7 * 24 * time.Hour)
+		fromTime = now.Add(-7 * 24 * time.Hour)
 	case "Last 30 days":
-		a.fromTime = now.Add(-30 * 24 * time.Hour)
+		fromTime = now.Add(-30 * 24 * time.Hour)
 	case "Last 90 days":
-		a.fromTime = now.Add(-90 * 24 * time.Hour)
+		fromTime = now.Add(-90 * 24 * time.Hour)
 	case "Last 6 months":
-		a.fromTime = now.Add(-180 * 24 * time.Hour)
+		fromTime = now.Add(-180 * 24 * time.Hour)
 	case "Last 1 year":
-		a.fromTime = now.Add(-365 * 24 * time.Hour)
+		fromTime = now.Add(-365 * 24 * time.Hour)
 	case "Last 2 years":
-		a.fromTime = now.Add(-2 * 365 * 24 * time.Hour)
+		fromTime = now.Add(-2 * 365 * 24 * time.Hour)
 	case "Last 5 years":
-		a.fromTime = now.Add(-5 * 365 * 24 * time.Hour)
+		fromTime = now.Add(-5 * 365 * 24 * time.Hour)
 	case "Today":
 		y, m, d := now.Date()
-		a.fromTime = time.Date(y, m, d, 0, 0, 0, 0, now.Location())
+		fromTime = time.Date(y, m, d, 0, 0, 0, 0, now.Location())
 	case "Yesterday":
 		yesterday := now.Add(-24 * time.Hour)
 		y, m, d := yesterday.Date()
-		a.fromTime = time.Date(y, m, d, 0, 0, 0, 0, now.Location())
-		a.toTime = time.Date(y, m, d, 23, 59, 59, 999999999, now.Location())
+		fromTime = time.Date(y, m, d, 0, 0, 0, 0, now.Location())
+		toTime = time.Date(y, m, d, 23, 59, 59, 999999999, now.Location())
 	case "This week":
-		// Calculate beginning of week (Monday)
 		daysFromMonday := int(now.Weekday())
-		if daysFromMonday == 0 { // Sunday
+		if daysFromMonday == 0 {
 			daysFromMonday = 6
 		} else {
 			daysFromMonday--
 		}
 		y, m, d := now.Date()
-		a.fromTime = time.Date(y, m, d-daysFromMonday, 0, 0, 0, 0, now.Location())
+		fromTime = time.Date(y, m, d-daysFromMonday, 0, 0, 0, 0, now.Location())
 	case "This month":
 		y, m, _ := now.Date()
-		a.fromTime = time.Date(y, m, 1, 0, 0, 0, 0, now.Location())
+		fromTime = time.Date(y, m, 1, 0, 0, 0, 0, now.Location())
 	case "This year":
 		y, _, _ := now.Date()
-		a.fromTime = time.Date(y, 1, 1, 0, 0, 0, 0, now.Location())
+		fromTime = time.Date(y, 1, 1, 0, 0, 0, 0, now.Location())
+	default:
+		fromTime = now.Add(-1 * time.Hour)
 	}
+
+	return fromTime, toTime
 }
 
-// applyCustomRange parses and applies a custom range expression like "now-1h"
-func (a *App) applyCustomRange(expr string) bool {
-	// Set the "to" time to now
-	a.toTime = time.Now()
+func applyCustomRange(expr string) (time.Time, time.Time, bool) {
+	toTime := time.Now()
 
 	// Parse expressions like "now-1h", "now-7d", etc.
 	if strings.HasPrefix(expr, "now") {
-		// Match patterns like "now-1h", "now-30m", etc.
 		re := regexp.MustCompile(`now-(\d+)([smhdwMyY])`)
 		matches := re.FindStringSubmatch(expr)
 
 		if len(matches) == 3 {
 			value, err := strconv.Atoi(matches[1])
 			if err != nil {
-				return false
+				return time.Time{}, time.Time{}, false
 			}
 
 			unit := matches[2]
@@ -870,13 +930,33 @@ func (a *App) applyCustomRange(expr string) bool {
 			case "y", "Y":
 				duration = time.Duration(value*365*24) * time.Hour
 			default:
-				return false
+				return time.Time{}, time.Time{}, false
 			}
 
-			a.fromTime = a.toTime.Add(-duration)
-			return true
+			fromTime := toTime.Add(-duration)
+			return fromTime, toTime, true
 		}
 	}
 
-	return false
+	return time.Time{}, time.Time{}, false
+}
+
+// App methods for showing date and range pickers
+
+func (a *App) showFromDatePicker() {
+	picker := newDatePicker("From Date/Time", a.state.FromTime, true, a.width, a.height)
+	a.datePickerHandler = picker
+	a.currentPage = pageDatePicker
+}
+
+func (a *App) showToDatePicker() {
+	picker := newDatePicker("To Date/Time", a.state.ToTime, false, a.width, a.height)
+	a.datePickerHandler = picker
+	a.currentPage = pageDatePicker
+}
+
+func (a *App) showRangePicker() {
+	picker := newRangePicker(a.state.FromTime, a.state.ToTime, a.width, a.height)
+	a.rangePickerHandler = picker
+	a.currentPage = pageRangePicker
 }

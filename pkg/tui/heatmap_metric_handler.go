@@ -1,9 +1,8 @@
 package tui
 
 import (
-	"fmt"
-
-	"github.com/rivo/tview"
+	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // getMetricSQL returns the SQL expression for the given metric
@@ -58,42 +57,93 @@ func getMetricName(metric HeatmapMetric) string {
 	}
 }
 
+// MetricSelectedMsg is sent when a metric is selected
+type MetricSelectedMsg struct {
+	Metric HeatmapMetric
+	Name   string
+}
+
+// metricSelector is a bubbletea model for selecting metric type
+type metricSelector struct {
+	list    widgets.FilteredList
+	metrics []HeatmapMetric
+	names   []string
+}
+
+func newMetricSelector(width, height int) metricSelector {
+	metrics := []HeatmapMetric{
+		MetricCount,
+		MetricMemoryUsage,
+		MetricCPUUsage,
+		MetricNetworkSent,
+		MetricNetworkReceive,
+		MetricReadRows,
+		MetricWrittenRows,
+		MetricReadBytes,
+		MetricWrittenBytes,
+	}
+
+	names := []string{
+		"Query Count",
+		"Memory Usage",
+		"CPU Usage",
+		"Network Sent",
+		"Network Received",
+		"Read Rows",
+		"Written Rows",
+		"Read Bytes",
+		"Written Bytes",
+	}
+
+	listModel := widgets.NewFilteredList("Select Metric", names, width, height)
+
+	return metricSelector{
+		list:    listModel,
+		metrics: metrics,
+		names:   names,
+	}
+}
+
+func (m metricSelector) Init() tea.Cmd {
+	return nil
+}
+
+func (m metricSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "enter":
+			// Get selected metric
+			selectedIdx := m.list.SelectedIndex()
+			if selectedIdx >= 0 && selectedIdx < len(m.metrics) {
+				return m, func() tea.Msg {
+					return MetricSelectedMsg{
+						Metric: m.metrics[selectedIdx],
+						Name:   m.names[selectedIdx],
+					}
+				}
+			}
+		case "esc", "q":
+			// Return to main - parent will handle this
+			return m, nil
+		}
+	}
+
+	// Delegate to list
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
+func (m metricSelector) View() string {
+	return m.list.View()
+}
+
 // showMetricSelector displays a list of available metrics
 func (a *App) showMetricSelector() {
-	metricList := tview.NewList()
-	metricList.SetTitle("Select Metric")
-	metricList.SetBorder(true)
-
-	metrics := []struct {
-		name   string
-		metric HeatmapMetric
-	}{
-		{"Query Count", MetricCount},
-		{"Memory Usage", MetricMemoryUsage},
-		{"CPU Usage", MetricCPUUsage},
-		{"Network Sent", MetricNetworkSent},
-		{"Network Received", MetricNetworkReceive},
-		{"Read Rows", MetricReadRows},
-		{"Written Rows", MetricWrittenRows},
-		{"Read Bytes", MetricReadBytes},
-		{"Written Bytes", MetricWrittenBytes},
-	}
-
-	for i, m := range metrics {
-		metricList.AddItem(m.name, "", rune('1'+i), nil)
-	}
-
-	metricList.SetSelectedFunc(func(i int, _ string, _ string, _ rune) {
-		a.heatmapMetric = metrics[i].metric
-		a.SwitchToMainPage(fmt.Sprintf("Metric changed to: %s", metrics[i].name))
-
-		// If we already have a heatmap, regenerate it with the new metric
-		if a.heatmapTable != nil {
-			a.ShowHeatmap()
-		}
-	})
-
-	a.metricList = metricList
-	a.pages.AddPage("metrics", metricList, true, true)
-	a.pages.SwitchToPage("metrics")
+	// Create bubbletea metric selector
+	selector := newMetricSelector(a.width, a.height)
+	a.metricHandler = selector
+	a.currentPage = pageMetric
 }

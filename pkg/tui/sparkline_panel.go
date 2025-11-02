@@ -2,21 +2,38 @@ package tui
 
 import (
 	"fmt"
-	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
 	"strings"
 	"time"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/evertras/bubble-table/table"
 )
 
-func (a *App) ExecuteAndProcessSparklineQuery(query string, prefix string, fields []string, filteredTable *widgets.FilteredTable, row *int) error {
-	rows, err := a.clickHouse.Query(query)
+// SparklineRowData represents a single sparkline row for display
+type SparklineRowData struct {
+	Name      string
+	MinValue  float64
+	MaxValue  float64
+	Values    []float64
+	Sparkline string
+	Color     string // lipgloss color
+}
+
+// SparklineResultMsg is sent when sparkline query completes
+type SparklineResultMsg struct {
+	Rows []SparklineRowData
+	Err  error
+}
+
+// ExecuteAndProcessSparklineQueryBubble executes a query and returns sparkline data for bubbletea
+func (a *App) ExecuteAndProcessSparklineQueryBubble(query string, prefix string, fields []string) ([]SparklineRowData, error) {
+	rows, err := a.state.ClickHouse.Query(query)
 	if err != nil {
-		return fmt.Errorf("error executing %s query: %v", prefix, err)
+		return nil, fmt.Errorf("error executing %s query: %v", prefix, err)
 	}
 	defer func() {
 		if closeErr := rows.Close(); closeErr != nil {
-			a.mainView.SetText(fmt.Sprintf("can't close %s rows", prefix))
+			// Log error but don't fail
 		}
 	}()
 
@@ -30,7 +47,7 @@ func (a *App) ExecuteAndProcessSparklineQuery(query string, prefix string, field
 			var timeValue [][]interface{}
 
 			if scanErr := rows.Scan(&name, &timeValue); scanErr != nil {
-				return fmt.Errorf("error scanning %s row: %v", prefix, scanErr)
+				return nil, fmt.Errorf("error scanning %s row: %v", prefix, scanErr)
 			}
 
 			// Extract values
@@ -44,6 +61,7 @@ func (a *App) ExecuteAndProcessSparklineQuery(query string, prefix string, field
 			}
 			alias := "A_" + name
 			results[alias] = values
+
 		case "CurrentMetric":
 			// Handle metrics which returns multiple array(tuple(time,value)) for each field
 			valuePtrs := make([]interface{}, len(fields))
@@ -54,7 +72,7 @@ func (a *App) ExecuteAndProcessSparklineQuery(query string, prefix string, field
 			}
 
 			if scanErr := rows.Scan(valuePtrs...); scanErr != nil {
-				return fmt.Errorf("error scanning %s row: %v", prefix, scanErr)
+				return nil, fmt.Errorf("error scanning %s row: %v", prefix, scanErr)
 			}
 
 			for i, field := range fields {
@@ -78,7 +96,7 @@ func (a *App) ExecuteAndProcessSparklineQuery(query string, prefix string, field
 			var bucketTime time.Time
 			valuePtrs[0] = &bucketTime
 			if scanErr := rows.Scan(valuePtrs...); scanErr != nil {
-				return fmt.Errorf("error scanning %s row: %v", prefix, scanErr)
+				return nil, fmt.Errorf("error scanning %s row: %v", prefix, scanErr)
 			}
 
 			for i, field := range fields {
@@ -89,10 +107,11 @@ func (a *App) ExecuteAndProcessSparklineQuery(query string, prefix string, field
 	}
 
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("error reading %s rows: %v", prefix, err)
+		return nil, fmt.Errorf("error reading %s rows: %v", prefix, err)
 	}
 
-	// Add results to display table
+	// Convert results to SparklineRowData
+	var rowData []SparklineRowData
 	for name, values := range results {
 		if len(values) == 0 {
 			continue
@@ -109,13 +128,15 @@ func (a *App) ExecuteAndProcessSparklineQuery(query string, prefix string, field
 			}
 		}
 
-		sparkline := a.GenerateSparkline(values)
-		color := tcell.ColorWhite
+		sparkline := GenerateSparkline(values)
+
+		// Determine color based on variance
+		color := "15" // White
 		if maxVal > 2*minVal {
-			color = tcell.ColorYellow
+			color = "11" // Yellow
 		}
 		if maxVal > 4*minVal {
-			color = tcell.ColorRed
+			color = "9" // Red
 		}
 
 		displayName := name
@@ -123,27 +144,21 @@ func (a *App) ExecuteAndProcessSparklineQuery(query string, prefix string, field
 			displayName = strings.TrimPrefix(name, prefix+"_")
 		}
 
-		filteredTable.AddRow([]*tview.TableCell{
-			tview.NewTableCell(displayName).
-				SetTextColor(color).
-				SetAlign(tview.AlignLeft),
-			tview.NewTableCell(fmt.Sprintf("%.1f", minVal)).
-				SetTextColor(color).
-				SetAlign(tview.AlignRight),
-			tview.NewTableCell(sparkline).
-				SetTextColor(color).
-				SetAlign(tview.AlignLeft),
-			tview.NewTableCell(fmt.Sprintf("%.1f", maxVal)).
-				SetTextColor(color).
-				SetAlign(tview.AlignLeft),
+		rowData = append(rowData, SparklineRowData{
+			Name:      displayName,
+			MinValue:  minVal,
+			MaxValue:  maxVal,
+			Values:    values,
+			Sparkline: sparkline,
+			Color:     color,
 		})
-
-		*row++
 	}
-	return nil
+
+	return rowData, nil
 }
 
-func (a *App) GenerateSparkline(values []float64) string {
+// GenerateSparkline creates a sparkline string using Unicode characters
+func GenerateSparkline(values []float64) string {
 	if len(values) == 0 {
 		return ""
 	}
@@ -179,15 +194,23 @@ func (a *App) GenerateSparkline(values []float64) string {
 	return result.String()
 }
 
-func (a *App) ShowDescription(name, description string) {
-	a.tviewApp.QueueUpdateDraw(func() {
-		modal := tview.NewModal().
-			SetText(fmt.Sprintf("[yellow]%s[-]\n\n%s", name, description)).
-			AddButtons([]string{"OK"}).
-			SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-				a.pages.HidePage("metric_desc")
-			})
+// ConvertSparklineDataToTableRows converts sparkline row data to bubble-table rows
+func ConvertSparklineDataToTableRows(data []SparklineRowData) []table.Row {
+	var rows []table.Row
 
-		a.pages.AddPage("metric_desc", modal, true, true)
-	})
+	for _, item := range data {
+		rowData := table.RowData{
+			"name":      item.Name,
+			"min":       fmt.Sprintf("%.1f", item.MinValue),
+			"sparkline": item.Sparkline,
+			"max":       fmt.Sprintf("%.1f", item.MaxValue),
+		}
+
+		row := table.NewRow(rowData).
+			WithStyle(lipgloss.NewStyle().Foreground(lipgloss.Color(item.Color)))
+
+		rows = append(rows, row)
+	}
+
+	return rows
 }

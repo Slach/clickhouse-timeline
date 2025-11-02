@@ -6,84 +6,129 @@ import (
 	"github.com/Slach/clickhouse-timeline/pkg/client"
 	"github.com/Slach/clickhouse-timeline/pkg/config"
 	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
-	"github.com/gdamore/tcell/v2"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/rs/zerolog/log"
 )
 
-func (a *App) handleConnectCommand() {
-	// Prepare items for filtering
-	var items []string
-	for _, ctx := range a.cfg.Contexts {
-		items = append(items, a.getContextString(ctx))
+// ContextSelectedMsg is sent when a context is selected
+type ContextSelectedMsg struct {
+	Context config.Context
+}
+
+// ConnectionResultMsg is sent when connection attempt completes
+type ConnectionResultMsg struct {
+	Context config.Context
+	Client  *client.Client
+	Version string
+	Err     error
+}
+
+// connectSelector is a bubbletea model for selecting and connecting to a context
+type connectSelector struct {
+	list       widgets.FilteredList
+	contexts   []config.Context
+	connecting bool
+	err        error
+}
+
+func newConnectSelector(contexts []config.Context, width, height int) connectSelector {
+	// Build display names
+	names := make([]string, len(contexts))
+	for i, ctx := range contexts {
+		names[i] = fmt.Sprintf("%s (%s:%d)", ctx.Name, ctx.Host, ctx.Port)
 	}
 
-	// Create filtered list widget
-	fl := widgets.NewFilteredList(
-		a.connectList,
-		"Connections",
-		items,
-		"contexts",
-	)
+	listModel := widgets.NewFilteredList("Select Connection", names, width, height)
 
-	// Set up list with all items
-	fl.ResetList()
-	a.connectList.SetSelectedFunc(func(i int, _ string, _ string, _ rune) {
-		a.handleContextSelection(i)
-	})
+	return connectSelector{
+		list:       listModel,
+		contexts:   contexts,
+		connecting: false,
+	}
+}
 
-	// Add key handler for filtering
-	a.connectList.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Rune() == '/' {
-			fl.ShowFilterInput(a.tviewApp, a.pages)
-			return nil
+func (m connectSelector) Init() tea.Cmd {
+	return nil
+}
+
+func (m connectSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
+	case ConnectionResultMsg:
+		m.connecting = false
+		// Connection result will be handled by parent App
+		return m, nil
+
+	case tea.KeyMsg:
+		if m.connecting {
+			// During connection, only allow escape
+			if msg.String() == "esc" {
+				return m, nil
+			}
+			return m, nil
 		}
-		return event
-	})
 
-	a.pages.SwitchToPage("contexts")
-	a.tviewApp.SetFocus(a.connectList)
+		switch msg.String() {
+		case "enter":
+			// Get selected context
+			selectedIdx := m.list.SelectedIndex()
+			if selectedIdx >= 0 && selectedIdx < len(m.contexts) {
+				m.connecting = true
+				return m, func() tea.Msg {
+					return ContextSelectedMsg{Context: m.contexts[selectedIdx]}
+				}
+			}
+		case "esc", "q":
+			// Return to main - parent will handle this
+			return m, nil
+		}
+	}
+
+	// Delegate to list
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
+func (m connectSelector) View() string {
+	if m.connecting {
+		return m.list.View() + "\n\nConnecting to ClickHouse..."
+	}
+	if m.err != nil {
+		return m.list.View() + fmt.Sprintf("\n\nError: %v\nPress ESC to go back", m.err)
+	}
+	return m.list.View()
+}
+
+// connectToContextCmd attempts to connect to a ClickHouse context
+func (a *App) connectToContextCmd(ctx config.Context) tea.Cmd {
+	return func() tea.Msg {
+		clickHouse := client.NewClient(ctx, a.version)
+
+		version, err := clickHouse.GetVersion()
+		if err != nil {
+			log.Error().Err(err).Str("host", ctx.Host).Int("port", ctx.Port).Msg("failed to connect to ClickHouse")
+			return ConnectionResultMsg{
+				Context: ctx,
+				Err:     err,
+			}
+		}
+
+		return ConnectionResultMsg{
+			Context: ctx,
+			Client:  clickHouse,
+			Version: version,
+		}
+	}
+}
+
+func (a *App) handleConnectCommand() {
+	// Create connect selector
+	selector := newConnectSelector(a.cfg.Contexts, a.width, a.height)
+	a.connectHandler = selector
+	a.currentPage = pageConnect
 }
 
 func (a *App) getContextString(ctx config.Context) string {
 	return fmt.Sprintf("%s (%s:%d)", ctx.Name, ctx.Host, ctx.Port)
-}
-
-func (a *App) handleContextSelection(i int) {
-	// Check if list is empty
-	if a.connectList.GetItemCount() == 0 {
-		a.SwitchToMainPage("Error: No contexts available")
-		return
-	}
-
-	// Get the selected item text
-	selectedText, _ := a.connectList.GetItemText(i)
-
-	// Find the matching context
-	var selectedCtx *config.Context
-	found := false
-
-	for _, ctx := range a.cfg.Contexts {
-		itemText := a.getContextString(ctx)
-		if itemText == selectedText {
-			selectedCtx = &ctx
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		a.SwitchToMainPage("Error: Could not find selected context")
-		return
-	}
-
-	clickHouse := client.NewClient(*selectedCtx, a.version)
-
-	version, err := clickHouse.GetVersion()
-	if err != nil {
-		log.Error().Err(err).Str("host", selectedCtx.Host).Int("port", selectedCtx.Port).Msg("failed to connect to ClickHouse")
-		a.SwitchToMainPage(fmt.Sprintf("Error connecting to ClickHouse %s: %v", err, a.getContextString(*selectedCtx)))
-	} else {
-		a.clickHouse = clickHouse
-		a.SwitchToMainPage(fmt.Sprintf("Connected to %s:%d : version %s, press ':' to continue", selectedCtx.Host, selectedCtx.Port, version))
-	}
 }

@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
 	"github.com/Slach/clickhouse-timeline/pkg/utils"
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // ScaleType represents the type of scaling to apply to heatmap values
@@ -18,38 +19,72 @@ const (
 	ScaleLog10  ScaleType = "log10"
 )
 
+// ScaleSelectedMsg is sent when a scale is selected
+type ScaleSelectedMsg struct {
+	Scale ScaleType
+}
+
+// scaleSelector is a bubbletea model for selecting scale type
+type scaleSelector struct {
+	list   widgets.FilteredList
+	scales []ScaleType
+}
+
+func newScaleSelector(width, height int) scaleSelector {
+	scales := []ScaleType{ScaleLinear, ScaleLog2, ScaleLog10}
+	scaleNames := []string{
+		"Linear",
+		"Logarithmic (base 2)",
+		"Logarithmic (base 10)",
+	}
+
+	listModel := widgets.NewFilteredList("Select Scale Type", scaleNames, width, height)
+
+	return scaleSelector{
+		list:   listModel,
+		scales: scales,
+	}
+}
+
+func (m scaleSelector) Init() tea.Cmd {
+	return nil
+}
+
+func (m scaleSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "enter":
+			// Get selected scale
+			selectedIdx := m.list.SelectedIndex()
+			if selectedIdx >= 0 && selectedIdx < len(m.scales) {
+				return m, func() tea.Msg {
+					return ScaleSelectedMsg{Scale: m.scales[selectedIdx]}
+				}
+			}
+		case "esc", "q":
+			// Return to main - parent will handle this
+			return m, nil
+		}
+	}
+
+	// Delegate to list
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
+func (m scaleSelector) View() string {
+	return m.list.View()
+}
+
 // showScaleSelector displays a list of available scaling options
 func (a *App) showScaleSelector() {
-	scaleList := tview.NewList()
-	scaleList.SetTitle("Select Scale Type")
-	scaleList.SetBorder(true)
-
-	scales := []struct {
-		name  string
-		scale ScaleType
-	}{
-		{"Linear", ScaleLinear},
-		{"Logarithmic (base 2)", ScaleLog2},
-		{"Logarithmic (base 10)", ScaleLog10},
-	}
-
-	for i, s := range scales {
-		scaleList.AddItem(s.name, "", rune('1'+i), nil)
-	}
-
-	scaleList.SetSelectedFunc(func(i int, _ string, _ string, _ rune) {
-		a.scaleType = scales[i].scale
-		a.SwitchToMainPage(fmt.Sprintf("Scale changed to: %s", a.scaleType))
-
-		// If we already have a heatmap, regenerate it with the new scale
-		if a.heatmapTable != nil {
-			a.ShowHeatmap()
-		}
-	})
-
-	a.scaleList = scaleList
-	a.pages.AddPage("scales", scaleList, true, true)
-	a.pages.SwitchToPage("scales")
+	// Create bubbletea scale selector
+	selector := newScaleSelector(a.width, a.height)
+	a.scaleHandler = selector
+	a.currentPage = pageScale
 }
 
 // applyScaling applies the selected scaling to a value
@@ -75,10 +110,16 @@ func (a *App) applyScaling(value, minValue, maxValue float64) float64 {
 	}
 }
 
-// generateLegend creates a legend showing the color scale with values
-func (a *App) generateLegend(minValue, maxValue float64) *tview.Table {
-	legend := tview.NewTable().
-		SetBorders(false)
+// generateLegend creates a legend for bubbletea using lipgloss
+func (a *App) generateLegend(minValue, maxValue float64) string {
+	var legend string
+
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("white")).
+		Padding(0, 1)
+
+	legend += titleStyle.Render(fmt.Sprintf("Scale: %s", a.scaleType)) + "\n\n"
 
 	// Create 5 color steps for the legend
 	steps := 5
@@ -97,31 +138,26 @@ func (a *App) generateLegend(minValue, maxValue float64) *tview.Table {
 		// Calculate normalized value for color
 		normalizedValue := a.applyScaling(stepValue, minValue, maxValue)
 
-		// Get color for this step
-		var color tcell.Color
+		// Get color for this step (convert to lipgloss color)
+		var colorStyle lipgloss.Style
 		if normalizedValue < 0.5 {
 			// Green to Yellow
-			green := 255
-			red := uint8(255 * normalizedValue * 2)
-			color = tcell.NewRGBColor(int32(red), int32(green), 0)
+			red := int(255 * normalizedValue * 2)
+			colorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(fmt.Sprintf("#%02xFF00", red)))
 		} else {
 			// Yellow to Red
-			red := 255
-			green := uint8(255 * (1 - (normalizedValue-0.5)*2))
-			color = tcell.NewRGBColor(int32(red), int32(green), 0)
+			green := int(255 * (1 - (normalizedValue-0.5)*2))
+			colorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(fmt.Sprintf("#FF%02X00", green)))
 		}
 
-		// Add color box and value
-		legend.SetCell(i, 0, tview.NewTableCell(" ").
-			SetBackgroundColor(color))
-		legend.SetCell(i, 1, tview.NewTableCell(displayValue).
-			SetAlign(tview.AlignLeft))
+		// Add color indicator and value
+		legend += colorStyle.Render("█ ") + displayValue + "\n"
 	}
 
-	// Add scale type as title
-	legend.SetTitle(fmt.Sprintf(" %s ", string(a.scaleType))).
-		SetBorder(true).
-		SetTitleAlign(tview.AlignCenter)
+	borderStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("62")).
+		Padding(1)
 
-	return legend
+	return borderStyle.Render(legend)
 }

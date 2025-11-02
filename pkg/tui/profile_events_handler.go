@@ -6,8 +6,9 @@ import (
 	"time"
 
 	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/evertras/bubble-table/table"
 	"github.com/rs/zerolog/log"
 )
 
@@ -33,24 +34,148 @@ GROUP BY key
 ORDER BY key
 `
 
-func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string, fromTime, toTime time.Time, cluster string) {
-	if a.clickHouse == nil {
+// ProfileEventsDataMsg is sent when profile events data is loaded
+type ProfileEventsDataMsg struct {
+	Rows  []table.Row
+	Title string
+	Err   error
+}
+
+// profileEventsViewer is a bubbletea model for profile events display
+type profileEventsViewer struct {
+	table     widgets.FilteredTable
+	queryView widgets.QueryView
+	loading   bool
+	err       error
+	width     int
+	height    int
+}
+
+func newProfileEventsViewer(width, height int) profileEventsViewer {
+	tableWidth := (width * 2) / 3
+	queryWidth := width - tableWidth
+
+	tableModel := widgets.NewFilteredTable(
+		"Profile Events",
+		[]string{"Event", "Count", "p50", "p90", "p99"},
+		tableWidth,
+		height-4,
+	)
+
+	queryModel := widgets.NewQueryView("Query", queryWidth, height-4)
+
+	return profileEventsViewer{
+		table:     tableModel,
+		queryView: queryModel,
+		loading:   true,
+		width:     width,
+		height:    height,
+	}
+}
+
+func (m profileEventsViewer) Init() tea.Cmd {
+	return nil
+}
+
+func (m profileEventsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	var cmds []tea.Cmd
+
+	switch msg := msg.(type) {
+	case ProfileEventsDataMsg:
+		m.loading = false
+		if msg.Err != nil {
+			m.err = msg.Err
+			return m, nil
+		}
+
+		tableWidth := (m.width * 2) / 3
+		queryWidth := m.width - tableWidth
+
+		// Update table with data
+		m.table = widgets.NewFilteredTable(
+			msg.Title,
+			[]string{"Event", "Count", "p50", "p90", "p99"},
+			tableWidth,
+			m.height-4,
+		)
+		m.table.SetRows(msg.Rows)
+		m.queryView = widgets.NewQueryView("Query", queryWidth, m.height-4)
+		return m, nil
+
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc", "q":
+			return m, func() tea.Msg {
+				return tea.KeyMsg{Type: tea.KeyEsc}
+			}
+		case "enter":
+			// TODO: Show event description in a modal
+			return m, nil
+		}
+	}
+
+	// Update table and query view based on selection
+	m.table, cmd = m.table.Update(msg)
+	cmds = append(cmds, cmd)
+
+	// Update query view if selection changed
+	selected := m.table.HighlightedRow()
+	if selected.Data != nil {
+		if query, ok := selected.Data["query"].(string); ok && query != "" {
+			m.queryView.SetSQL(query)
+		}
+	}
+
+	m.queryView, cmd = m.queryView.Update(msg)
+	cmds = append(cmds, cmd)
+
+	return m, tea.Batch(cmds...)
+}
+
+func (m profileEventsViewer) View() string {
+	if m.loading {
+		return "Loading profile events, please wait..."
+	}
+	if m.err != nil {
+		return fmt.Sprintf("Error loading profile events: %v\n\nPress ESC to return", m.err)
+	}
+
+	// Split-pane layout: table on left, query view on right
+	return lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		m.table.View(),
+		m.queryView.View(),
+	)
+}
+
+// ShowProfileEvents displays profile events data
+func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string, fromTime, toTime time.Time, cluster string) tea.Cmd {
+	if a.state.ClickHouse == nil {
 		a.SwitchToMainPage("Error: Please connect to a ClickHouse instance first using :connect command")
-		return
+		return nil
 	}
 	if cluster == "" {
 		a.SwitchToMainPage("Error: Please select a cluster first using :cluster command")
-		return
+		return nil
 	}
 
-	a.mainView.SetText("Loading profile events, please wait...")
+	// Create and show viewer
+	viewer := newProfileEventsViewer(a.width, a.height)
+	a.profileHandler = viewer
+	a.currentPage = pageProfileEvents
 
-	go func() {
-		// Format dates for the query
+	// Start async data fetch
+	return a.fetchProfileEventsDataCmd(categoryType, categoryValue, fromTime, toTime, cluster)
+}
+
+// fetchProfileEventsDataCmd fetches profile events data from ClickHouse
+func (a *App) fetchProfileEventsDataCmd(categoryType CategoryType, categoryValue string, fromTime, toTime time.Time, cluster string) tea.Cmd {
+	return func() tea.Msg {
 		fromStr := fromTime.Format("2006-01-02 15:04:05 -07:00")
 		toStr := toTime.Format("2006-01-02 15:04:05 -07:00")
 
-		// Build categoryType filter if categoryValue is provided
+		// Build category filter if categoryValue is provided
 		var categoryFilter string
 		if categoryValue != "" {
 			switch categoryType {
@@ -73,12 +198,9 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 			categoryFilter,
 		)
 
-		rows, err := a.clickHouse.Query(query)
+		rows, err := a.state.ClickHouse.Query(query)
 		if err != nil {
-			a.tviewApp.QueueUpdateDraw(func() {
-				a.mainView.SetText(fmt.Sprintf("Error executing query: %v\n%s", err, query))
-			})
-			return
+			return ProfileEventsDataMsg{Err: fmt.Errorf("error executing query: %v\n%s", err, query)}
 		}
 		defer func() {
 			if closeErr := rows.Close(); closeErr != nil {
@@ -86,163 +208,46 @@ func (a *App) ShowProfileEvents(categoryType CategoryType, categoryValue string,
 			}
 		}()
 
-		// Create table to display results
-		a.tviewApp.QueueUpdateDraw(func() {
-			// Create filtered table widget
-			filteredTable := widgets.NewFilteredTable()
-			filteredTable.SetupHeaders([]string{"Event", "Count", "p50", "p90", "p99"})
+		// Process rows
+		var tableRows []table.Row
+		for rows.Next() {
+			var (
+				event           string
+				count           int
+				p50             float64
+				p90             float64
+				p99             float64
+				p50s            string
+				p90s            string
+				p99s            string
+				normalizedQuery string
+			)
 
-			// Create flex layout with table on left and query view on right
-			flex := tview.NewFlex().
-				SetDirection(tview.FlexColumn)
-
-			// Process rows
-			row := 1
-			for rows.Next() {
-				var (
-					event           string
-					count           int
-					p50             float64
-					p90             float64
-					p99             float64
-					p50s            string
-					p90s            string
-					p99s            string
-					normalizedQuery string
-				)
-
-				if err := rows.Scan(&event, &count, &p50, &p90, &p99, &p50s, &p90s, &p99s, &normalizedQuery); err != nil {
-					a.mainView.SetText(fmt.Sprintf("Error scanning row: %v", err))
-					return
-				}
-
-				// Determine cell colors based on percentile differences
-				color := tcell.ColorWhite
-				if p90 > 2*p50 || p99 > 2*p90 {
-					color = tcell.ColorYellow
-				}
-				if p90 > 4*p50 || p99 > 6*p50 {
-					color = tcell.ColorRed
-				}
-
-				// Add row to table
-				filteredTable.AddRow([]*tview.TableCell{
-					tview.NewTableCell(event).
-						SetTextColor(color).
-						SetAlign(tview.AlignLeft),
-					tview.NewTableCell(fmt.Sprintf("%d", count)).
-						SetTextColor(color).
-						SetAlign(tview.AlignRight),
-					tview.NewTableCell(p50s).
-						SetTextColor(color).
-						SetAlign(tview.AlignRight),
-					tview.NewTableCell(p90s).
-						SetTextColor(color).
-						SetAlign(tview.AlignRight),
-					tview.NewTableCell(p99s).
-						SetTextColor(color).
-						SetAlign(tview.AlignRight),
-					tview.NewTableCell(normalizedQuery),
-				})
-
-				row++
+			if err := rows.Scan(&event, &count, &p50, &p90, &p99, &p50s, &p90s, &p99s, &normalizedQuery); err != nil {
+				return ProfileEventsDataMsg{Err: fmt.Errorf("error scanning row: %v", err)}
 			}
 
-			if err := rows.Err(); err != nil {
-				a.mainView.SetText(fmt.Sprintf("Error reading rows: %v", err))
-				return
+			// Determine color based on percentile differences (stored as metadata for rendering)
+			// For now, we'll just use the formatted strings
+			rowData := table.RowData{
+				"Event": event,
+				"Count": fmt.Sprintf("%d", count),
+				"p50":   p50s,
+				"p90":   p90s,
+				"p99":   p99s,
+				"query": normalizedQuery, // Hidden column for query view
 			}
+			tableRows = append(tableRows, table.NewRow(rowData))
+		}
 
-			// Set title
-			title := fmt.Sprintf("Profile Events: %s (%s to %s)",
-				categoryValue,
-				fromStr,
-				toStr)
-			filteredTable.Table.SetTitle(title).SetBorder(true)
+		if err := rows.Err(); err != nil {
+			return ProfileEventsDataMsg{Err: fmt.Errorf("error reading rows: %v", err)}
+		}
 
-			// Add key handler for filtering table content
-			filteredTable.Table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-				if event.Key() == tcell.KeyEscape {
-					if a.pages.HasPage("heatmap") {
-						a.pages.SwitchToPage("heatmap")
-					} else {
-						a.pages.SwitchToPage("main")
-					}
-					return nil
-				}
-				if filterHandler := filteredTable.GetInputCapture(a.tviewApp, a.pages); filterHandler != nil {
-					if result := filterHandler(event); result == nil {
-						return nil
-					}
-				}
-				if event.Key() == tcell.KeyEnter {
-					row, _ := filteredTable.Table.GetSelection()
-					eventName := filteredTable.Table.GetCell(row, 0).Text
-
-					// Query event description
-					go func() {
-						descrQuery := fmt.Sprintf("SELECT description FROM system.events WHERE name = '%s'", eventName)
-						descrRows, descrErr := a.clickHouse.Query(descrQuery)
-						if descrErr != nil {
-							a.tviewApp.QueueUpdateDraw(func() {
-								a.SwitchToMainPage(fmt.Sprintf("Error getting event description: %v", descrErr))
-							})
-							return
-						}
-						defer func() {
-							if closeErr := descrRows.Close(); closeErr != nil {
-								log.Error().Err(closeErr).Msg("can't close ProfileEvents descrRows")
-							}
-						}()
-
-						var description string
-						if descrRows.Next() {
-							if scanErr := rows.Scan(&description); scanErr != nil {
-								a.tviewApp.QueueUpdateDraw(func() {
-									a.mainView.SetText(fmt.Sprintf("Error scanning description: %v", scanErr))
-								})
-								return
-							}
-						}
-
-						// Show description in modal
-						a.tviewApp.QueueUpdateDraw(func() {
-							modal := tview.NewModal().
-								SetText(fmt.Sprintf("[yellow]%s[-]\n\n%s", eventName, description)).
-								AddButtons([]string{"OK"}).
-								SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-									a.pages.HidePage("event_desc")
-								})
-
-							a.pages.AddPage("event_desc", modal, true, true)
-						})
-					}()
-					return nil
-				}
-				return event
-			})
-
-			// Create query view widget
-			queryView := widgets.NewQueryView()
-
-			// Update query view when selection changes
-			filteredTable.Table.SetSelectionChangedFunc(func(row, column int) {
-				if row > 0 && row <= len(filteredTable.OriginalRows) {
-					rowData := filteredTable.OriginalRows[row]
-					if len(rowData) > 5 && rowData[5] != nil {
-						if normalizedQuery := rowData[5].Text; normalizedQuery != "" {
-							queryView.SetSQL(normalizedQuery)
-						}
-					}
-				}
-			})
-
-			// Add components to flex
-			flex.AddItem(filteredTable.Table, 0, 2, true).
-				AddItem(queryView, 0, 1, false)
-
-			a.pages.AddPage("profile_events", flex, true, true)
-			a.pages.SwitchToPage("profile_events")
-		})
-	}()
+		title := fmt.Sprintf("Profile Events: %s (%s to %s)", categoryValue, fromStr, toStr)
+		return ProfileEventsDataMsg{
+			Rows:  tableRows,
+			Title: title,
+		}
+	}
 }

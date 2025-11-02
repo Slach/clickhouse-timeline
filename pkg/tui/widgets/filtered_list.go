@@ -1,165 +1,222 @@
 package widgets
 
 import (
-	"fmt"
 	"strings"
 
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
+	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
+// FilteredList is a bubbletea model for a filterable list
 type FilteredList struct {
-	List       *tview.List
-	Title      string
-	Items      []string
-	FilterPage string
-	// RenderList, if set, is used to render items into the real list.
-	// This allows callers to preserve custom prefixes (e.g. "[ ]"/"[+]") and selection behavior.
-	RenderList func(list *tview.List, items []string)
+	list        list.Model
+	filterInput textinput.Model
+	filtering   bool
+	title       string
+	allItems    []list.Item
+	width       int
+	height      int
+	onSelect    func(selectedIndex int, selectedItem list.Item)
 }
 
-func NewFilteredList(list *tview.List, title string, items []string, filterPage string) *FilteredList {
-	return &FilteredList{
-		List:       list,
-		Title:      title,
-		Items:      items,
-		FilterPage: filterPage,
-		RenderList: nil,
+// FilteredListItem implements list.Item interface
+type FilteredListItem struct {
+	title       string
+	description string
+}
+
+func (i FilteredListItem) Title() string       { return i.title }
+func (i FilteredListItem) Description() string { return i.description }
+func (i FilteredListItem) FilterValue() string { return i.title }
+
+// NewFilteredList creates a new filtered list
+func NewFilteredList(title string, items []string, width, height int) FilteredList {
+	// Convert strings to list items
+	listItems := make([]list.Item, len(items))
+	for i, item := range items {
+		listItems[i] = FilteredListItem{title: item, description: ""}
+	}
+
+	// Create list
+	delegate := list.NewDefaultDelegate()
+	l := list.New(listItems, delegate, width, height-3) // Reserve space for filter input
+	l.Title = title
+	l.SetShowStatusBar(false)
+	l.SetFilteringEnabled(false) // We handle filtering ourselves
+
+	// Create filter input
+	ti := textinput.New()
+	ti.Placeholder = "Type to filter..."
+	ti.Prompt = "/"
+	ti.CharLimit = 100
+
+	return FilteredList{
+		list:        l,
+		filterInput: ti,
+		filtering:   false,
+		title:       title,
+		allItems:    listItems,
+		width:       width,
+		height:      height,
 	}
 }
 
-func (fl *FilteredList) SetupFilterInput(app *tview.Application, pages *tview.Pages) *tview.InputField {
-	filterInput := tview.NewInputField().
-		SetLabel("/").
-		SetFieldWidth(30)
-
-	// DoneFunc will close the transient overlay (if present) and restore focus to the original list.
-	filterInput.SetDoneFunc(func(key tcell.Key) {
-		overlayName := fl.FilterPage + "_overlay"
-		if key == tcell.KeyEscape {
-			// Just close overlay and restore focus, do not mutate original page structure.
-			pages.RemovePage(overlayName)
-			app.SetFocus(fl.List)
-		} else if key == tcell.KeyEnter {
-			// Apply the filter to the real list and close overlay.
-			filterText := filterInput.GetText()
-			if filterText != "" {
-				fl.List.SetTitle(fmt.Sprintf("%s [::b::cyan]/%s[-:-:-]", fl.Title, filterText))
-			} else {
-				fl.List.SetTitle(fl.Title)
-			}
-			fl.FilterList(filterText)
-			pages.RemovePage(overlayName)
-			app.SetFocus(fl.List)
-		}
-	})
-
-	filterInput.SetMouseCapture(func(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
-		return action, event
-	})
-
-	return filterInput
+// SetOnSelect sets the callback when an item is selected
+func (m *FilteredList) SetOnSelect(callback func(selectedIndex int, selectedItem list.Item)) {
+	m.onSelect = callback
 }
 
-func (fl *FilteredList) ShowFilterInput(app *tview.Application, pages *tview.Pages) {
-	// Create a transient overlay page so the underlying page remains intact.
-	overlayName := fl.FilterPage + "_overlay"
+// SetSize updates the dimensions
+func (m *FilteredList) SetSize(width, height int) {
+	m.width = width
+	m.height = height
+	m.list.SetSize(width, height-3)
+}
 
-	// Prepare a dedicated input for the overlay (done func already handles closing overlay).
-	filterInput := fl.SetupFilterInput(app, pages)
+// Init implements tea.Model
+func (m FilteredList) Init() tea.Cmd {
+	return nil
+}
 
-	// Create a temporary list to render filtered results in the overlay.
-	tempList := tview.NewList().ShowSecondaryText(false)
-	tempList.SetMainTextColor(tcell.ColorWhite)
+// Update implements tea.Model
+func (m FilteredList) Update(msg tea.Msg) (FilteredList, tea.Cmd) {
+	var cmd tea.Cmd
+	var cmds []tea.Cmd
 
-	// Populate function for the temporary list based on current fl.Items.
-	populate := func(filter string) {
-		tempList.Clear()
-		lower := strings.ToLower(filter)
-		for _, item := range fl.Items {
-			if lower == "" || strings.Contains(strings.ToLower(item), lower) {
-				// Add visible items to the temporary list.
-				// Capture item text by value in the selected func closure below.
-				tempList.AddItem(item, "", 0, nil)
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.SetSize(msg.Width, msg.Height)
+		return m, nil
+
+	case tea.KeyMsg:
+		if m.filtering {
+			switch msg.String() {
+			case "esc":
+				// Cancel filtering
+				m.filtering = false
+				m.filterInput.SetValue("")
+				m.filterInput.Blur()
+				m.applyFilter("")
+				return m, nil
+
+			case "enter":
+				// Apply filter and exit filter mode
+				m.filtering = false
+				m.filterInput.Blur()
+				return m, nil
+
+			default:
+				// Update filter input
+				m.filterInput, cmd = m.filterInput.Update(msg)
+				cmds = append(cmds, cmd)
+				// Apply filter as user types
+				m.applyFilter(m.filterInput.Value())
+				return m, tea.Batch(cmds...)
+			}
+		} else {
+			// Normal list navigation
+			switch msg.String() {
+			case "/":
+				// Enter filter mode
+				m.filtering = true
+				m.filterInput.Focus()
+				return m, nil
+
+			case "enter":
+				// Select current item
+				if m.onSelect != nil {
+					selectedItem := m.list.SelectedItem()
+					if selectedItem != nil {
+						// Find the index in the original allItems
+						for i, item := range m.allItems {
+							if item.(FilteredListItem).title == selectedItem.(FilteredListItem).title {
+								m.onSelect(i, selectedItem)
+								break
+							}
+						}
+					}
+				}
+				return m, nil
+
+			case "esc", "q":
+				// Propagate up (will be handled by parent)
+				return m, nil
+
+			default:
+				// Delegate to list
+				m.list, cmd = m.list.Update(msg)
+				cmds = append(cmds, cmd)
 			}
 		}
 	}
 
-	// Wire changed event on the overlay input to update the temporary list.
-	filterInput.SetChangedFunc(func(filterText string) {
-		populate(filterText)
-	})
-
-	// When a user selects an item in the overlay list, close the overlay and focus the real list.
-	tempList.SetSelectedFunc(func(index int, mainText string, _ string, _ rune) {
-		selected := mainText
-		// Find and select the same item in the real list if possible.
-		for i, it := range fl.Items {
-			if it == selected {
-				fl.List.SetCurrentItem(i)
-				break
-			}
-		}
-		// Close overlay and focus the real list.
-		pages.RemovePage(overlayName)
-		app.SetFocus(fl.List)
-	})
-
-	// Initial population
-	populate("")
-
-	// Layout for overlay: input on top, temporary list below.
-	flex := tview.NewFlex().
-		SetDirection(tview.FlexRow).
-		AddItem(filterInput, 1, 0, true).
-		AddItem(tempList, 0, 1, false)
-
-	// Add overlay page (do not remove the original page). Show overlay above current pages.
-	pages.RemovePage(overlayName) // ensure no duplicate
-	pages.AddPage(overlayName, flex, true, true)
-	app.SetFocus(filterInput)
+	return m, tea.Batch(cmds...)
 }
 
-func (fl *FilteredList) FilterList(filter string) {
-	fl.List.Clear()
+// View implements tea.Model
+func (m FilteredList) View() string {
+	if m.filtering {
+		// Show filter input at top
+		filterView := lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("62")).
+			Padding(0, 1).
+			Width(m.width - 4).
+			Render(m.filterInput.View())
 
+		return lipgloss.JoinVertical(lipgloss.Left, filterView, m.list.View())
+	}
+
+	// Update title to show active filter
+	if m.filterInput.Value() != "" {
+		titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("cyan"))
+		m.list.Title = m.title + " " + titleStyle.Render("/"+m.filterInput.Value())
+	} else {
+		m.list.Title = m.title
+	}
+
+	return m.list.View()
+}
+
+// applyFilter filters the list based on the filter text
+func (m *FilteredList) applyFilter(filter string) {
 	if filter == "" {
-		fl.ResetList()
+		// Reset to all items
+		m.list.SetItems(m.allItems)
 		return
 	}
 
-	fl.List.SetTitle(fmt.Sprintf("%s [::b::cyan]/%s[-:-:-]", fl.Title, filter))
-	filter = strings.ToLower(filter)
-
-	// Build filtered slice
-	var filtered []string
-	for _, item := range fl.Items {
-		if strings.Contains(strings.ToLower(item), filter) {
+	// Filter items
+	filterLower := strings.ToLower(filter)
+	var filtered []list.Item
+	for _, item := range m.allItems {
+		if strings.Contains(strings.ToLower(item.FilterValue()), filterLower) {
 			filtered = append(filtered, item)
 		}
 	}
 
-	// If caller provided a custom renderer, use it so prefixes/selection state can be preserved.
-	if fl.RenderList != nil {
-		fl.RenderList(fl.List, filtered)
-		return
-	}
-
-	for _, item := range filtered {
-		fl.List.AddItem(item, "", 0, nil).ShowSecondaryText(false)
-	}
+	m.list.SetItems(filtered)
 }
 
-func (fl *FilteredList) ResetList() {
-	fl.List.Clear()
-	fl.List.SetTitle(fl.Title)
-
-	if fl.RenderList != nil {
-		fl.RenderList(fl.List, fl.Items)
-		return
+// SelectedIndex returns the index of the selected item in the original list
+func (m FilteredList) SelectedIndex() int {
+	selectedItem := m.list.SelectedItem()
+	if selectedItem == nil {
+		return -1
 	}
 
-	for _, item := range fl.Items {
-		fl.List.AddItem(item, "", 0, nil).ShowSecondaryText(false)
+	// Find index in original allItems
+	for i, item := range m.allItems {
+		if item.(FilteredListItem).title == selectedItem.(FilteredListItem).title {
+			return i
+		}
 	}
+	return -1
+}
+
+// SelectedItem returns the currently selected item
+func (m FilteredList) SelectedItem() list.Item {
+	return m.list.SelectedItem()
 }

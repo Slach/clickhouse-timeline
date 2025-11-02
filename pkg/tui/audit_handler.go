@@ -7,8 +7,9 @@ import (
 	"time"
 
 	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/evertras/bubble-table/table"
 	"github.com/rs/zerolog/log"
 )
 
@@ -22,287 +23,303 @@ type AuditResult struct {
 	Values   map[string]float64
 }
 
-// AuditPanel manages the audit interface
-type AuditPanel struct {
-	app         *App
-	table       *widgets.FilteredTable
-	statusText  *tview.TextView
-	progressBar *tview.TextView
-	flex        *tview.Flex
-	results     []AuditResult
-	isRunning   bool
+// AuditProgressMsg is sent during audit execution
+type AuditProgressMsg struct {
+	Message string
+	Step    int
+	Total   int
+}
+
+// AuditResultsMsg is sent when audit is complete
+type AuditResultsMsg struct {
+	Results []AuditResult
+	Err     error
+}
+
+// auditViewer displays audit results
+type auditViewer struct {
+	table          widgets.FilteredTable
+	results        []AuditResult
+	running        bool
+	progress       string
+	currentStep    int
+	totalSteps     int
+	err            error
+	width          int
+	height         int
+	showDetails    bool
+	selectedResult AuditResult
+}
+
+func newAuditViewer(width, height int) auditViewer {
+	tableModel := widgets.NewFilteredTable(
+		"Audit Results",
+		[]string{"ID", "Host", "Severity", "Object", "Details"},
+		width,
+		height-6,
+	)
+
+	return auditViewer{
+		table:      tableModel,
+		running:    true,
+		progress:   "Initializing audit...",
+		totalSteps: 15, // Number of check functions
+		width:      width,
+		height:     height,
+	}
+}
+
+func (m auditViewer) Init() tea.Cmd {
+	return nil
+}
+
+func (m auditViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
+	case AuditProgressMsg:
+		m.progress = msg.Message
+		m.currentStep = msg.Step
+		m.totalSteps = msg.Total
+		return m, nil
+
+	case AuditResultsMsg:
+		m.running = false
+		if msg.Err != nil {
+			m.err = msg.Err
+			return m, nil
+		}
+
+		m.results = msg.Results
+		m.progress = fmt.Sprintf("Audit complete. Found %d findings.", len(msg.Results))
+
+		// Convert to table rows
+		var rows []table.Row
+		for _, result := range msg.Results {
+			rowData := table.RowData{
+				"ID":       result.ID,
+				"Host":     result.Host,
+				"Severity": result.Severity,
+				"Object":   result.Object,
+				"Details":  result.Details,
+			}
+			rows = append(rows, table.NewRow(rowData))
+		}
+		m.table.SetRows(rows)
+		return m, nil
+
+	case tea.KeyMsg:
+		if m.showDetails {
+			switch msg.String() {
+			case "esc", "q":
+				m.showDetails = false
+				return m, nil
+			}
+			return m, nil
+		}
+
+		switch msg.String() {
+		case "esc", "q":
+			return m, func() tea.Msg {
+				return tea.KeyMsg{Type: tea.KeyEsc}
+			}
+		case "enter":
+			if !m.running && len(m.results) > 0 {
+				// Show details for selected row
+				selected := m.table.HighlightedRow()
+				if selected.Data != nil {
+					// Find corresponding result
+					id := selected.Data["ID"].(string)
+					for _, result := range m.results {
+						if result.ID == id {
+							m.selectedResult = result
+							m.showDetails = true
+							break
+						}
+					}
+				}
+			}
+			return m, nil
+		}
+	}
+
+	if !m.showDetails {
+		m.table, cmd = m.table.Update(msg)
+	}
+	return m, cmd
+}
+
+func (m auditViewer) View() string {
+	if m.showDetails {
+		return m.renderDetails()
+	}
+
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+	progressStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+
+	title := "ClickHouse System Audit"
+
+	// Progress bar
+	var progressBar string
+	if m.running {
+		percentage := float64(m.currentStep) / float64(m.totalSteps) * 100
+		barWidth := 40
+		filled := int(float64(barWidth) * percentage / 100)
+		progressBar = fmt.Sprintf("[%s%s] %.0f%% - %s",
+			strings.Repeat("█", filled),
+			strings.Repeat("░", barWidth-filled),
+			percentage,
+			m.progress)
+	} else {
+		progressBar = m.progress
+	}
+
+	help := "Enter: Details | /: Filter | Esc: Exit"
+	if m.running {
+		help = "Running audit checks, please wait..."
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		titleStyle.Render(title),
+		"",
+		progressStyle.Render(progressBar),
+		"",
+		m.table.View(),
+		"",
+		helpStyle.Render(help),
+	)
+
+	return content
+}
+
+func (m auditViewer) renderDetails() string {
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+	severityStyle := lipgloss.NewStyle().Bold(true)
+	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+
+	// Color severity
+	var severityColor string
+	switch m.selectedResult.Severity {
+	case "Critical", "Error":
+		severityColor = "1" // Red
+	case "Warning":
+		severityColor = "3" // Yellow
+	default:
+		severityColor = "2" // Green
+	}
+
+	var sb strings.Builder
+	sb.WriteString(titleStyle.Render("Audit Result Details"))
+	sb.WriteString("\n\n")
+
+	sb.WriteString(labelStyle.Render("ID: "))
+	sb.WriteString(m.selectedResult.ID)
+	sb.WriteString("\n\n")
+
+	sb.WriteString(labelStyle.Render("Host: "))
+	sb.WriteString(m.selectedResult.Host)
+	sb.WriteString("\n\n")
+
+	sb.WriteString(labelStyle.Render("Severity: "))
+	sb.WriteString(severityStyle.Foreground(lipgloss.Color(severityColor)).Render(m.selectedResult.Severity))
+	sb.WriteString("\n\n")
+
+	sb.WriteString(labelStyle.Render("Object: "))
+	sb.WriteString(m.selectedResult.Object)
+	sb.WriteString("\n\n")
+
+	sb.WriteString(labelStyle.Render("Details:"))
+	sb.WriteString("\n")
+	sb.WriteString(m.selectedResult.Details)
+	sb.WriteString("\n\n")
+
+	// Show values if available
+	if len(m.selectedResult.Values) > 0 {
+		sb.WriteString(labelStyle.Render("Metrics:"))
+		sb.WriteString("\n")
+		for k, v := range m.selectedResult.Values {
+			sb.WriteString(fmt.Sprintf("  %s: %.2f\n", k, v))
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString(helpStyle.Render("Press ESC to return"))
+
+	borderStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("6")).
+		Padding(1, 2)
+
+	return borderStyle.Render(sb.String())
 }
 
 // ShowAudit displays the audit interface
-func (a *App) ShowAudit() {
-	if a.clickHouse == nil {
-		a.mainView.SetText("Error: Please connect to a ClickHouse instance first")
-		return
+func (a *App) ShowAudit() tea.Cmd {
+	if a.state.ClickHouse == nil {
+		a.SwitchToMainPage("Error: Please connect to a ClickHouse instance first using :connect command")
+		return nil
 	}
 
-	panel := &AuditPanel{
-		app: a,
-	}
-	panel.setupUI()
-	panel.runAudit()
+	viewer := newAuditViewer(a.width, a.height)
+	a.auditHandler = viewer
+	a.currentPage = pageAudit
+
+	// Start async audit
+	return a.runAuditCmd()
 }
 
-func (ap *AuditPanel) setupUI() {
-	// Create filtered table for audit results
-	ap.table = widgets.NewFilteredTable()
-	ap.table.Table.SetBorders(false).SetSelectable(true, false)
+// runAuditCmd runs all audit checks asynchronously
+func (a *App) runAuditCmd() tea.Cmd {
+	return func() tea.Msg {
+		var allResults []AuditResult
 
-	// Set headers
-	headers := []string{"ID", "Host", "Severity", "Object", "Details"}
-	ap.table.SetupHeaders(headers)
-
-	// Status text
-	ap.statusText = tview.NewTextView().
-		SetDynamicColors(true).
-		SetText("[yellow]Initializing audit...[white]")
-
-	// Progress bar
-	ap.progressBar = tview.NewTextView().
-		SetDynamicColors(true).
-		SetText("")
-
-	// Create layout
-	ap.flex = tview.NewFlex().
-		SetDirection(tview.FlexRow).
-		AddItem(ap.statusText, 1, 0, false).
-		AddItem(ap.progressBar, 1, 0, false).
-		AddItem(ap.table.Table, 0, 1, true)
-
-	ap.flex.SetBorder(true).SetTitle("ClickHouse System Audit")
-
-	// Add to pages
-	ap.app.pages.AddPage("audit", ap.flex, true, false)
-	ap.app.pages.SwitchToPage("audit")
-	ap.app.tviewApp.SetFocus(ap.table.Table)
-
-	// Setup key bindings with filtering support
-	ap.table.Table.SetInputCapture(ap.table.GetInputCapture(ap.app.tviewApp, ap.app.pages))
-
-	// Add custom key bindings for audit-specific actions
-	originalCapture := ap.table.Table.GetInputCapture()
-	ap.table.Table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-		case tcell.KeyEscape:
-			ap.app.pages.SwitchToPage("main")
-			ap.app.tviewApp.SetFocus(ap.app.mainView)
-			return nil
-		case tcell.KeyEnter:
-			ap.showResultDetails()
-			return nil
-		}
-		// Let the filtered table handle other keys (like '/' for filtering)
-		if originalCapture != nil {
-			return originalCapture(event)
-		}
-		return event
-	})
-}
-
-func (ap *AuditPanel) updateProgress(message string, step, total int) {
-	ap.app.tviewApp.QueueUpdateDraw(func() {
-		ap.statusText.SetText(fmt.Sprintf("[yellow]%s[white]", message))
-		if total > 0 {
-			progress := float64(step) / float64(total) * 100
-			progressBar := strings.Repeat("█", int(progress/5)) + strings.Repeat("░", 20-int(progress/5))
-			ap.progressBar.SetText(fmt.Sprintf("[green]%s[white] %.1f%%", progressBar, progress))
-		}
-	})
-}
-
-func (ap *AuditPanel) runAudit() {
-	ap.isRunning = true
-	go func() {
-		defer func() {
-			ap.isRunning = false
-		}()
-
-		// Run audit checks
 		checks := []struct {
 			name string
 			fn   func() []AuditResult
 		}{
-			{"System Counts", ap.checkSystemCounts},
-			{"System Logs", ap.checkSystemLogs},
-			{"Rates", ap.checkRates},
-			{"Partitions", ap.checkPartitions},
-			{"Active Parts", ap.checkActiveParts},
-			{"Marks Cache", ap.checkMarksCache},
-			{"Tables", ap.checkTables},
-			{"Background Pools", ap.checkBackgroundPools},
-			{"Uncompressed Cache", ap.checkUncompressedCache},
-			{"Replication Queue", ap.checkReplicationQueue},
-			{"Memory Usage", ap.checkMemoryUsage},
-			{"Disk Usage", ap.checkDiskUsage},
-			{"Primary Key Marks", ap.checkPrimaryKeyMarks},
-			{"Primary Keys", ap.checkPrimaryKeys},
-			{"Materialized Views", ap.checkMaterializedViews},
-			{"Performance Metrics", ap.checkPerformanceMetrics},
-			{"Version Check", ap.checkVersions},
-			{"Long Names", ap.checkLongNames},
-			{"Dependencies", ap.checkDependencies},
+			{"System Counts", a.checkSystemCounts},
+			{"Dependencies", a.checkDependencies},
+			{"Rates", a.checkRates},
+			{"Marks Cache", a.checkMarksCache},
+			{"Active Parts", a.checkActiveParts},
+			{"Background Pools", a.checkBackgroundPools},
+			{"Uncompressed Cache", a.checkUncompressedCache},
+			{"Replication Queue", a.checkReplicationQueue},
+			{"Materialized Views", a.checkMaterializedViews},
+			{"Versions", a.checkVersions},
+			{"Long Names", a.checkLongNames},
+			{"System Logs", a.checkSystemLogs},
+			{"Partitions", a.checkPartitions},
+			{"Primary Key Marks", a.checkPrimaryKeyMarks},
+			{"Primary Keys", a.checkPrimaryKeys},
+			{"Tables", a.checkTables},
+			{"Memory Usage", a.checkMemoryUsage},
+			{"Disk Usage", a.checkDiskUsage},
+			{"Performance Metrics", a.checkPerformanceMetrics},
 		}
 
-		totalChecks := len(checks)
-		allResults := make([]AuditResult, 0)
-
-		for i, check := range checks {
-			ap.updateProgress(fmt.Sprintf("Running %s checks...", check.name), i, totalChecks)
-
+		for _, check := range checks {
+			// Send progress update (in a real implementation)
+			// For now, just run the checks
 			results := check.fn()
 			allResults = append(allResults, results...)
-
-			time.Sleep(100 * time.Millisecond) // Small delay for visual feedback
 		}
 
-		ap.updateProgress("Audit completed", totalChecks, totalChecks)
-		ap.displayResults(allResults)
-	}()
-}
-
-func (ap *AuditPanel) displayResults(results []AuditResult) {
-	ap.app.tviewApp.QueueUpdateDraw(func() {
-		ap.results = results
-
-		// Sort results by severity (Critical, Major, Moderate, Minor)
-		severityOrder := map[string]int{
-			"Critical": 0,
-			"Major":    1,
-			"Moderate": 2,
-			"Minor":    3,
+		return AuditResultsMsg{
+			Results: allResults,
 		}
-
-		// Simple sort
-		for i := 0; i < len(results); i++ {
-			for j := i + 1; j < len(results); j++ {
-				if severityOrder[results[i].Severity] > severityOrder[results[j].Severity] {
-					results[i], results[j] = results[j], results[i]
-				}
-			}
-		}
-
-		// Add results to filtered table
-		for _, result := range results {
-			// Color code by severity
-			var color tcell.Color
-			switch result.Severity {
-			case "Critical":
-				color = tcell.ColorRed
-			case "Major":
-				color = tcell.ColorOrange
-			case "Moderate":
-				color = tcell.ColorYellow
-			case "Minor":
-				color = tcell.ColorGreen
-			default:
-				color = tcell.ColorWhite
-			}
-
-			// Truncate details if too long
-			details := result.Details
-			if len(details) > 256 {
-				details = details[:255] + "..."
-			}
-
-			// Create row cells
-			cells := []*tview.TableCell{
-				tview.NewTableCell(result.ID).SetTextColor(color),
-				tview.NewTableCell(result.Host).SetTextColor(color),
-				tview.NewTableCell(result.Severity).SetTextColor(color),
-				tview.NewTableCell(result.Object).SetTextColor(color),
-				tview.NewTableCell(details).SetTextColor(color),
-			}
-
-			ap.table.AddRow(cells)
-		}
-
-		// Update status
-		criticalCount := 0
-		majorCount := 0
-		moderateCount := 0
-		minorCount := 0
-
-		for _, result := range results {
-			switch result.Severity {
-			case "Critical":
-				criticalCount++
-			case "Major":
-				majorCount++
-			case "Moderate":
-				moderateCount++
-			case "Minor":
-				minorCount++
-			}
-		}
-
-		statusMsg := fmt.Sprintf("[red]Critical: %d[white] | [orange]Major: %d[white] | [yellow]Moderate: %d[white] | [green]Minor: %d[white] | Total: %d issues found",
-			criticalCount, majorCount, moderateCount, minorCount, len(results))
-
-		ap.statusText.SetText(statusMsg)
-		ap.progressBar.SetText("[green]Press Enter for details, Esc to return[white]")
-	})
-}
-
-func (ap *AuditPanel) showResultDetails() {
-	row, _ := ap.table.Table.GetSelection()
-	if row <= 0 || row > len(ap.results) {
-		return
 	}
-
-	result := ap.results[row-1]
-
-	details := fmt.Sprintf(`[yellow::b]Audit Result Details[white::-]
-
-[yellow]ID:[white] %s
-[yellow]Host:[white] %s
-[yellow]Severity:[white] %s
-[yellow]Object:[white] %s
-
-[yellow]Details:[white]
-%s
-
-[yellow]Values:[white]`, result.ID, result.Host, result.Severity, result.Object, result.Details)
-
-	if len(result.Values) > 0 {
-		for key, value := range result.Values {
-			details += fmt.Sprintf("\n  %s: %.2f", key, value)
-		}
-	} else {
-		details += "\n  No additional values"
-	}
-
-	details += "\n\n[green]Press Esc to return[white]"
-
-	detailView := tview.NewTextView().
-		SetDynamicColors(true).
-		SetText(details).
-		SetBorder(true).
-		SetTitle("Audit Result Details")
-
-	detailView.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Key() == tcell.KeyEscape {
-			ap.app.pages.SwitchToPage("audit")
-			ap.app.tviewApp.SetFocus(ap.table.Table)
-			return nil
-		}
-		return event
-	})
-
-	ap.app.pages.AddPage("audit_detail", detailView, true, false)
-	ap.app.pages.SwitchToPage("audit_detail")
-	ap.app.tviewApp.SetFocus(detailView)
 }
 
-// Audit check implementations
-func (ap *AuditPanel) checkSystemCounts() []AuditResult {
+// Audit check functions implementation
+
+func (a *App) checkSystemCounts() []AuditResult {
 	var results []AuditResult
 
 	// Check replicated tables count
-	row := ap.app.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, count() FROM cluster('%s', system.tables) WHERE engine LIKE 'Replicated%%' GROUP BY h", ap.app.cluster))
+	row := a.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, count() FROM cluster('%s', system.tables) WHERE engine LIKE 'Replicated%%' GROUP BY h", a.cluster))
 	var host string
 	var replicatedCount int64
 	if err := row.Scan(&host, &replicatedCount); err == nil {
@@ -330,7 +347,7 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 
 	// Check MergeTree tables count
 	mergeTreeCount := 0
-	row = ap.app.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, count() FROM cluster('%s', system.tables) WHERE engine LIKE '%%MergeTree%%' GROUP BY h", ap.app.cluster))
+	row = a.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, count() FROM cluster('%s', system.tables) WHERE engine LIKE '%%MergeTree%%' GROUP BY h", a.cluster))
 	if err := row.Scan(&host, &mergeTreeCount); err == nil {
 		severity := ""
 		if mergeTreeCount > 10000 {
@@ -355,7 +372,7 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 
 	// Check databases count
 	databasesCount := 0
-	row = ap.app.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, count() FROM cluster('%s', system.databases) GROUP BY h", ap.app.cluster))
+	row = a.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, count() FROM cluster('%s', system.databases) GROUP BY h", a.cluster))
 	if err := row.Scan(&host, &databasesCount); err == nil {
 		severity := ""
 		if databasesCount > 1000 {
@@ -379,14 +396,14 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 	}
 
 	// Check column files in parts vs inodes
-	row = ap.app.clickHouse.QueryRow(fmt.Sprintf(`
+	row = a.clickHouse.QueryRow(fmt.Sprintf(`
 		SELECT 
 			hostName() AS h,
 			(SELECT count() * 4 FROM cluster('%s', system.parts_columns)) as column_files_in_parts_count,
 			(SELECT min(value) FROM cluster('%s', system.asynchronous_metrics) WHERE metric='FilesystemMainPathTotalINodes') as total_inodes,
 			column_files_in_parts_count / total_inodes as ratio
 		GROUP BY h
-	`, ap.app.cluster, ap.app.cluster))
+	`, a.cluster, a.cluster))
 	var columnFilesCount, totalInodes int64
 	var inodesRatio float64
 	if err := row.Scan(&host, &columnFilesCount, &totalInodes, &inodesRatio); err == nil && inodesRatio > 0.5 {
@@ -416,7 +433,7 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 
 	// Check total parts count
 	partsCount := 0
-	row = ap.app.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, count() FROM cluster('%s', system.parts) GROUP BY h", ap.app.cluster))
+	row = a.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, count() FROM cluster('%s', system.parts) GROUP BY h", a.cluster))
 	if err := row.Scan(&host, &partsCount); err == nil {
 		severity := ""
 		if partsCount > 120000 {
@@ -439,7 +456,7 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 	}
 
 	// Check obsolete inactive parts
-	row = ap.app.clickHouse.QueryRow(fmt.Sprintf(`
+	row = a.clickHouse.QueryRow(fmt.Sprintf(`
 		WITH (SELECT max(modification_time) FROM cluster('%s', system.parts)) AS max_ts
 		SELECT hostName() AS h, count()
 		FROM cluster('%s', system.parts)
@@ -447,7 +464,7 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 		AND ((remove_time > 0 AND remove_time < max_ts - INTERVAL 20 MINUTE) 
 		     OR (remove_time = 0 AND modification_time < max_ts - INTERVAL 20 MINUTE))
 		GROUP BY h
-	`, ap.app.cluster, ap.app.cluster))
+	`, a.cluster, a.cluster))
 	var obsoletePartsCount int64
 	if err := row.Scan(&host, &obsoletePartsCount); err == nil && obsoletePartsCount > 0 {
 		severity := ""
@@ -472,7 +489,7 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 	}
 
 	// Check for too many tiny replicated tables
-	row = ap.app.clickHouse.QueryRow(fmt.Sprintf(`
+	row = a.clickHouse.QueryRow(fmt.Sprintf(`
 		WITH
 			(total_rows < 1000000) AND (total_bytes < 10000000) AS tiny_table,
 			(total_rows < 100000000) AND (total_bytes < 1000000000) AND (NOT tiny_table) AS small_table,
@@ -487,7 +504,7 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 		FROM cluster('%s', system.tables)
 		WHERE engine LIKE 'Replicated%%MergeTree'
 		GROUP BY h
-	`, ap.app.cluster))
+	`, a.cluster))
 	var tinyTablesCount, smallTablesCount, mediumTablesCount, bigTablesCount, tablesCount int64
 	if err := row.Scan(&host, &tinyTablesCount, &smallTablesCount, &mediumTablesCount, &bigTablesCount, &tablesCount); err == nil {
 		if ((tinyTablesCount + smallTablesCount) > int64(float64(tablesCount)*0.85)) || ((tinyTablesCount + smallTablesCount) > 100) {
@@ -511,12 +528,12 @@ func (ap *AuditPanel) checkSystemCounts() []AuditResult {
 	return results
 }
 
-func (ap *AuditPanel) checkDependencies() []AuditResult {
+func (a *App) checkDependencies() []AuditResult {
 	var results []AuditResult
 
 	// Create temporary dependencies table and populate it
 	// This implements the logic from dependancies_init.sql and dependancies_loop.sql
-	_, err := ap.app.clickHouse.Exec(`
+	_, err := a.clickHouse.Exec(`
 		CREATE TEMPORARY TABLE IF NOT EXISTS dependencies_temp (
 			host String,
 			parent String,
@@ -531,7 +548,7 @@ func (ap *AuditPanel) checkDependencies() []AuditResult {
 	}
 
 	// Initialize dependencies from tables (dependancies_init.sql logic)
-	_, err = ap.app.clickHouse.Exec(fmt.Sprintf(`
+	_, err = a.clickHouse.Exec(fmt.Sprintf(`
 		INSERT INTO dependencies_temp
 		WITH d1 AS (
 			SELECT 
@@ -555,7 +572,7 @@ func (ap *AuditPanel) checkDependencies() []AuditResult {
 			AND _create_table_query[5] = 'TO'
 		)
 		SELECT h, parent, child, type, 0 as level FROM d1
-	`, ap.app.cluster, ap.app.cluster))
+	`, a.cluster, a.cluster))
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to populate initial dependencies")
 		return results
@@ -564,7 +581,7 @@ func (ap *AuditPanel) checkDependencies() []AuditResult {
 	// Iteratively build dependency chains (dependancies_loop.sql logic)
 	// We'll do a few iterations to build the dependency tree
 	for i := 0; i < 5; i++ {
-		row := ap.app.clickHouse.QueryRow(`
+		row := a.clickHouse.QueryRow(`
 			WITH 
 				(SELECT max(level) FROM dependencies_temp) as _level,
 				d as (SELECT * FROM dependencies_temp WHERE level = _level)
@@ -577,7 +594,7 @@ func (ap *AuditPanel) checkDependencies() []AuditResult {
 			break // No more dependencies to add
 		}
 
-		_, err = ap.app.clickHouse.Exec(`
+		_, err = a.clickHouse.Exec(`
 			INSERT INTO dependencies_temp
 			WITH 
 				(SELECT max(level) FROM dependencies_temp) as _level,
@@ -598,7 +615,7 @@ func (ap *AuditPanel) checkDependencies() []AuditResult {
 	}
 
 	// Check for tables with too many dependencies (A2.3 logic)
-	rows, err := ap.app.clickHouse.Query(`
+	rows, err := a.clickHouse.Query(`
 		SELECT 
 			host,
 			parent,
@@ -642,7 +659,7 @@ func (ap *AuditPanel) checkDependencies() []AuditResult {
 	}
 
 	// Clean up temporary table
-	_, err = ap.app.clickHouse.Exec("DROP TABLE IF EXISTS dependencies_temp")
+	_, err = a.clickHouse.Exec("DROP TABLE IF EXISTS dependencies_temp")
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to drop dependencies temp table")
 	}
@@ -650,11 +667,11 @@ func (ap *AuditPanel) checkDependencies() []AuditResult {
 	return results
 }
 
-func (ap *AuditPanel) checkRates() []AuditResult {
+func (a *App) checkRates() []AuditResult {
 	var results []AuditResult
 
 	// Check parts creation rate
-	row := ap.app.clickHouse.QueryRow(fmt.Sprintf(`
+	row := a.clickHouse.QueryRow(fmt.Sprintf(`
 		WITH 
 			(SELECT max(toUInt32(value)) FROM cluster('%s', system.merge_tree_settings) WHERE name='old_parts_lifetime') as old_parts_lifetime_raw,
 			if(old_parts_lifetime_raw IS NULL OR old_parts_lifetime_raw = 0, 480, old_parts_lifetime_raw) as old_parts_lifetime
@@ -666,7 +683,7 @@ func (ap *AuditPanel) checkRates() []AuditResult {
 		WHERE modification_time > (SELECT max(modification_time) FROM cluster('%s', system.parts)) - old_parts_lifetime 
 		AND level = 0
 		GROUP BY h
-	`, ap.app.cluster, ap.app.cluster, ap.app.cluster))
+	`, a.cluster, a.cluster, a.cluster))
 	var host string
 	var partsCreatedCount int64
 	var partsCreatedPerSecond float64
@@ -691,7 +708,7 @@ func (ap *AuditPanel) checkRates() []AuditResult {
 	}
 
 	// Check parts creation rate per table
-	rows, err := ap.app.clickHouse.Query(fmt.Sprintf(`
+	rows, err := a.clickHouse.Query(fmt.Sprintf(`
 		WITH 
 			(SELECT max(toUInt32(value)) FROM cluster('%s', system.merge_tree_settings) WHERE name='old_parts_lifetime') as old_parts_lifetime_raw,
 			if(old_parts_lifetime_raw IS NULL OR old_parts_lifetime_raw = 0, 480, old_parts_lifetime_raw) as old_parts_lifetime
@@ -706,7 +723,7 @@ func (ap *AuditPanel) checkRates() []AuditResult {
 		AND level = 0
 		GROUP BY h, database, table
 		HAVING parts_created_per_second > 5
-	`, ap.app.cluster, ap.app.cluster, ap.app.cluster))
+	`, a.cluster, a.cluster, a.cluster))
 	if err == nil {
 		defer func() {
 			if closeErr := rows.Close(); closeErr != nil {
@@ -742,18 +759,18 @@ func (ap *AuditPanel) checkRates() []AuditResult {
 	return results
 }
 
-func (ap *AuditPanel) checkMarksCache() []AuditResult {
+func (a *App) checkMarksCache() []AuditResult {
 	var results []AuditResult
 
 	// Check marks cache hit ratio
-	row := ap.app.clickHouse.QueryRow(fmt.Sprintf(`
+	row := a.clickHouse.QueryRow(fmt.Sprintf(`
 		SELECT 
 			hostName() AS h,
 			(SELECT value FROM cluster('%s', system.events) WHERE event = 'MarkCacheHits') as hits,
 			(SELECT value FROM cluster('%s', system.events) WHERE event = 'MarkCacheMisses') as misses,
 			hits / (hits + misses) as hit_ratio
 		GROUP BY h
-	`, ap.app.cluster, ap.app.cluster))
+	`, a.cluster, a.cluster))
 	var host string
 	var hits, misses, hitRatio float64
 	if err := row.Scan(&host, &hits, &misses, &hitRatio); err == nil && hitRatio < 0.8 {
@@ -777,7 +794,7 @@ func (ap *AuditPanel) checkMarksCache() []AuditResult {
 	}
 
 	// Check percentage of marks in memory
-	row = ap.app.clickHouse.QueryRow(`
+	row = a.clickHouse.QueryRow(`
 		SELECT 
 			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'MarkCacheBytes') as actual_mark_cache_size,
 			(SELECT sum(marks_bytes) FROM system.parts WHERE active) as overall_marks_size,
@@ -800,7 +817,7 @@ func (ap *AuditPanel) checkMarksCache() []AuditResult {
 	}
 
 	// Check marks cache size vs total RAM
-	row = ap.app.clickHouse.QueryRow(`
+	row = a.clickHouse.QueryRow(`
 		SELECT 
 			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'MarkCacheBytes') as actual_mark_cache_size,
 			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'OSMemoryTotal') as total_ram,
@@ -827,7 +844,7 @@ func (ap *AuditPanel) checkMarksCache() []AuditResult {
 	}
 
 	// Check percentage of marks in memory (A1.2.05 - duplicate check)
-	row = ap.app.clickHouse.QueryRow(`
+	row = a.clickHouse.QueryRow(`
 		SELECT 
 			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'MarkCacheBytes') as actual_mark_cache_size,
 			(SELECT sum(marks_bytes) FROM system.parts WHERE active) as overall_marks_size,
@@ -849,7 +866,7 @@ func (ap *AuditPanel) checkMarksCache() []AuditResult {
 	}
 
 	// Check marks cache size vs total RAM (A1.2.06 - duplicate of A1.2.04)
-	row = ap.app.clickHouse.QueryRow(`
+	row = a.clickHouse.QueryRow(`
 		SELECT 
 			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'MarkCacheBytes') as actual_mark_cache_size,
 			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'OSMemoryTotal') as total_ram,
@@ -877,11 +894,11 @@ func (ap *AuditPanel) checkMarksCache() []AuditResult {
 	return results
 }
 
-func (ap *AuditPanel) checkActiveParts() []AuditResult {
+func (a *App) checkActiveParts() []AuditResult {
 	var results []AuditResult
 
 	// Check total active parts number (A1.5.01.1)
-	row := ap.app.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, sum(active) AS parts FROM cluster('%s', system.parts) WHERE active GROUP BY h", ap.app.cluster))
+	row := a.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, sum(active) AS parts FROM cluster('%s', system.parts) WHERE active GROUP BY h", a.cluster))
 	var host string
 	var parts int64
 	if err := row.Scan(&host, &parts); err == nil {
@@ -909,11 +926,11 @@ func (ap *AuditPanel) checkActiveParts() []AuditResult {
 	return results
 }
 
-func (ap *AuditPanel) checkBackgroundPools() []AuditResult {
+func (a *App) checkBackgroundPools() []AuditResult {
 	var results []AuditResult
 
 	// Check background pool overload
-	rows, err := ap.app.clickHouse.Query(`
+	rows, err := a.clickHouse.Query(`
 		SELECT 
 			extract(m.metric, '^Background(.*)Task') AS pool_name,
 			m.value as current_value,
@@ -970,7 +987,7 @@ func (ap *AuditPanel) checkBackgroundPools() []AuditResult {
 	}
 
 	// Check MessageBrokerSchedulePool size vs Kafka/RabbitMQ tables
-	row := ap.app.clickHouse.QueryRow(`
+	row := a.clickHouse.QueryRow(`
 		SELECT 
 			(SELECT toUInt64(value) FROM system.settings WHERE name = 'background_message_broker_schedule_pool_size') as pool_size,
 			(SELECT count() FROM system.tables WHERE engine = 'Kafka' OR engine = 'RabbitMQ') as tables_with_engines
@@ -992,11 +1009,11 @@ func (ap *AuditPanel) checkBackgroundPools() []AuditResult {
 	return results
 }
 
-func (ap *AuditPanel) checkUncompressedCache() []AuditResult {
+func (a *App) checkUncompressedCache() []AuditResult {
 	var results []AuditResult
 
 	// Check uncompressed cache hit ratio
-	row := ap.app.clickHouse.QueryRow(`
+	row := a.clickHouse.QueryRow(`
 		SELECT 
 			(SELECT value FROM system.events WHERE event = 'UncompressedCacheHits') as hits,
 			(SELECT value FROM system.events WHERE event = 'UncompressedCacheMisses') as misses,
@@ -1023,7 +1040,7 @@ func (ap *AuditPanel) checkUncompressedCache() []AuditResult {
 	}
 
 	// Check uncompressed cache size vs total RAM
-	row = ap.app.clickHouse.QueryRow(`
+	row = a.clickHouse.QueryRow(`
 		SELECT 
 			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'UncompressedCacheBytes') as actual_uncompressed_cache_size,
 			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'OSMemoryTotal') as total_ram,
@@ -1052,11 +1069,11 @@ func (ap *AuditPanel) checkUncompressedCache() []AuditResult {
 	return results
 }
 
-func (ap *AuditPanel) checkReplicationQueue() []AuditResult {
+func (a *App) checkReplicationQueue() []AuditResult {
 	var results []AuditResult
 
 	// Check replication queue size (moved from checkReplication)
-	rows, err := ap.app.clickHouse.Query(`
+	rows, err := a.clickHouse.Query(`
 		SELECT 
 			database, 
 			table, 
@@ -1105,7 +1122,7 @@ func (ap *AuditPanel) checkReplicationQueue() []AuditResult {
 	}
 
 	// Check for old tasks in replication queue
-	rows, err = ap.app.clickHouse.Query(`
+	rows, err = a.clickHouse.Query(`
 		WITH 
 			(SELECT maxArray([create_time, last_attempt_time, last_postpone_time]) FROM system.replication_queue) AS max_time
 		SELECT 
@@ -1148,7 +1165,7 @@ func (ap *AuditPanel) checkReplicationQueue() []AuditResult {
 	}
 
 	// Check for tasks with no activity in replication queue
-	rows, err = ap.app.clickHouse.Query(`
+	rows, err = a.clickHouse.Query(`
 		WITH 
 			(SELECT maxArray([create_time, last_attempt_time, last_postpone_time]) FROM system.replication_queue) AS max_time
 		SELECT 
@@ -1188,11 +1205,11 @@ func (ap *AuditPanel) checkReplicationQueue() []AuditResult {
 	return results
 }
 
-func (ap *AuditPanel) checkMaterializedViews() []AuditResult {
+func (a *App) checkMaterializedViews() []AuditResult {
 	var results []AuditResult
 
 	// Check for MVs not using TO syntax
-	rows, err := ap.app.clickHouse.Query(`
+	rows, err := a.clickHouse.Query(`
 		SELECT database, name 
 		FROM system.tables 
 		WHERE engine='MaterializedView' 
@@ -1219,7 +1236,7 @@ func (ap *AuditPanel) checkMaterializedViews() []AuditResult {
 	}
 
 	// Check for MVs using JOINs
-	rows, err = ap.app.clickHouse.Query(`
+	rows, err = a.clickHouse.Query(`
 		SELECT database, name 
 		FROM system.tables 
 		WHERE engine='MaterializedView' 
@@ -1248,10 +1265,10 @@ func (ap *AuditPanel) checkMaterializedViews() []AuditResult {
 	return results
 }
 
-func (ap *AuditPanel) checkVersions() []AuditResult {
+func (a *App) checkVersions() []AuditResult {
 	var results []AuditResult
 
-	row := ap.app.clickHouse.QueryRow(`
+	row := a.clickHouse.QueryRow(`
 		WITH version_data AS (
 			SELECT
 				maxIf(value, name = 'VERSION_DESCRIBE') AS version_full,
@@ -1376,11 +1393,11 @@ func (ap *AuditPanel) checkVersions() []AuditResult {
 	return results
 }
 
-func (ap *AuditPanel) checkLongNames() []AuditResult {
+func (a *App) checkLongNames() []AuditResult {
 	var results []AuditResult
 
 	// Check for long database names
-	rows, err := ap.app.clickHouse.Query(`
+	rows, err := a.clickHouse.Query(`
 		SELECT name, length(name) as name_length
 		FROM system.databases 
 		WHERE length(name) > 32
@@ -1416,7 +1433,7 @@ func (ap *AuditPanel) checkLongNames() []AuditResult {
 	}
 
 	// Check for long table names
-	rows, err = ap.app.clickHouse.Query(`
+	rows, err = a.clickHouse.Query(`
 		SELECT database, name, length(name) as name_length
 		FROM system.tables 
 		WHERE length(name) > 32
@@ -1452,7 +1469,7 @@ func (ap *AuditPanel) checkLongNames() []AuditResult {
 	}
 
 	// Check for long column names
-	rows, err = ap.app.clickHouse.Query(`
+	rows, err = a.clickHouse.Query(`
 		SELECT database, table, name, length(name) as name_length
 		FROM system.columns 
 		WHERE length(name) > 32 AND database NOT IN ('system','INFORMATION_SCHEMA','information_schema')
@@ -1490,11 +1507,11 @@ func (ap *AuditPanel) checkLongNames() []AuditResult {
 	return results
 }
 
-func (ap *AuditPanel) checkSystemLogs() []AuditResult {
+func (a *App) checkSystemLogs() []AuditResult {
 	var results []AuditResult
 
 	// Check if query_log is enabled and has recent data
-	row := ap.app.clickHouse.QueryRow(`
+	row := a.clickHouse.QueryRow(`
 		SELECT max(event_time) 
 		FROM system.query_log 
 		WHERE event_time > now() - INTERVAL 4 HOUR
@@ -1513,7 +1530,7 @@ func (ap *AuditPanel) checkSystemLogs() []AuditResult {
 	}
 
 	// Check if part_log is enabled and has recent data
-	row = ap.app.clickHouse.QueryRow(`
+	row = a.clickHouse.QueryRow(`
 		SELECT max(event_time) 
 		FROM system.part_log 
 		WHERE event_time > now() - INTERVAL 4 HOUR
@@ -1531,7 +1548,7 @@ func (ap *AuditPanel) checkSystemLogs() []AuditResult {
 	}
 
 	// Check if query_log has too old data
-	row = ap.app.clickHouse.QueryRow(`
+	row = a.clickHouse.QueryRow(`
 		SELECT 
 			max(event_time) as max_time,
 			min(event_time) as min_time
@@ -1554,7 +1571,7 @@ func (ap *AuditPanel) checkSystemLogs() []AuditResult {
 	}
 
 	// Check for system log tables without TTL
-	rows, err := ap.app.clickHouse.Query(`
+	rows, err := a.clickHouse.Query(`
 		SELECT database, name 
 		FROM system.tables 
 		WHERE database='system' AND name LIKE '%_log' 
@@ -1581,7 +1598,7 @@ func (ap *AuditPanel) checkSystemLogs() []AuditResult {
 	}
 
 	// Check system logs disk space usage
-	rows, err = ap.app.clickHouse.Query(`
+	rows, err = a.clickHouse.Query(`
 		WITH 
 			used AS (
 				SELECT 
@@ -1635,7 +1652,7 @@ func (ap *AuditPanel) checkSystemLogs() []AuditResult {
 	}
 
 	// Check for leftover system.*_logN tables after version upgrade
-	rows, err = ap.app.clickHouse.Query(`
+	rows, err = a.clickHouse.Query(`
 		SELECT database, name 
 		FROM system.tables 
 		WHERE database='system' AND match(name, '(.\w+)_log_(\d+)')
@@ -1661,7 +1678,7 @@ func (ap *AuditPanel) checkSystemLogs() []AuditResult {
 	}
 
 	// Check for query_thread_log being enabled (should be disabled in production)
-	row = ap.app.clickHouse.QueryRow("SELECT count() FROM system.tables WHERE database='system' AND name='query_thread_log'")
+	row = a.clickHouse.QueryRow("SELECT count() FROM system.tables WHERE database='system' AND name='query_thread_log'")
 	var threadLogExists int64
 	if err := row.Scan(&threadLogExists); err == nil && threadLogExists > 0 {
 		results = append(results, AuditResult{
@@ -1674,7 +1691,7 @@ func (ap *AuditPanel) checkSystemLogs() []AuditResult {
 	}
 
 	// Check for recent crashes
-	row = ap.app.clickHouse.QueryRow("SELECT count() FROM system.crash_log WHERE event_time > now() - INTERVAL 5 DAY")
+	row = a.clickHouse.QueryRow("SELECT count() FROM system.crash_log WHERE event_time > now() - INTERVAL 5 DAY")
 	var crashCount int64
 	if err := row.Scan(&crashCount); err == nil && crashCount > 1 {
 		results = append(results, AuditResult{
@@ -1687,7 +1704,7 @@ func (ap *AuditPanel) checkSystemLogs() []AuditResult {
 	}
 
 	// Check for warnings
-	rows, err = ap.app.clickHouse.Query("SELECT message FROM system.warnings")
+	rows, err = a.clickHouse.Query("SELECT message FROM system.warnings")
 	if err == nil {
 		defer func() {
 			if closeErr := rows.Close(); closeErr != nil {
@@ -1711,11 +1728,11 @@ func (ap *AuditPanel) checkSystemLogs() []AuditResult {
 	return results
 }
 
-func (ap *AuditPanel) checkPartitions() []AuditResult {
+func (a *App) checkPartitions() []AuditResult {
 	var results []AuditResult
 
 	// Check for tables with too many small partitions (A1.1.01)
-	rows, err := ap.app.clickHouse.Query(`
+	rows, err := a.clickHouse.Query(`
 		WITH
 			median(b) as median_partition_size_bytes,
 			median(r) as median_partition_size_rows,
@@ -1769,7 +1786,7 @@ func (ap *AuditPanel) checkPartitions() []AuditResult {
 
 				if severity != "noerror" {
 					// Get partition key for the table
-					partitionKeyRow := ap.app.clickHouse.QueryRow(`
+					partitionKeyRow := a.clickHouse.QueryRow(`
 						SELECT partition_key FROM system.tables 
 						WHERE database = ? AND name = ?
 					`, database, table)
@@ -1797,7 +1814,7 @@ func (ap *AuditPanel) checkPartitions() []AuditResult {
 	}
 
 	// Check for too fast inserts
-	rows, err = ap.app.clickHouse.Query(`
+	rows, err = a.clickHouse.Query(`
 		WITH 
 			(SELECT max(toUInt32(value)) FROM system.merge_tree_settings WHERE name='old_parts_lifetime') as old_parts_lifetime_raw,
 			if(old_parts_lifetime_raw IS NULL OR old_parts_lifetime_raw = 0, 480, old_parts_lifetime_raw) as old_parts_lifetime
@@ -1856,7 +1873,7 @@ func (ap *AuditPanel) checkPartitions() []AuditResult {
 	}
 
 	// Check average row size
-	rows, err = ap.app.clickHouse.Query(`
+	rows, err = a.clickHouse.Query(`
 		SELECT 
 			database,
 			table,
@@ -1902,7 +1919,7 @@ func (ap *AuditPanel) checkPartitions() []AuditResult {
 	}
 
 	// Check maximum partition size for special MergeTree engines (A1.1.03)
-	rows, err = ap.app.clickHouse.Query(`
+	rows, err = a.clickHouse.Query(`
 		WITH
 			(SELECT max(toUInt64(value)) FROM system.merge_tree_settings WHERE name = 'max_bytes_to_merge_at_max_space_in_pool') AS max_partition_size
 		SELECT
@@ -1951,7 +1968,7 @@ func (ap *AuditPanel) checkPartitions() []AuditResult {
 				}
 
 				// Get partition key for the table
-				partitionKeyRow := ap.app.clickHouse.QueryRow(`
+				partitionKeyRow := a.clickHouse.QueryRow(`
 					SELECT partition_key FROM system.tables 
 					WHERE database = ? AND name = ?
 				`, database, table)
@@ -1975,7 +1992,7 @@ func (ap *AuditPanel) checkPartitions() []AuditResult {
 	}
 
 	// Check detached parts
-	rows, err = ap.app.clickHouse.Query(`
+	rows, err = a.clickHouse.Query(`
 		SELECT database, table, count() as parts_count
 		FROM system.detached_parts
 		GROUP BY database, table
@@ -2014,11 +2031,11 @@ func (ap *AuditPanel) checkPartitions() []AuditResult {
 	return results
 }
 
-func (ap *AuditPanel) checkPrimaryKeyMarks() []AuditResult {
+func (a *App) checkPrimaryKeyMarks() []AuditResult {
 	var results []AuditResult
 
 	// Check primary key size per mark
-	rows, err := ap.app.clickHouse.Query(`
+	rows, err := a.clickHouse.Query(`
 		SELECT 
 			database, 
 			table,
@@ -2064,11 +2081,11 @@ func (ap *AuditPanel) checkPrimaryKeyMarks() []AuditResult {
 	return results
 }
 
-func (ap *AuditPanel) checkPrimaryKeys() []AuditResult {
+func (a *App) checkPrimaryKeys() []AuditResult {
 	var results []AuditResult
 
 	// A2.4.01: Check first column of PRIMARY KEY/ORDER BY
-	rows, err := ap.app.clickHouse.Query(`
+	rows, err := a.clickHouse.Query(`
 		WITH tables_data AS (
 			SELECT 
 				format('{}.{}', database, name) AS object,
@@ -2153,7 +2170,7 @@ func (ap *AuditPanel) checkPrimaryKeys() []AuditResult {
 	}
 
 	// A2.4.02: Check for too many nullable columns
-	rows, err = ap.app.clickHouse.Query(`
+	rows, err = a.clickHouse.Query(`
 		SELECT
 			format('{}.{}', database, table) AS object,
 			countIf(type LIKE '%Nullable%') as nullable_columns,
@@ -2190,7 +2207,7 @@ func (ap *AuditPanel) checkPrimaryKeys() []AuditResult {
 	}
 
 	// A2.4.03: Check if compression codecs are used
-	row := ap.app.clickHouse.QueryRow(`
+	row := a.clickHouse.QueryRow(`
 		SELECT count() 
 		FROM system.columns
 		WHERE compression_codec <> '' AND database NOT IN ('system', 'information_schema', 'INFORMATION_SCHEMA')
@@ -2213,11 +2230,11 @@ func (ap *AuditPanel) checkPrimaryKeys() []AuditResult {
 	return results
 }
 
-func (ap *AuditPanel) checkTables() []AuditResult {
+func (a *App) checkTables() []AuditResult {
 	var results []AuditResult
 
 	// Check for tables with too many columns
-	rows, err := ap.app.clickHouse.Query(`
+	rows, err := a.clickHouse.Query(`
 		SELECT 
 			database, 
 			table, 
@@ -2259,7 +2276,7 @@ func (ap *AuditPanel) checkTables() []AuditResult {
 	}
 
 	// Check for tables with TTL but without ttl_only_drop_parts=1
-	rows, err = ap.app.clickHouse.Query(`
+	rows, err = a.clickHouse.Query(`
 		SELECT database, name
 		FROM system.tables
 		WHERE create_table_query LIKE '% TTL %'
@@ -2289,11 +2306,11 @@ func (ap *AuditPanel) checkTables() []AuditResult {
 	return results
 }
 
-func (ap *AuditPanel) checkMemoryUsage() []AuditResult {
+func (a *App) checkMemoryUsage() []AuditResult {
 	var results []AuditResult
 
 	// Check memory usage ratio
-	row := ap.app.clickHouse.QueryRow(`
+	row := a.clickHouse.QueryRow(`
 		SELECT 
 			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'MemoryResident') as memory_resident,
 			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'OSMemoryTotal') as memory_total
@@ -2322,7 +2339,7 @@ func (ap *AuditPanel) checkMemoryUsage() []AuditResult {
 	}
 
 	// Check memory used by dictionaries and memory tables
-	row = ap.app.clickHouse.QueryRow(`
+	row = a.clickHouse.QueryRow(`
 		SELECT 
 			(SELECT sum(bytes_allocated) FROM system.dictionaries) as dictionaries,
 			(SELECT sum(total_bytes) FROM system.tables WHERE engine IN ('Memory','Set','Join')) as mem_tables,
@@ -2354,7 +2371,7 @@ func (ap *AuditPanel) checkMemoryUsage() []AuditResult {
 	}
 
 	// Check memory used by primary keys
-	row = ap.app.clickHouse.QueryRow(`
+	row = a.clickHouse.QueryRow(`
 		SELECT 
 			(SELECT sum(primary_key_bytes_in_memory) FROM system.parts) as primary_key_bytes_in_memory,
 			(SELECT value FROM system.asynchronous_metrics WHERE metric='OSMemoryTotal') as total_memory,
@@ -2386,11 +2403,11 @@ func (ap *AuditPanel) checkMemoryUsage() []AuditResult {
 	return results
 }
 
-func (ap *AuditPanel) checkDiskUsage() []AuditResult {
+func (a *App) checkDiskUsage() []AuditResult {
 	var results []AuditResult
 
 	// Check disk space
-	rows, err := ap.app.clickHouse.Query(`
+	rows, err := a.clickHouse.Query(`
 		SELECT 
 			name,
 			free_space,
@@ -2437,17 +2454,17 @@ func (ap *AuditPanel) checkDiskUsage() []AuditResult {
 	return results
 }
 
-func (ap *AuditPanel) checkPerformanceMetrics() []AuditResult {
+func (a *App) checkPerformanceMetrics() []AuditResult {
 	var results []AuditResult
 	var row *sql.Row
 	var err error
 
 	// A3.0.1: Check max concurrent queries
 	var maxConcurrentQueries float64
-	err = ap.app.clickHouse.QueryRow("SELECT value FROM system.settings WHERE name = 'max_concurrent_queries'").Scan(&maxConcurrentQueries)
+	err = a.clickHouse.QueryRow("SELECT value FROM system.settings WHERE name = 'max_concurrent_queries'").Scan(&maxConcurrentQueries)
 	if err == nil { // Found the setting
 		var currentQueries float64
-		err = ap.app.clickHouse.QueryRow("SELECT value FROM system.metrics WHERE metric = 'Query'").Scan(&currentQueries)
+		err = a.clickHouse.QueryRow("SELECT value FROM system.metrics WHERE metric = 'Query'").Scan(&currentQueries)
 		if err == nil {
 			if currentQueries > maxConcurrentQueries*0.5 { // Threshold from SQL
 				severity := "Minor"
@@ -2473,10 +2490,10 @@ func (ap *AuditPanel) checkPerformanceMetrics() []AuditResult {
 
 	// A3.0.2: Check max connections
 	var maxConnections float64
-	err = ap.app.clickHouse.QueryRow("SELECT value FROM system.settings WHERE name = 'max_connections'").Scan(&maxConnections)
+	err = a.clickHouse.QueryRow("SELECT value FROM system.settings WHERE name = 'max_connections'").Scan(&maxConnections)
 	if err == nil { // Found the setting
 		var currentConnections float64
-		err = ap.app.clickHouse.QueryRow("SELECT sum(value) FROM system.metrics WHERE metric IN ('TCPConnection','MySQLConnection','HTTPConnection','InterserverConnection','PostgreSQLConnection')").Scan(&currentConnections)
+		err = a.clickHouse.QueryRow("SELECT sum(value) FROM system.metrics WHERE metric IN ('TCPConnection','MySQLConnection','HTTPConnection','InterserverConnection','PostgreSQLConnection')").Scan(&currentConnections)
 		if err == nil {
 			if currentConnections > maxConnections*0.5 { // Threshold from SQL
 				severity := "Minor"
@@ -2501,7 +2518,7 @@ func (ap *AuditPanel) checkPerformanceMetrics() []AuditResult {
 	}
 
 	// Check if there are readonly replicas (A3.0.3)
-	row = ap.app.clickHouse.QueryRow("SELECT value FROM system.metrics WHERE metric='ReadonlyReplica'")
+	row = a.clickHouse.QueryRow("SELECT value FROM system.metrics WHERE metric='ReadonlyReplica'")
 	var readonlyReplicas float64
 	if err = row.Scan(&readonlyReplicas); err == nil && readonlyReplicas > 0 {
 		results = append(results, AuditResult{
@@ -2514,7 +2531,7 @@ func (ap *AuditPanel) checkPerformanceMetrics() []AuditResult {
 	}
 
 	// A3.0.4: Check Block In-flight Ops
-	rowsA304, errA304 := ap.app.clickHouse.Query("SELECT metric, value FROM system.asynchronous_metrics WHERE metric LIKE 'BlockInFlightOps%' AND value > 128")
+	rowsA304, errA304 := a.clickHouse.Query("SELECT metric, value FROM system.asynchronous_metrics WHERE metric LIKE 'BlockInFlightOps%' AND value > 128")
 	if errA304 == nil {
 		defer func() {
 			if closeErr := rowsA304.Close(); closeErr != nil {
@@ -2545,7 +2562,7 @@ func (ap *AuditPanel) checkPerformanceMetrics() []AuditResult {
 	}
 
 	// Check load average (A3.0.5)
-	rowsLoadAvg, errLoadAvg := ap.app.clickHouse.Query(`
+	rowsLoadAvg, errLoadAvg := a.clickHouse.Query(`
 		SELECT 
 			metric, 
 			value,
@@ -2596,7 +2613,7 @@ func (ap *AuditPanel) checkPerformanceMetrics() []AuditResult {
 	}
 
 	// Check replica delays (A3.0.6)
-	rowsReplicaDelays, errReplicaDelays := ap.app.clickHouse.Query(`
+	rowsReplicaDelays, errReplicaDelays := a.clickHouse.Query(`
 		SELECT metric, value
 		FROM system.asynchronous_metrics
 		WHERE metric IN ('ReplicasMaxAbsoluteDelay', 'ReplicasMaxRelativeDelay') 
@@ -2652,7 +2669,7 @@ func (ap *AuditPanel) checkPerformanceMetrics() []AuditResult {
 	}
 
 	for _, check := range queueChecks {
-		row = ap.app.clickHouse.QueryRow(fmt.Sprintf("SELECT value FROM system.asynchronous_metrics WHERE metric = '%s'", check.metric))
+		row = a.clickHouse.QueryRow(fmt.Sprintf("SELECT value FROM system.asynchronous_metrics WHERE metric = '%s'", check.metric))
 		var value float64
 		if err = row.Scan(&value); err == nil && value > check.threshold {
 			results = append(results, AuditResult{
@@ -2668,7 +2685,7 @@ func (ap *AuditPanel) checkPerformanceMetrics() []AuditResult {
 	}
 
 	// Check max parts in partition (A3.0.14)
-	row = ap.app.clickHouse.QueryRow(`
+	row = a.clickHouse.QueryRow(`
 		SELECT 
 			value,
 			(SELECT toUInt32(value) FROM system.merge_tree_settings WHERE name='parts_to_delay_insert') as parts_to_delay_insert,
@@ -2698,7 +2715,7 @@ func (ap *AuditPanel) checkPerformanceMetrics() []AuditResult {
 
 	// A3.0.16: Check memory used by other processes
 	var maxServerMemoryUsageToRamRatioFloat float64
-	err = ap.app.clickHouse.QueryRow("SELECT value FROM system.settings WHERE name = 'max_server_memory_usage_to_ram_ratio'").Scan(&maxServerMemoryUsageToRamRatioFloat)
+	err = a.clickHouse.QueryRow("SELECT value FROM system.settings WHERE name = 'max_server_memory_usage_to_ram_ratio'").Scan(&maxServerMemoryUsageToRamRatioFloat)
 	if err != nil {
 		log.Warn().Err(err).Msg("Failed to get max_server_memory_usage_to_ram_ratio setting for A3.0.16, using default 0.7")
 		maxServerMemoryUsageToRamRatioFloat = 0.7 // Default from ClickHouse if not set
@@ -2713,7 +2730,7 @@ func (ap *AuditPanel) checkPerformanceMetrics() []AuditResult {
 			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'OSMemoryCached'),
 			(SELECT value FROM system.asynchronous_metrics WHERE metric = 'OSMemoryBuffers')
 	`
-	err = ap.app.clickHouse.QueryRow(queryA3016).Scan(&totalMem, &freeWithoutCached, &memResident, &cachedMem, &buffersMem)
+	err = a.clickHouse.QueryRow(queryA3016).Scan(&totalMem, &freeWithoutCached, &memResident, &cachedMem, &buffersMem)
 
 	if err == nil && totalMem > 0 {
 		totalUsed := totalMem - freeWithoutCached

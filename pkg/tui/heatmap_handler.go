@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/Slach/clickhouse-timeline/pkg/timezone"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/rs/zerolog/log"
-
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
 )
 
 // SQL template for heatmap queries
@@ -37,91 +37,860 @@ GROUP BY ALL
 SETTINGS skip_unavailable_shards=1
 `
 
-// ShowHeatmap displays the heatmap visualization
-func (a *App) ShowHeatmap() {
-	if a.clickHouse == nil {
-		a.mainView.SetText("Error: Please connect to a ClickHouse instance first")
-		return
+// HeatmapDataMsg is sent when heatmap data is loaded
+type HeatmapDataMsg struct {
+	Timestamps   []time.Time
+	Categories   []string
+	ValueMap     map[string]map[time.Time]float64
+	MinValue     float64
+	MaxValue     float64
+	Interval     string
+	IntervalSecs int
+	TzLocation   *time.Location
+	Err          error
+}
+
+// heatmapViewer is a bubbletea model for heatmap display
+type heatmapViewer struct {
+	viewport viewport.Model
+	loading  bool
+	err      error
+	width    int
+	height   int
+
+	// Heatmap data
+	timestamps   []time.Time
+	categories   []string
+	valueMap     map[string]map[time.Time]float64
+	minValue     float64
+	maxValue     float64
+	interval     string
+	intervalSecs int
+	tzLocation   *time.Location
+
+	// Selection state
+	selectedRow int // 0 = header, 1+ = data rows
+	selectedCol int // 0 = category column, 1+ = time columns
+
+	// Action menu
+	showActionMenu bool
+	actionMenuIdx  int
+	actionMenuOpts []string
+
+	// Scroll position
+	scrollX int
+	scrollY int
+
+	// Context for actions
+	categoryType  CategoryType
+	categoryValue string
+	fromTime      time.Time
+	toTime        time.Time
+	cluster       string
+	scaleType     ScaleType
+	heatmapMetric HeatmapMetric
+}
+
+func newHeatmapViewer(categoryType CategoryType, fromTime, toTime time.Time, cluster string, scaleType ScaleType, metric HeatmapMetric, width, height int) heatmapViewer {
+	vp := viewport.New(width-4, height-8)
+	vp.SetContent("Loading heatmap data...")
+
+	return heatmapViewer{
+		viewport:      vp,
+		loading:       true,
+		width:         width,
+		height:        height,
+		categoryType:  categoryType,
+		fromTime:      fromTime,
+		toTime:        toTime,
+		cluster:       cluster,
+		scaleType:     scaleType,
+		heatmapMetric: metric,
+		selectedRow:   1, // Start at first data row, not header
+		selectedCol:   1, // Start at first data column
 	}
+}
 
-	if a.cluster == "" {
-		a.mainView.SetText("Error: Please select a cluster first using :cluster command")
-		return
-	}
+func (m heatmapViewer) Init() tea.Cmd {
+	return nil
+}
 
-	a.mainView.SetText("Generating heatmap, please wait...")
+func (m heatmapViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
 
-	// Calculate appropriate interval based on time range
-	duration := a.toTime.Sub(a.fromTime)
+	switch msg := msg.(type) {
+	case HeatmapDataMsg:
+		m.loading = false
+		if msg.Err != nil {
+			m.err = msg.Err
+			return m, nil
+		}
 
-	var interval string
-	var intervalSeconds int
+		m.timestamps = msg.Timestamps
+		m.categories = msg.Categories
+		m.valueMap = msg.ValueMap
+		m.minValue = msg.MinValue
+		m.maxValue = msg.MaxValue
+		m.interval = msg.Interval
+		m.intervalSecs = msg.IntervalSecs
+		m.tzLocation = msg.TzLocation
 
-	if duration <= 2*time.Hour {
-		interval = "1 MINUTE"
-		intervalSeconds = 60
-	} else if duration <= 24*time.Hour {
-		interval = "10 MINUTE"
-		intervalSeconds = 600
-	} else if duration <= 7*24*time.Hour {
-		interval = "1 HOUR"
-		intervalSeconds = 3600
-	} else if duration <= 30*24*time.Hour {
-		interval = "1 DAY"
-		intervalSeconds = 86400
-	} else {
-		interval = "1 WEEK"
-		intervalSeconds = 604800
-	}
+		// Render heatmap content
+		m.viewport.SetContent(m.renderHeatmap())
+		return m, nil
 
-	// Format the query
-	fromStr := a.fromTime.Format("2006-01-02 15:04:05 -07:00")
-	toStr := a.toTime.Format("2006-01-02 15:04:05 -07:00")
+	case tea.KeyMsg:
+		if m.showActionMenu {
+			return m.handleActionMenuKey(msg)
+		}
 
-	metricSQL := getMetricSQL(a.heatmapMetric)
-	categorySQL := getCategorySQL(a.categoryType)
+		switch msg.String() {
+		case "esc", "q":
+			return m, func() tea.Msg {
+				return tea.KeyMsg{Type: tea.KeyEsc}
+			}
+		case "up":
+			if m.selectedRow > 1 {
+				m.selectedRow--
+				m.viewport.SetContent(m.renderHeatmap())
+				// Auto-scroll viewport if cursor moves above visible area
+				if m.selectedRow-1 < m.viewport.YOffset {
+					m.viewport.LineUp(1)
+				}
+			}
+		case "down":
+			if m.selectedRow < len(m.categories) {
+				m.selectedRow++
+				m.viewport.SetContent(m.renderHeatmap())
+				// Auto-scroll viewport if cursor moves below visible area
+				visibleBottom := m.viewport.YOffset + m.viewport.Height
+				if m.selectedRow-1 >= visibleBottom {
+					m.viewport.LineDown(1)
+				}
+			}
+		case "left":
+			if m.selectedCol > 1 {
+				m.selectedCol--
+				m.viewport.SetContent(m.renderHeatmap())
+			}
+		case "right":
+			if m.selectedCol < len(m.timestamps) {
+				m.selectedCol++
+				m.viewport.SetContent(m.renderHeatmap())
+			}
+		case "home":
+			// Home key - jump to first row and scroll to top
+			m.selectedRow = 1
+			m.viewport.SetContent(m.renderHeatmap())
+			m.viewport.GotoTop()
+		case "end":
+			// End key - jump to last row and scroll to bottom
+			m.selectedRow = len(m.categories)
+			m.viewport.SetContent(m.renderHeatmap())
+			m.viewport.GotoBottom()
+		case "ctrl+up":
+			m.selectedRow = 1 // Jump to first data row, not header
+			m.viewport.SetContent(m.renderHeatmap())
+			// Scroll to top
+			m.viewport.GotoTop()
+		case "ctrl+down":
+			m.selectedRow = len(m.categories)
+			m.viewport.SetContent(m.renderHeatmap())
+			// Scroll to bottom
+			m.viewport.GotoBottom()
+		case "ctrl+left":
+			m.selectedCol = 1 // Jump to first data column
+			m.viewport.SetContent(m.renderHeatmap())
+		case "ctrl+right":
+			m.selectedCol = len(m.timestamps)
+			m.viewport.SetContent(m.renderHeatmap())
+		case "enter":
+			// Show action menu
+			m.showActionMenu = true
+			m.actionMenuIdx = 0
+			m.buildActionMenu()
+			return m, nil
+		case "pgdown", "f", " ":
+			// Page down - scroll viewport and move cursor
+			oldYOffset := m.viewport.YOffset
+			m.viewport.ViewDown()
+			newYOffset := m.viewport.YOffset
 
-	// Get timezone name from offset
-	tzName, offset := a.fromTime.Zone()
-	if tzName[0] == '-' || tzName[0] == '+' {
-		var tzErr error
-		tzName, tzErr = timezone.ConvertOffsetToIANAName(offset)
-		if tzErr != nil {
-			log.Error().Err(tzErr).Int("offset", offset).Msg("Failed to get timezone from offset")
-			tzName = "UTC" // Fallback to UTC
+			// Move cursor by the amount scrolled (approximately)
+			scrolledLines := newYOffset - oldYOffset
+			if scrolledLines > 0 {
+				m.selectedRow += scrolledLines
+				if m.selectedRow > len(m.categories) {
+					m.selectedRow = len(m.categories)
+				}
+				m.viewport.SetContent(m.renderHeatmap())
+			}
+			return m, nil
+		case "pgup", "b":
+			// Page up - scroll viewport and move cursor
+			oldYOffset := m.viewport.YOffset
+			m.viewport.ViewUp()
+			newYOffset := m.viewport.YOffset
+
+			// Move cursor by the amount scrolled (approximately)
+			scrolledLines := oldYOffset - newYOffset
+			if scrolledLines > 0 {
+				m.selectedRow -= scrolledLines
+				if m.selectedRow < 1 {
+					m.selectedRow = 1
+				}
+				m.viewport.SetContent(m.renderHeatmap())
+			}
+			return m, nil
 		}
 	}
-	tzLocation, _ := time.LoadLocation(tzName)
 
-	// Add error filter if showing errors
-	errorFilter := ""
-	if a.categoryType == CategoryError {
-		errorFilter = "AND exception_code != 0"
+	// Let viewport handle other scrolling (mouse wheel, etc)
+	oldYOffset := m.viewport.YOffset
+	m.viewport, cmd = m.viewport.Update(msg)
+	newYOffset := m.viewport.YOffset
+
+	// If viewport scrolled (e.g., by mouse), adjust cursor to stay visible
+	if oldYOffset != newYOffset {
+		scrollDiff := newYOffset - oldYOffset
+		if scrollDiff > 0 {
+			// Scrolled down
+			if m.selectedRow-1 < newYOffset {
+				// Cursor is above visible area, move it to top of visible area
+				m.selectedRow = newYOffset + 1
+			}
+		} else if scrollDiff < 0 {
+			// Scrolled up
+			if m.selectedRow-1 >= newYOffset+m.viewport.Height {
+				// Cursor is below visible area, move it to bottom of visible area
+				m.selectedRow = newYOffset + m.viewport.Height
+			}
+		}
+		m.viewport.SetContent(m.renderHeatmap())
 	}
 
-	query := fmt.Sprintf(heatmapQueryTemplate,
-		tzName, interval, tzName, interval,
-		tzName, interval, tzName, interval,
-		intervalSeconds,
-		tzName, interval, tzName, interval, tzName, interval,
-		intervalSeconds,
-		categorySQL, metricSQL, a.cluster,
-		fromStr, toStr, fromStr, toStr,
-		errorFilter,
+	return m, cmd
+}
+
+func (m heatmapViewer) View() string {
+	if m.loading {
+		return "Loading heatmap data, please wait..."
+	}
+	if m.err != nil {
+		return fmt.Sprintf("Error loading heatmap: %v\n\nPress ESC to return", m.err)
+	}
+
+	if m.showActionMenu {
+		return m.renderActionMenu()
+	}
+
+	// Render title
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+	title := fmt.Sprintf("Heatmap: %s by %s (%s to %s)",
+		getMetricName(m.heatmapMetric),
+		getCategoryName(m.categoryType),
+		m.fromTime.Format("2006-01-02 15:04:05 -07:00"),
+		m.toTime.Format("2006-01-02 15:04:05 -07:00"))
+
+	// Add selection info to title
+	selectionInfo := ""
+	if m.selectedRow > 0 && m.selectedRow <= len(m.categories) && m.selectedCol > 0 && m.selectedCol <= len(m.timestamps) {
+		// Both row and column selected (specific cell)
+		category := m.categories[m.selectedRow-1]
+		timestamp := m.timestamps[m.selectedCol-1]
+		var timeText string
+		if m.interval == "1 MINUTE" || m.interval == "10 MINUTE" {
+			timeText = timestamp.In(m.tzLocation).Format("15:04:05")
+		} else if m.interval == "1 HOUR" {
+			timeText = timestamp.In(m.tzLocation).Format("15:00:00")
+		} else {
+			timeText = timestamp.In(m.tzLocation).Format("2006-01-02 15:04:05")
+		}
+
+		// Show value if available
+		if value, exists := m.valueMap[category][timestamp]; exists {
+			selectionInfo = fmt.Sprintf(" | Selected: %s @ %s = %.2f", category, timeText, value)
+		} else {
+			selectionInfo = fmt.Sprintf(" | Selected: %s @ %s", category, timeText)
+		}
+	} else if m.selectedRow > 0 && m.selectedRow <= len(m.categories) {
+		// Only row selected
+		category := m.categories[m.selectedRow-1]
+		selectionInfo = fmt.Sprintf(" | Selected Row: %s (all times)", category)
+	} else if m.selectedCol > 0 && m.selectedCol <= len(m.timestamps) {
+		// Only column selected
+		timestamp := m.timestamps[m.selectedCol-1]
+		var timeText string
+		if m.interval == "1 MINUTE" || m.interval == "10 MINUTE" {
+			timeText = timestamp.In(m.tzLocation).Format("15:04:05")
+		} else if m.interval == "1 HOUR" {
+			timeText = timestamp.In(m.tzLocation).Format("15:00:00")
+		} else {
+			timeText = timestamp.In(m.tzLocation).Format("2006-01-02 15:04:05")
+		}
+		selectionInfo = fmt.Sprintf(" | Selected Column: %s (all categories)", timeText)
+	}
+	title += selectionInfo
+
+	// Render help
+	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	help := "Arrows: Navigate | PgUp/PgDn: Page scroll | Home/End: Jump to top/bottom | Enter: Actions | Esc: Exit"
+
+	// Render legend
+	legend := m.renderLegend()
+
+	// Render fixed header (outside viewport)
+	header := m.renderHeatmapHeader()
+
+	// Combine everything with fixed header
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		titleStyle.Render(title),
+		"",
+		header,
+		m.viewport.View(),
+		"",
+		legend,
+		"",
+		helpStyle.Render(help),
 	)
 
-	// Execute the query
-	go func() {
-		rows, err := a.clickHouse.Query(query)
+	return content
+}
+
+// renderHeatmapHeader renders the fixed header row (outside viewport)
+func (m heatmapViewer) renderHeatmapHeader() string {
+	if len(m.categories) == 0 || len(m.timestamps) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+
+	// Determine max category name length for alignment
+	maxCatLen := len(getCategoryName(m.categoryType))
+	for _, cat := range m.categories {
+		if len(cat) > maxCatLen {
+			maxCatLen = len(cat)
+		}
+	}
+
+	// Header row - category column + timestamp columns
+	headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true)
+	categoryHeader := getCategoryName(m.categoryType)
+	// Header is always shown without selection indicator
+	categoryHeader = "  " + categoryHeader
+	sb.WriteString(headerStyle.Render(fmt.Sprintf("%-*s", maxCatLen+2, categoryHeader)))
+	sb.WriteString(" ")
+
+	// Timestamp column headers (use dots)
+	for i := range m.timestamps {
+		colNum := i + 1
+		// Show selection on header timestamp
+		if m.selectedCol == colNum {
+			// Selected column indicator - bright and larger
+			selectedStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("15")).
+				Background(lipgloss.Color("237")).
+				Bold(true)
+			sb.WriteString(selectedStyle.Render("▼"))
+		} else {
+			sb.WriteString(headerStyle.Render("•"))
+		}
+	}
+
+	return sb.String()
+}
+
+// renderHeatmap generates the heatmap data rows (scrollable content in viewport)
+func (m heatmapViewer) renderHeatmap() string {
+	if len(m.categories) == 0 || len(m.timestamps) == 0 {
+		return "No data available"
+	}
+
+	var sb strings.Builder
+
+	// Determine max category name length for alignment
+	maxCatLen := len(getCategoryName(m.categoryType))
+	for _, cat := range m.categories {
+		if len(cat) > maxCatLen {
+			maxCatLen = len(cat)
+		}
+	}
+
+	// Data rows (header is now rendered separately)
+	for i, category := range m.categories {
+		rowNum := i + 1
+		isRowSelected := m.selectedRow == rowNum
+
+		// Category name column - highlight if this row is selected
+		var catStyle lipgloss.Style
+		catText := category
+		if isRowSelected {
+			// Highlight selected row's category name
+			catStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("15")).
+				Background(lipgloss.Color("237")).
+				Bold(true)
+			catText = "▶ " + catText
+		} else {
+			catStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
+			catText = "  " + catText
+		}
+		sb.WriteString(catStyle.Render(fmt.Sprintf("%-*s", maxCatLen+2, catText)))
+		sb.WriteString(" ")
+
+		// Value cells
+		for j, timestamp := range m.timestamps {
+			colNum := j + 1
+			value, exists := m.valueMap[category][timestamp]
+
+			if !exists {
+				sb.WriteString(" ")
+				continue
+			}
+
+			// Calculate color based on value
+			color := m.getColorForValue(value)
+
+			// Check selection state for crosshair effect
+			isColSelected := m.selectedCol == colNum
+			isCellSelected := isRowSelected && isColSelected
+
+			var cellStyle lipgloss.Style
+			if isCellSelected {
+				// The actual selected cell (intersection) - brightest with border
+				cellStyle = lipgloss.NewStyle().
+					Background(lipgloss.Color("15")).
+					Foreground(lipgloss.Color("0")).
+					Bold(true)
+				sb.WriteString(cellStyle.Render("●"))
+			} else if isRowSelected || isColSelected {
+				// Crosshair highlight - dimmed cell showing row or column selection
+				cellStyle = lipgloss.NewStyle().
+					Background(color).
+					Foreground(lipgloss.Color("15"))
+				sb.WriteString(cellStyle.Render("▪"))
+			} else {
+				// Normal cell
+				cellStyle = lipgloss.NewStyle().
+					Background(color).
+					Foreground(color)
+				sb.WriteString(cellStyle.Render("█"))
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
+// getColorForValue returns a lipgloss color based on the value's position in the range
+func (m heatmapViewer) getColorForValue(value float64) lipgloss.Color {
+	normalizedValue := m.applyScaling(value)
+
+	// Convert 0-1 range to color gradient: green -> yellow -> red
+	var colorCode int
+	if normalizedValue < 0.5 {
+		// Green (2) to Yellow (3)
+		colorCode = 2 // Green for low values
+	} else if normalizedValue < 0.75 {
+		// Yellow (3)
+		colorCode = 3
+	} else {
+		// Red (1) for high values
+		colorCode = 1
+	}
+
+	return lipgloss.Color(fmt.Sprintf("%d", colorCode))
+}
+
+// applyScaling normalizes the value between 0 and 1 based on min/max and scale type
+func (m heatmapViewer) applyScaling(value float64) float64 {
+	if m.maxValue == m.minValue {
+		return 0.5
+	}
+
+	switch m.scaleType {
+	case ScaleLinear:
+		return (value - m.minValue) / (m.maxValue - m.minValue)
+	case ScaleLog2:
+		if value <= 0 {
+			return 0
+		}
+		logMin := math.Log2(m.minValue + 1)
+		logMax := math.Log2(m.maxValue + 1)
+		logVal := math.Log2(value + 1)
+		return (logVal - logMin) / (logMax - logMin)
+	case ScaleLog10:
+		if value <= 0 {
+			return 0
+		}
+		logMin := math.Log10(m.minValue + 1)
+		logMax := math.Log10(m.maxValue + 1)
+		logVal := math.Log10(value + 1)
+		return (logVal - logMin) / (logMax - logMin)
+	default:
+		return (value - m.minValue) / (m.maxValue - m.minValue)
+	}
+}
+
+// renderLegend generates the color legend
+func (m heatmapViewer) renderLegend() string {
+	steps := 10
+	var sb strings.Builder
+
+	sb.WriteString("Legend: ")
+
+	for i := 0; i < steps; i++ {
+		normalized := float64(i) / float64(steps-1)
+
+		// Simple color mapping
+		var color lipgloss.Color
+		if normalized < 0.5 {
+			color = lipgloss.Color("2") // Green
+		} else if normalized < 0.75 {
+			color = lipgloss.Color("3") // Yellow
+		} else {
+			color = lipgloss.Color("1") // Red
+		}
+
+		cellStyle := lipgloss.NewStyle().
+			Background(color).
+			Foreground(color)
+		sb.WriteString(cellStyle.Render("█"))
+	}
+
+	sb.WriteString(fmt.Sprintf("  [%.2f - %.2f]", m.minValue, m.maxValue))
+
+	return sb.String()
+}
+
+// buildActionMenu constructs the action menu options based on context
+func (m *heatmapViewer) buildActionMenu() {
+	m.actionMenuOpts = []string{"Flamegraph", "Profile Events"}
+
+	// Add Explain option only for query hash category
+	if m.categoryType == CategoryQueryHash {
+		m.actionMenuOpts = append(m.actionMenuOpts, "Explain query")
+	}
+
+	// Add zoom options
+	m.actionMenuOpts = append(m.actionMenuOpts, "Zoom in", "Zoom out", "Reset zoom", "Cancel")
+}
+
+// handleActionMenuKey handles keyboard input for the action menu
+func (m heatmapViewer) handleActionMenuKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q", "c":
+		m.showActionMenu = false
+		return m, nil
+	case "up", "k":
+		if m.actionMenuIdx > 0 {
+			m.actionMenuIdx--
+		}
+	case "down", "j":
+		if m.actionMenuIdx < len(m.actionMenuOpts)-1 {
+			m.actionMenuIdx++
+		}
+	case "enter":
+		return m.executeAction()
+	case "f":
+		// Quick key for flamegraph
+		m.actionMenuIdx = 0
+		return m.executeAction()
+	case "p":
+		// Quick key for profile events
+		m.actionMenuIdx = 1
+		return m.executeAction()
+	case "e":
+		// Quick key for explain (if available)
+		if m.categoryType == CategoryQueryHash {
+			m.actionMenuIdx = 2
+			return m.executeAction()
+		}
+	case "z":
+		// Quick key for zoom in
+		for i, opt := range m.actionMenuOpts {
+			if opt == "Zoom in" {
+				m.actionMenuIdx = i
+				return m.executeAction()
+			}
+		}
+	case "Z":
+		// Quick key for zoom out
+		for i, opt := range m.actionMenuOpts {
+			if opt == "Zoom out" {
+				m.actionMenuIdx = i
+				return m.executeAction()
+			}
+		}
+	case "r":
+		// Quick key for reset zoom
+		for i, opt := range m.actionMenuOpts {
+			if opt == "Reset zoom" {
+				m.actionMenuIdx = i
+				return m.executeAction()
+			}
+		}
+	}
+
+	return m, nil
+}
+
+// executeAction executes the selected action from the menu
+func (m heatmapViewer) executeAction() (tea.Model, tea.Cmd) {
+	if m.actionMenuIdx >= len(m.actionMenuOpts) {
+		m.showActionMenu = false
+		return m, nil
+	}
+
+	action := m.actionMenuOpts[m.actionMenuIdx]
+	m.showActionMenu = false
+
+	// Determine context for the action based on selection
+	var categoryValue string
+	var fromTime, toTime time.Time
+
+	if m.selectedRow > 0 && m.selectedCol > 0 {
+		// Specific cell selected
+		categoryValue = m.categories[m.selectedRow-1]
+		timestamp := m.timestamps[m.selectedCol-1]
+		fromTime = timestamp
+		toTime = timestamp.Add(time.Duration(m.intervalSecs) * time.Second)
+	} else if m.selectedRow > 0 {
+		// Row header selected - use global time range
+		categoryValue = m.categories[m.selectedRow-1]
+		fromTime = m.fromTime
+		toTime = m.toTime
+	} else if m.selectedCol > 0 {
+		// Column header selected
+		timestamp := m.timestamps[m.selectedCol-1]
+		var timeWindow time.Duration
+		if m.interval == "1 MINUTE" {
+			timeWindow = 5 * time.Minute
+		} else if m.interval == "10 MINUTE" {
+			timeWindow = 30 * time.Minute
+		} else if m.interval == "1 HOUR" {
+			timeWindow = 2 * time.Hour
+		} else {
+			timeWindow = 24 * time.Hour
+		}
+		fromTime = timestamp.Add(-timeWindow / 2)
+		toTime = timestamp.Add(timeWindow / 2)
+		categoryValue = ""
+	}
+
+	// Execute the action by returning appropriate message
+	switch action {
+	case "Flamegraph":
+		return m, func() tea.Msg {
+			return HeatmapActionMsg{
+				Action:        "flamegraph",
+				CategoryValue: categoryValue,
+				FromTime:      fromTime,
+				ToTime:        toTime,
+			}
+		}
+	case "Profile Events":
+		return m, func() tea.Msg {
+			return HeatmapActionMsg{
+				Action:        "profile_events",
+				CategoryValue: categoryValue,
+				FromTime:      fromTime,
+				ToTime:        toTime,
+			}
+		}
+	case "Explain query":
+		return m, func() tea.Msg {
+			return HeatmapActionMsg{
+				Action:        "explain",
+				CategoryValue: categoryValue,
+				FromTime:      fromTime,
+				ToTime:        toTime,
+			}
+		}
+	case "Zoom in":
+		if m.selectedRow > 0 && m.selectedCol > 0 {
+			timestamp := m.timestamps[m.selectedCol-1]
+			fromTime := timestamp
+			toTime := timestamp.Add(time.Duration(m.intervalSecs) * time.Second)
+
+			zoomFactor := 0.5
+			currentRange := toTime.Sub(fromTime)
+			newRange := time.Duration(float64(currentRange) * zoomFactor)
+			center := fromTime.Add(currentRange / 2)
+
+			return m, func() tea.Msg {
+				return HeatmapActionMsg{
+					Action:   "zoom_in",
+					FromTime: center.Add(-newRange / 2),
+					ToTime:   center.Add(newRange / 2),
+				}
+			}
+		}
+	case "Zoom out":
+		return m, func() tea.Msg {
+			return HeatmapActionMsg{
+				Action: "zoom_out",
+			}
+		}
+	case "Reset zoom":
+		return m, func() tea.Msg {
+			return HeatmapActionMsg{
+				Action: "reset_zoom",
+			}
+		}
+	case "Cancel":
+		return m, nil
+	}
+
+	return m, nil
+}
+
+// renderActionMenu renders the action menu
+func (m heatmapViewer) renderActionMenu() string {
+	var sb strings.Builder
+
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+	sb.WriteString(titleStyle.Render("Select Action:"))
+	sb.WriteString("\n\n")
+
+	for i, opt := range m.actionMenuOpts {
+		if i == m.actionMenuIdx {
+			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true).Render(fmt.Sprintf("> %s", opt)))
+		} else {
+			sb.WriteString(fmt.Sprintf("  %s", opt))
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("\n")
+	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	sb.WriteString(helpStyle.Render("↑↓: Navigate | Enter: Select | Esc: Cancel"))
+
+	// Wrap in border
+	borderStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("6")).
+		Padding(1, 2)
+
+	return borderStyle.Render(sb.String())
+}
+
+// HeatmapActionMsg is sent when a heatmap action is triggered
+type HeatmapActionMsg struct {
+	Action        string
+	CategoryValue string
+	FromTime      time.Time
+	ToTime        time.Time
+}
+
+// ShowHeatmap displays the heatmap visualization
+func (a *App) ShowHeatmap() tea.Cmd {
+	log.Info().
+		Str("cluster", a.cluster).
+		Str("category", string(a.categoryType)).
+		Str("metric", string(a.heatmapMetric)).
+		Time("from", a.state.FromTime).
+		Time("to", a.state.ToTime).
+		Msg("ShowHeatmap called")
+
+	if a.state.ClickHouse == nil {
+		a.SwitchToMainPage("Error: Please connect to a ClickHouse instance first using :connect command")
+		return nil
+	}
+	if a.cluster == "" {
+		a.SwitchToMainPage("Error: Please select a cluster first using :cluster command")
+		return nil
+	}
+
+	// Create and show viewer
+	viewer := newHeatmapViewer(
+		a.categoryType,
+		a.state.FromTime,
+		a.state.ToTime,
+		a.cluster,
+		a.scaleType,
+		a.heatmapMetric,
+		a.width,
+		a.height,
+	)
+	a.heatmapHandler = viewer
+	a.currentPage = pageHeatmap
+
+	// Start async data fetch
+	return a.fetchHeatmapDataCmd()
+}
+
+// fetchHeatmapDataCmd fetches heatmap data from ClickHouse
+func (a *App) fetchHeatmapDataCmd() tea.Cmd {
+	return func() tea.Msg {
+		// Calculate appropriate interval based on time range
+		duration := a.state.ToTime.Sub(a.state.FromTime)
+
+		var interval string
+		var intervalSeconds int
+
+		if duration <= 2*time.Hour {
+			interval = "1 MINUTE"
+			intervalSeconds = 60
+		} else if duration <= 24*time.Hour {
+			interval = "10 MINUTE"
+			intervalSeconds = 600
+		} else if duration <= 7*24*time.Hour {
+			interval = "1 HOUR"
+			intervalSeconds = 3600
+		} else if duration <= 30*24*time.Hour {
+			interval = "1 DAY"
+			intervalSeconds = 86400
+		} else {
+			interval = "1 WEEK"
+			intervalSeconds = 604800
+		}
+
+		// Format the query
+		fromStr := a.state.FromTime.Format("2006-01-02 15:04:05 -07:00")
+		toStr := a.state.ToTime.Format("2006-01-02 15:04:05 -07:00")
+
+		metricSQL := getMetricSQL(a.heatmapMetric)
+		categorySQL := getCategorySQL(a.categoryType)
+
+		// Get timezone name from offset
+		tzName, offset := a.state.FromTime.Zone()
+		if tzName[0] == '-' || tzName[0] == '+' {
+			var tzErr error
+			tzName, tzErr = timezone.ConvertOffsetToIANAName(offset)
+			if tzErr != nil {
+				log.Error().Err(tzErr).Int("offset", offset).Msg("Failed to get timezone from offset")
+				tzName = "UTC" // Fallback to UTC
+			}
+		}
+		tzLocation, _ := time.LoadLocation(tzName)
+
+		// Add error filter if showing errors
+		errorFilter := ""
+		if a.categoryType == CategoryError {
+			errorFilter = "AND exception_code != 0"
+		}
+
+		query := fmt.Sprintf(heatmapQueryTemplate,
+			tzName, interval, tzName, interval,
+			tzName, interval, tzName, interval,
+			intervalSeconds,
+			tzName, interval, tzName, interval, tzName, interval,
+			intervalSeconds,
+			categorySQL, metricSQL, a.cluster,
+			fromStr, toStr, fromStr, toStr,
+			errorFilter,
+		)
+
+		// Execute the query
+		rows, err := a.state.ClickHouse.Query(query)
 		if err != nil {
-			a.tviewApp.QueueUpdateDraw(func() {
-				a.mainView.SetText(fmt.Sprintf("Error executing query: %v", err))
-			})
-			return
+			return HeatmapDataMsg{Err: fmt.Errorf("error executing query: %v", err)}
 		}
 		defer func() {
 			if closeErr := rows.Close(); closeErr != nil {
-				log.Error().Err(closeErr).Msg("can't close query")
+				log.Error().Err(closeErr).Msg("can't close heatmap query")
 			}
 		}()
 
@@ -139,28 +908,19 @@ func (a *App) ShowHeatmap() {
 			var value float64
 
 			if err := rows.Scan(&t, &category, &value); err != nil {
-				a.tviewApp.QueueUpdateDraw(func() {
-					a.mainView.SetText(fmt.Sprintf("Error scanning row: %v", err))
-				})
-				return
+				return HeatmapDataMsg{Err: fmt.Errorf("error scanning row: %v", err)}
 			}
 
 			data = append(data, dataPoint{t, category, value})
 		}
 
 		if rowsErr := rows.Err(); rowsErr != nil {
-			a.tviewApp.QueueUpdateDraw(func() {
-				a.mainView.SetText(fmt.Sprintf("Error reading rows: %v", rowsErr))
-			})
-			return
+			return HeatmapDataMsg{Err: fmt.Errorf("error reading rows: %v", rowsErr)}
 		}
 
 		// Process data for heatmap
 		if len(data) == 0 {
-			a.tviewApp.QueueUpdateDraw(func() {
-				a.mainView.SetText("No data found for the selected time range and categoryType")
-			})
-			return
+			return HeatmapDataMsg{Err: fmt.Errorf("no data found for the selected time range and category")}
 		}
 
 		// Extract unique timestamps and categories
@@ -208,526 +968,18 @@ func (a *App) ShowHeatmap() {
 			return timestamps[i].Before(timestamps[j])
 		})
 
-		// Sort categories alphabetically for better readability
+		// Sort categories alphabetically
 		sort.Strings(categories)
 
-		// Create the heatmap table
-		a.tviewApp.QueueUpdateDraw(func() {
-			table := tview.NewTable().
-				SetBorders(false).
-				SetSelectable(true, true).
-				SetFixed(1, 1). // Fix first row and first column
-				SetSeparator(0) // Remove column separator/padding
-
-			// Set header row with column numbers instead of timestamps
-			table.SetCell(0, 0, tview.NewTableCell(getCategoryName(a.categoryType)).
-				SetTextColor(tcell.ColorYellow).
-				SetAlign(tview.AlignCenter).
-				SetSelectable(false))
-
-			// Use single character column headers
-			for i := range timestamps {
-				table.SetCell(0, i+1, tview.NewTableCell("•").
-					SetTextColor(tcell.ColorYellow).
-					SetAlign(tview.AlignCenter).
-					SetSelectable(true))
-			}
-
-			// Fill in the data cells
-			for i, category := range categories {
-				table.SetCell(i+1, 0, tview.NewTableCell(category).
-					SetTextColor(tcell.ColorWhite).
-					SetAlign(tview.AlignLeft).
-					SetSelectable(true))
-
-				for j, timestamp := range timestamps {
-					value, exists := valueMap[category][timestamp]
-					if !exists {
-						table.SetCell(i+1, j+1, tview.NewTableCell(" ").
-							SetSelectable(true))
-						continue
-					}
-
-					// Apply scaling to the value
-					normalizedValue := a.applyScaling(value, minValue, maxValue)
-					var color tcell.Color
-
-					if normalizedValue < 0.5 {
-						// Green to Yellow
-						green := 255
-						red := uint8(255 * normalizedValue * 2)
-						color = tcell.NewRGBColor(int32(red), int32(green), 0)
-					} else {
-						// Yellow to Red
-						red := 255
-						green := uint8(255 * (1 - (normalizedValue-0.5)*2))
-						color = tcell.NewRGBColor(int32(red), int32(green), 0)
-					}
-
-					// Use single character with background color
-					table.SetCell(i+1, j+1, tview.NewTableCell("█").
-						SetBackgroundColor(color).
-						SetTextColor(color).
-						SetAlign(tview.AlignCenter).
-						SetSelectable(true))
-				}
-			}
-
-			// Set initial title
-			baseTitle := fmt.Sprintf("Heatmap: %s by %s (%s to %s)",
-				getMetricName(a.heatmapMetric),
-				getCategoryName(a.categoryType),
-				a.fromTime.Format("2006-01-02 15:04:05 -07:00"),
-				a.toTime.Format("2006-01-02 15:04:05 -07:00"))
-
-			table.SetTitle(baseTitle).SetBorder(true)
-
-			// Create legend
-			legend := a.generateLegend(minValue, maxValue)
-
-			// Create scroll bars with dynamic sizing
-			horizontalScroll := tview.NewTextView().
-				SetDynamicColors(true).
-				SetRegions(true).
-				SetScrollable(false).
-				SetTextColor(tcell.ColorWhite)
-			horizontalScroll.SetBackgroundColor(tcell.ColorDarkSlateGray)
-
-			verticalScroll := tview.NewTextView().
-				SetDynamicColors(true).
-				SetRegions(true).
-				SetScrollable(false).
-				SetTextColor(tcell.ColorWhite)
-			horizontalScroll.SetBackgroundColor(tcell.ColorDarkSlateGray)
-
-			// Create scrollable wrapper with vertical scroll
-			scrollWrapper := tview.NewFlex().
-				SetDirection(tview.FlexColumn).
-				AddItem(table, 0, 1, true).
-				AddItem(verticalScroll, 1, 0, false) // Fixed width
-
-			// Create main flex with horizontal scroll
-			mainFlex := tview.NewFlex().
-				SetDirection(tview.FlexRow).
-				AddItem(scrollWrapper, 0, 1, true).
-				AddItem(horizontalScroll, 1, 0, false) // Fixed height
-
-			// Store previous selection for color restoration
-			var prevRow, prevCol = -1, -1
-
-			// Update scroll bars and table title when table selection changes
-			table.SetSelectionChangedFunc(func(row, column int) {
-				rowsCount := table.GetRowCount()
-				colsCount := table.GetColumnCount()
-
-				// Restore previous cell colors if there was a previous selection
-				if prevRow > 0 && prevCol > 0 && prevRow <= len(categories) && prevCol <= len(timestamps) {
-					category := categories[prevRow-1]
-					timestamp := timestamps[prevCol-1]
-					value, exists := valueMap[category][timestamp]
-					if exists {
-						// Restore original colors
-						color := a.getColorForValue(value, minValue, maxValue)
-						table.SetCell(prevRow, prevCol, tview.NewTableCell("█").
-							SetBackgroundColor(color).
-							SetTextColor(color).
-							SetAlign(tview.AlignCenter).
-							SetSelectable(true))
-					}
-				}
-
-				// Update current cell colors if it's a data cell with value
-				if row > 0 && column > 0 && row <= len(categories) && column <= len(timestamps) {
-					category := categories[row-1]
-					timestamp := timestamps[column-1]
-					value, exists := valueMap[category][timestamp]
-					if exists {
-						// Invert colors for selected cell
-						originalColor := a.getColorForValue(value, minValue, maxValue)
-						// Create inverted color (swap background and text)
-						table.SetCell(row, column, tview.NewTableCell("█").
-							SetBackgroundColor(tcell.ColorWhite).
-							SetTextColor(originalColor).
-							SetAlign(tview.AlignCenter).
-							SetSelectable(true))
-					}
-				}
-
-				// Store current selection for next iteration
-				prevRow, prevCol = row, column
-
-				// Update table title when column is selected
-				var titleText string
-				if column > 0 && column <= len(timestamps) {
-					timestamp := timestamps[column-1]
-					var timeText string
-					if interval == "1 MINUTE" || interval == "10 MINUTE" {
-						timeText = timestamp.In(tzLocation).Format("15:04:05")
-					} else if interval == "1 HOUR" {
-						timeText = timestamp.In(tzLocation).Format("15:00:00")
-					} else {
-						timeText = timestamp.In(tzLocation).Format("2006-01-02 15:04:05")
-					}
-					titleText = fmt.Sprintf("%s | [yellow]Current Time: %s[white]", baseTitle, timeText)
-				} else {
-					titleText = baseTitle
-				}
-				table.SetTitle(titleText)
-
-				// Get available dimensions
-				_, _, width, height := mainFlex.GetRect()
-				scrollWidth := width - 10  // Account for legend width
-				scrollHeight := height - 1 // Account for horizontal scroll height
-
-				// Update horizontal scroll
-				if colsCount > 0 && scrollWidth > 0 {
-					pos := int(float64(column) / float64(colsCount-1) * float64(scrollWidth))
-					scrollText := "[red]◄[white]" + strings.Repeat("─", pos) + "[red]●[white]" + strings.Repeat("─", scrollWidth-pos) + "[red]►"
-					horizontalScroll.SetText(scrollText)
-				}
-
-				// Update vertical scroll
-				if rowsCount > 0 && scrollHeight > 2 {
-					// Reserve space for ▲ and ▼ characters
-					availableHeight := scrollHeight - 2
-					pos := int(float64(row) / float64(rowsCount-1) * float64(availableHeight))
-					scrollText := "[red]▲[white]\n"
-					for i := 0; i < availableHeight; i++ {
-						if i == pos {
-							scrollText += "[red::b]●[-:-:-]\n"
-						} else {
-							scrollText += "[white]│[-]\n"
-						}
-					}
-					scrollText += "[red]▼[-]"
-					verticalScroll.SetText(scrollText)
-				} else if scrollHeight > 0 {
-					// Minimal scroll bar for very small heights
-					verticalScroll.SetText("[red]▲\n▼[-]")
-				}
-			})
-
-			// Create a flex container for the heatmap and legend
-			flex := tview.NewFlex().
-				SetDirection(tview.FlexColumn).
-				AddItem(mainFlex, 0, 1, true).
-				AddItem(legend, 10, 0, false)
-
-			selectedHandler := func(row, col int) {
-				// Handle cell selection in the data area
-				if row > 0 && col > 0 {
-					category := categories[row-1]
-					timestamp := timestamps[col-1]
-					value, exists := valueMap[category][timestamp]
-
-					if exists {
-						info := fmt.Sprintf("Category: %s\nTime: %s\n%s: %.2f\n\nPress Enter to generate flamegraph for this selection",
-							category,
-							timestamp.Format("2006-01-02 15:04:05"),
-							getMetricName(a.heatmapMetric),
-							value)
-
-						a.mainView.SetText(info)
-
-						// Save selected data for use in flamegraph
-						a.categoryValue = category
-						a.flamegraphTimeStamp = timestamp
-					}
-				} else if row > 0 && col == 0 {
-					// Handle categoryType selection (row header)
-					category := categories[row-1]
-					info := fmt.Sprintf("Selected Category: %s\n\nPress Enter to generate flamegraph for this categoryType with global time range",
-						category)
-					a.mainView.SetText(info)
-					a.categoryValue = category
-				} else if row == 0 && col > 0 {
-					// Handle timestamp selection (column header)
-					timestamp := timestamps[col-1]
-					info := fmt.Sprintf("Selected Time: %s\n\nPress Enter to generate flamegraph for all categories at this time",
-						timestamp.Format("2006-01-02 15:04:05"))
-					a.mainView.SetText(info)
-					a.flamegraphTimeStamp = timestamp
-				}
-			}
-			// Add selection handler
-			table.SetSelectedFunc(selectedHandler)
-
-			// Add key handler for the table
-			table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-				// Handle Ctrl+Arrow key navigation
-				if event.Modifiers()&tcell.ModCtrl != 0 {
-					switch event.Key() {
-					case tcell.KeyUp:
-						// Move to first row (0), same column
-						_, col := table.GetSelection()
-						table.Select(0, col)
-						return nil
-					case tcell.KeyDown:
-						// Move to last row, same column
-						_, col := table.GetSelection()
-						rowCount := table.GetRowCount()
-						if rowCount > 0 {
-							table.Select(rowCount-1, col)
-						}
-						return nil
-					case tcell.KeyLeft:
-						// Move to first column (0), same row
-						row, _ := table.GetSelection()
-						table.Select(row, 0)
-						return nil
-					case tcell.KeyRight:
-						// Move to last column, same row
-						row, _ := table.GetSelection()
-						colCount := table.GetColumnCount()
-						if colCount > 0 {
-							table.Select(row, colCount-1)
-						}
-						return nil
-					}
-
-				}
-
-				// When Enter is pressed, show action menu
-				if event.Key() == tcell.KeyEnter {
-					row, col := table.GetSelection()
-
-					// Determine categoryType type and trace type
-					var categoryType = a.categoryType
-					var categoryValue string
-					var fromTime, toTime time.Time
-
-					// Set trace type based on metric
-					var traceType TraceType
-					if a.heatmapMetric == MetricMemoryUsage {
-						traceType = TraceMemory
-					} else {
-						traceType = TraceReal
-					}
-
-					if row > 0 && col > 0 {
-						// Cell in data area - specific categoryType and time
-						categoryValue = categories[row-1]
-						timestamp := timestamps[col-1]
-						fromTime = timestamp
-						toTime = timestamp.Add(time.Duration(intervalSeconds) * time.Second)
-					} else if row > 0 && col == 0 {
-						// Category row header - use global time range
-						categoryValue = categories[row-1]
-						fromTime = a.fromTime
-						toTime = a.toTime
-					} else if row == 0 && col > 0 {
-						// Timestamp column header - use all categories
-						timestamp := timestamps[col-1]
-						var timeWindow time.Duration
-						if interval == "1 MINUTE" {
-							timeWindow = 5 * time.Minute
-						} else if interval == "10 MINUTE" {
-							timeWindow = 30 * time.Minute
-						} else if interval == "1 HOUR" {
-							timeWindow = 2 * time.Hour
-						} else {
-							timeWindow = 24 * time.Hour
-						}
-						fromTime = timestamp.Add(-timeWindow / 2)
-						toTime = timestamp.Add(timeWindow / 2)
-						categoryType = ""
-						categoryValue = ""
-					}
-
-					// Build action menu dynamically: include Explain option only for normalized_query_hash category
-					menuText := "Select action:\n[f] Flamegraph\n[p] Profile Events"
-					buttons := []string{"Flamegraph (f)", "Profile Events (p)"}
-					if categoryType == CategoryQueryHash {
-						menuText += "\n[e] Explain query"
-						buttons = append(buttons, "Explain (e)")
-					}
-
-					// Add zoom options
-					menuText += "\n[z] Zoom in\n[Z] Zoom out\n[r] Reset zoom"
-					buttons = append(buttons, "Zoom in (z)", "Zoom out (Z)", "Zoom Reset (r)")
-					buttons = append(buttons, "Cancel")
-
-					actionMenu := tview.NewModal().
-						SetText(menuText).
-						AddButtons(buttons).
-						SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-							switch buttonLabel {
-							case "Flamegraph (f)":
-								a.pages.SwitchToPage("main")
-								a.generateFlamegraph(categoryType, categoryValue, traceType, fromTime, toTime, a.cluster, "heatmap")
-							case "Profile Events (p)":
-								a.pages.SwitchToPage("main")
-								a.ShowProfileEvents(categoryType, categoryValue, fromTime, toTime, a.cluster)
-							case "Explain (e)":
-								// Open explain flow. Keep behaviour consistent with other actions.
-								a.pages.SwitchToPage("main")
-								// ShowExplain will add its own page(s) and switch as needed.
-								a.ShowExplain(categoryType, categoryValue, fromTime, toTime, a.cluster)
-							case "Zoom in (z)":
-								// Zoom in by reducing the time range to the selected cell's interval
-								if row > 0 && col > 0 && row <= len(categories) && col <= len(timestamps) {
-									timestamp := timestamps[col-1]
-									fromTime := timestamp
-									toTime := timestamp.Add(time.Duration(intervalSeconds) * time.Second)
-
-									zoomFactor := 0.5
-									currentRange := toTime.Sub(fromTime)
-									newRange := time.Duration(float64(currentRange) * zoomFactor)
-									center := fromTime.Add(currentRange / 2)
-									a.fromTime = center.Add(-newRange / 2)
-									a.toTime = center.Add(newRange / 2)
-
-									// Regenerate heatmap with new time range
-									a.pages.SwitchToPage("main")
-									a.ShowHeatmap()
-								} else {
-									a.pages.SwitchToPage("heatmap")
-								}
-							case "Zoom out (Z)":
-								// Zoom out by expanding the time range
-								currentRange := a.toTime.Sub(a.fromTime)
-								zoomFactor := 2.0
-								newRange := time.Duration(float64(currentRange) * zoomFactor)
-								center := a.fromTime.Add(currentRange / 2)
-								a.fromTime = center.Add(-newRange / 2)
-								a.toTime = center.Add(newRange / 2)
-
-								// But don't exceed the initial range
-								if a.fromTime.Before(a.initialFromTime) {
-									a.fromTime = a.initialFromTime
-								}
-								if a.toTime.After(a.initialToTime) {
-									a.toTime = a.initialToTime
-								}
-
-								// Regenerate heatmap with new time range
-								a.pages.SwitchToPage("main")
-								a.ShowHeatmap()
-							case "Zoom Reset (r)":
-								// Reset to initial range
-								a.fromTime = a.initialFromTime
-								a.toTime = a.initialToTime
-								// Regenerate heatmap with initial time range
-								a.pages.SwitchToPage("main")
-								a.ShowHeatmap()
-							case "Cancel":
-								a.pages.SwitchToPage("heatmap")
-							}
-						})
-					actionMenu.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-						switch event.Rune() {
-						case 'f', 'F':
-							a.pages.SwitchToPage("main")
-							a.generateFlamegraph(categoryType, categoryValue, traceType, fromTime, toTime, a.cluster, "heatmap")
-							return nil
-						case 'p', 'P':
-							a.pages.SwitchToPage("main")
-							a.ShowProfileEvents(categoryType, categoryValue, fromTime, toTime, a.cluster)
-							return nil
-						case 'e', 'E':
-							// Only respond if option is relevant (category is normalized_query_hash)
-							if categoryType == CategoryQueryHash {
-								a.pages.SwitchToPage("main")
-								a.ShowExplain(categoryType, categoryValue, fromTime, toTime, a.cluster)
-								return nil
-							}
-						case 'z':
-							// Zoom in by reducing the time range to the selected cell's interval
-							if row > 0 && col > 0 && row <= len(categories) && col <= len(timestamps) {
-								timestamp := timestamps[col-1]
-								fromTime := timestamp
-								toTime := timestamp.Add(time.Duration(intervalSeconds) * time.Second)
-
-								zoomFactor := 0.5
-								currentRange := toTime.Sub(fromTime)
-								newRange := time.Duration(float64(currentRange) * zoomFactor)
-								center := fromTime.Add(currentRange / 2)
-								a.fromTime = center.Add(-newRange / 2)
-								a.toTime = center.Add(newRange / 2)
-
-								// Regenerate heatmap with new time range
-								a.pages.SwitchToPage("main")
-								a.ShowHeatmap()
-							} else {
-								a.pages.SwitchToPage("heatmap")
-							}
-							return nil
-						case 'Z':
-							// Zoom out by expanding the time range
-							currentRange := a.toTime.Sub(a.fromTime)
-							zoomFactor := 2.0
-							newRange := time.Duration(float64(currentRange) * zoomFactor)
-							center := a.fromTime.Add(currentRange / 2)
-							a.fromTime = center.Add(-newRange / 2)
-							a.toTime = center.Add(newRange / 2)
-
-							// But don't exceed the initial range
-							if a.fromTime.Before(a.initialFromTime) {
-								a.fromTime = a.initialFromTime
-							}
-							if a.toTime.After(a.initialToTime) {
-								a.toTime = a.initialToTime
-							}
-
-							// Regenerate heatmap with new time range
-							a.pages.SwitchToPage("main")
-							a.ShowHeatmap()
-							return nil
-						case 'r', 'R': // Reset zoom
-							// Reset to initial range
-							a.fromTime = a.initialFromTime
-							a.toTime = a.initialToTime
-							// Regenerate heatmap with initial time range
-							a.pages.SwitchToPage("main")
-							a.ShowHeatmap()
-							return nil
-						case 'c', 'C':
-							a.pages.SwitchToPage("heatmap")
-							return nil
-						}
-						if event.Key() == tcell.KeyEscape {
-							a.pages.SwitchToPage("heatmap")
-							return nil
-						}
-						return event
-					})
-
-					a.pages.AddPage("action_menu", actionMenu, true, true)
-					a.pages.SwitchToPage("action_menu")
-					return nil
-				}
-				return event
-			})
-
-			// Add mouse handler for double click
-			table.SetMouseCapture(func(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
-				if action == tview.MouseLeftDoubleClick {
-					// Get current selection and trigger the selected function
-					row, col := table.GetSelection()
-					selectedHandler(row, col)
-					return action, event
-				}
-				return action, event
-			})
-
-			// Store the table and display it
-			a.heatmapTable = table
-			a.pages.AddPage("heatmap", flex, true, true)
-			a.pages.SwitchToPage("heatmap")
-		})
-	}()
-}
-
-// Helper function to calculate color for a value based on min/max values and scaling
-func (a *App) getColorForValue(value, minValue, maxValue float64) tcell.Color {
-	normalizedValue := a.applyScaling(value, minValue, maxValue)
-	if normalizedValue < 0.5 {
-		green := 255
-		red := uint8(255 * normalizedValue * 2)
-		return tcell.NewRGBColor(int32(red), int32(green), 0)
-	} else {
-		red := 255
-		green := uint8(255 * (1 - (normalizedValue-0.5)*2))
-		return tcell.NewRGBColor(int32(red), int32(green), 0)
+		return HeatmapDataMsg{
+			Timestamps:   timestamps,
+			Categories:   categories,
+			ValueMap:     valueMap,
+			MinValue:     minValue,
+			MaxValue:     maxValue,
+			Interval:     interval,
+			IntervalSecs: intervalSeconds,
+			TzLocation:   tzLocation,
+		}
 	}
 }

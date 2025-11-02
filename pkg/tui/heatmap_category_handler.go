@@ -1,9 +1,8 @@
 package tui
 
 import (
-	"fmt"
-
-	"github.com/rivo/tview"
+	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // getCategorySQL returns the SQL expression for the given categoryType
@@ -38,32 +37,72 @@ func getCategoryName(category CategoryType) string {
 	}
 }
 
+// CategorySelectedMsg is sent when a category is selected
+type CategorySelectedMsg struct {
+	Category CategoryType
+	Name     string
+}
+
+// categorySelector is a bubbletea model for selecting category type
+type categorySelector struct {
+	list       widgets.FilteredList
+	categories []CategoryType
+	names      []string
+}
+
+func newCategorySelector(width, height int) categorySelector {
+	categories := []CategoryType{CategoryQueryHash, CategoryTable, CategoryHost, CategoryError}
+	names := []string{"Query Hash", "Tables", "Hosts", "Errors"}
+
+	listModel := widgets.NewFilteredList("Select Category", names, width, height)
+
+	return categorySelector{
+		list:       listModel,
+		categories: categories,
+		names:      names,
+	}
+}
+
+func (m categorySelector) Init() tea.Cmd {
+	return nil
+}
+
+func (m categorySelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "enter":
+			// Get selected category
+			selectedIdx := m.list.SelectedIndex()
+			if selectedIdx >= 0 && selectedIdx < len(m.categories) {
+				return m, func() tea.Msg {
+					return CategorySelectedMsg{
+						Category: m.categories[selectedIdx],
+						Name:     m.names[selectedIdx],
+					}
+				}
+			}
+		case "esc", "q":
+			// Return to main - parent will handle this
+			return m, nil
+		}
+	}
+
+	// Delegate to list
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
+func (m categorySelector) View() string {
+	return m.list.View()
+}
+
 // showCategorySelector displays a list of available categories
 func (a *App) showCategorySelector() {
-	categoryList := tview.NewList()
-	categoryList.SetTitle("Select Category")
-	categoryList.SetBorder(true)
-
-	categories := []struct {
-		name     string
-		category CategoryType
-	}{
-		{"Query Hash", CategoryQueryHash},
-		{"Tables", CategoryTable},
-		{"Hosts", CategoryHost},
-		{"Errors", CategoryError},
-	}
-
-	for i, cat := range categories {
-		categoryList.AddItem(cat.name, "", rune('1'+i), nil)
-	}
-
-	categoryList.SetSelectedFunc(func(i int, _ string, _ string, _ rune) {
-		a.categoryType = categories[i].category
-		a.SwitchToMainPage(fmt.Sprintf("Heatmap category set to: %s", categories[i].name))
-	})
-
-	a.categoryList = categoryList
-	a.pages.AddPage("categories", categoryList, true, true)
-	a.pages.SwitchToPage("categories")
+	// Create bubbletea category selector
+	selector := newCategorySelector(a.width, a.height)
+	a.categoryHandler = selector
+	a.currentPage = pageCategory
 }

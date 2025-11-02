@@ -3,4 +3,7 @@
 .idea
 .vscode
 .gigaide
+.claude
 /build
+AGENTS.md
+CLAUDE.md

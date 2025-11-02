@@ -1,5 +1,7 @@
 package tui
 
-func (a *App) handleQuitCommand() {
-	a.tviewApp.Stop()
+import tea "github.com/charmbracelet/bubbletea"
+
+func (a *App) handleQuitCommand() tea.Cmd {
+	return tea.Quit
 }
