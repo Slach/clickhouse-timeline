@@ -31,16 +31,17 @@ type FlamegraphConfigMsg struct {
 
 // flamegraphConfigForm is the configuration form for flamegraph
 type flamegraphConfigForm struct {
-	categoryType  CategoryType
-	categoryValue textinput.Model
-	traceType     TraceType
-	fromTime      time.Time
-	toTime        time.Time
-	currentField  int // 0=category type, 1=category value, 2=trace type
-	categoryIdx   int
-	traceIdx      int
-	width         int
-	height        int
+	categoryType   CategoryType
+	categoryValue  textinput.Model
+	traceType      TraceType
+	fromTime       time.Time
+	toTime         time.Time
+	currentField   int // 0=category type, 1=category value, 2=trace type, 3=buttons
+	categoryIdx    int
+	traceIdx       int
+	selectedButton int // 0=Show flamegraph, 1=Cancel
+	width          int
+	height         int
 }
 
 var categoryOptions = []string{
@@ -89,16 +90,17 @@ func newFlamegraphConfigForm(categoryType CategoryType, categoryValue string, tr
 	}
 
 	return flamegraphConfigForm{
-		categoryType:  categoryType,
-		categoryValue: valueInput,
-		traceType:     traceType,
-		fromTime:      fromTime,
-		toTime:        toTime,
-		currentField:  1, // Start on value input
-		categoryIdx:   categoryIdx,
-		traceIdx:      traceIdx,
-		width:         width,
-		height:        height,
+		categoryType:   categoryType,
+		categoryValue:  valueInput,
+		traceType:      traceType,
+		fromTime:       fromTime,
+		toTime:         toTime,
+		currentField:   1, // Start on value input
+		categoryIdx:    categoryIdx,
+		traceIdx:       traceIdx,
+		selectedButton: 0, // Default to "Show flamegraph" button
+		width:          width,
+		height:         height,
 	}
 }
 
@@ -117,10 +119,10 @@ func (m flamegraphConfigForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return tea.KeyMsg{Type: tea.KeyEsc}
 			}
 		case "tab", "down":
-			m.currentField = (m.currentField + 1) % 3
+			m.currentField = (m.currentField + 1) % 4
 			m.updateFocus()
 		case "shift+tab", "up":
-			m.currentField = (m.currentField + 2) % 3
+			m.currentField = (m.currentField + 3) % 4
 			m.updateFocus()
 		case "left":
 			if m.currentField == 0 {
@@ -131,6 +133,9 @@ func (m flamegraphConfigForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Trace type
 				m.traceIdx = (m.traceIdx + len(traceOptions) - 1) % len(traceOptions)
 				m.updateTraceType()
+			} else if m.currentField == 3 {
+				// Buttons
+				m.selectedButton = (m.selectedButton + 1) % 2
 			}
 		case "right":
 			if m.currentField == 0 {
@@ -141,8 +146,22 @@ func (m flamegraphConfigForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Trace type
 				m.traceIdx = (m.traceIdx + 1) % len(traceOptions)
 				m.updateTraceType()
+			} else if m.currentField == 3 {
+				// Buttons
+				m.selectedButton = (m.selectedButton + 1) % 2
 			}
 		case "enter", "ctrl+enter":
+			// Handle button selection
+			if m.currentField == 3 {
+				if m.selectedButton == 1 {
+					// Cancel button
+					return m, func() tea.Msg {
+						return tea.KeyMsg{Type: tea.KeyEsc}
+					}
+				}
+				// Show flamegraph button - fall through to validation
+			}
+
 			// Validate and submit
 			if m.categoryType != "" && m.categoryValue.Value() == "" {
 				// Category type requires a value
@@ -261,8 +280,41 @@ func (m flamegraphConfigForm) View() string {
 	sb.WriteString(timeRange)
 	sb.WriteString("\n\n")
 
+	// Buttons
+	buttonStyle := lipgloss.NewStyle().
+		Padding(0, 2).
+		Foreground(lipgloss.Color("15")).
+		Background(lipgloss.Color("8"))
+	selectedButtonStyle := lipgloss.NewStyle().
+		Padding(0, 2).
+		Foreground(lipgloss.Color("0")).
+		Background(lipgloss.Color("10")).
+		Bold(true)
+
+	if m.currentField == 3 {
+		sb.WriteString(labelStyle.Render("> "))
+	} else {
+		sb.WriteString("  ")
+	}
+
+	// Show flamegraph button
+	if m.currentField == 3 && m.selectedButton == 0 {
+		sb.WriteString(selectedButtonStyle.Render("Show Flamegraph"))
+	} else {
+		sb.WriteString(buttonStyle.Render("Show Flamegraph"))
+	}
+	sb.WriteString("  ")
+
+	// Cancel button
+	if m.currentField == 3 && m.selectedButton == 1 {
+		sb.WriteString(selectedButtonStyle.Render("Cancel"))
+	} else {
+		sb.WriteString(buttonStyle.Render("Cancel"))
+	}
+	sb.WriteString("\n\n")
+
 	// Help
-	sb.WriteString(helpStyle.Render("Tab/Shift+Tab: Navigate | ←→: Select options | Enter: Generate | Esc: Cancel"))
+	sb.WriteString(helpStyle.Render("Tab/Shift+Tab: Navigate | ←→: Select options | Enter: Activate | Esc: Cancel"))
 
 	// Wrap in border
 	borderStyle := lipgloss.NewStyle().

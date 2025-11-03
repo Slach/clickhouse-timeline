@@ -61,18 +61,20 @@ type FlamegraphDataMsg struct {
 
 // flamegraphViewer displays the flamegraph
 type flamegraphViewer struct {
-	root          *Frame
-	maxDepth      int
-	maxCount      int
-	frames        []*FocusedFrame
-	currentIdx    int
-	width         int
-	height        int
-	loading       bool
-	err           error
-	categoryType  CategoryType
-	categoryValue string
-	traceType     TraceType
+	root           *Frame
+	maxDepth       int
+	maxCount       int
+	frames         []*FocusedFrame
+	currentIdx     int
+	width          int
+	height         int
+	loading        bool
+	err            error
+	categoryType   CategoryType
+	categoryValue  string
+	traceType      TraceType
+	ShowingDetails bool // Exported so parent can check if showing details
+	detailsScroll  int
 }
 
 func newFlamegraphViewer(width, height int) flamegraphViewer {
@@ -108,49 +110,76 @@ func (m flamegraphViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "esc", "q":
-			return m, func() tea.Msg {
-				return tea.KeyMsg{Type: tea.KeyEsc}
-			}
-		case "up":
-			if m.currentIdx > 0 {
-				m.currentIdx--
-			}
-		case "down":
-			if m.currentIdx < len(m.frames)-1 {
-				m.currentIdx++
-			}
-		case "left":
-			// Navigate to parent
-			if m.currentIdx > 0 && m.frames[m.currentIdx].frame.Parent != nil {
-				// Find parent in frames list
-				parent := m.frames[m.currentIdx].frame.Parent
-				for i, f := range m.frames {
-					if f.frame == parent {
-						m.currentIdx = i
-						break
-					}
+		if m.ShowingDetails {
+			// In details view, handle scrolling and exit
+			switch msg.String() {
+			case "esc", "q":
+				m.ShowingDetails = false
+				m.detailsScroll = 0
+				return m, nil
+			case "up", "k":
+				if m.detailsScroll > 0 {
+					m.detailsScroll--
 				}
+			case "down", "j":
+				m.detailsScroll++
+			case "pgup":
+				m.detailsScroll -= 10
+				if m.detailsScroll < 0 {
+					m.detailsScroll = 0
+				}
+			case "pgdown":
+				m.detailsScroll += 10
+			case "home":
+				m.detailsScroll = 0
 			}
-		case "right":
-			// Navigate to first child
-			if len(m.frames) > m.currentIdx {
-				current := m.frames[m.currentIdx].frame
-				if len(current.Children) > 0 {
-					child := current.Children[0]
+		} else {
+			// In flamegraph view
+			switch msg.String() {
+			case "esc", "q":
+				// Signal to parent that we want to exit
+				// Parent will handle switching to main page
+				return m, nil
+			case "up":
+				if m.currentIdx > 0 {
+					m.currentIdx--
+				}
+			case "down":
+				if m.currentIdx < len(m.frames)-1 {
+					m.currentIdx++
+				}
+			case "left":
+				// Navigate to parent
+				if m.currentIdx > 0 && m.frames[m.currentIdx].frame.Parent != nil {
+					// Find parent in frames list
+					parent := m.frames[m.currentIdx].frame.Parent
 					for i, f := range m.frames {
-						if f.frame == child {
+						if f.frame == parent {
 							m.currentIdx = i
 							break
 						}
 					}
 				}
-			}
-		case "enter":
-			// Show details for selected frame
-			if m.currentIdx < len(m.frames) {
-				// Could add a details view here
+			case "right":
+				// Navigate to first child
+				if len(m.frames) > m.currentIdx {
+					current := m.frames[m.currentIdx].frame
+					if len(current.Children) > 0 {
+						child := current.Children[0]
+						for i, f := range m.frames {
+							if f.frame == child {
+								m.currentIdx = i
+								break
+							}
+						}
+					}
+				}
+			case "enter":
+				// Show details for selected frame
+				if m.currentIdx < len(m.frames) {
+					m.ShowingDetails = true
+					m.detailsScroll = 0
+				}
 			}
 		}
 	}
@@ -167,6 +196,11 @@ func (m flamegraphViewer) View() string {
 	}
 	if m.root == nil || m.maxDepth == 0 || m.root.Count == 0 {
 		return "No data available for selected parameters\n\nPress ESC to return"
+	}
+
+	// Show stack trace details if requested
+	if m.ShowingDetails {
+		return m.renderStackTraceDetails()
 	}
 
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
@@ -329,6 +363,85 @@ func (m flamegraphViewer) getColorForCount(count int, relativeRatio float64) str
 		// Hot colors (red-orange)
 		return "196" // Red
 	}
+}
+
+// renderStackTraceDetails renders the full stack trace for the selected frame
+func (m flamegraphViewer) renderStackTraceDetails() string {
+	if m.currentIdx >= len(m.frames) {
+		return "No frame selected"
+	}
+
+	focused := m.frames[m.currentIdx]
+	percentage := float64(focused.frame.Count) / float64(m.root.Count) * 100
+
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+	highlightStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true)
+	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	borderStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("6")).
+		Padding(1, 2)
+
+	title := titleStyle.Render("Stack Trace Details")
+	info := fmt.Sprintf("\nSamples: %d (%.2f%% of total)\n", focused.frame.Count, percentage)
+
+	var stackLines []string
+	stackLines = append(stackLines, "\nFull Stack Trace:")
+
+	// Calculate the viewport for scrolling
+	maxVisibleLines := m.height - 10 // Reserve space for title, info, and help
+	if maxVisibleLines < 5 {
+		maxVisibleLines = 5
+	}
+
+	// Build the full stack from root to selected frame
+	stack := focused.stack
+	totalLines := len(stack)
+
+	// Adjust scroll to not go beyond the content
+	if m.detailsScroll > totalLines-maxVisibleLines {
+		m.detailsScroll = totalLines - maxVisibleLines
+	}
+	if m.detailsScroll < 0 {
+		m.detailsScroll = 0
+	}
+
+	startLine := m.detailsScroll
+	endLine := startLine + maxVisibleLines
+	if endLine > totalLines {
+		endLine = totalLines
+	}
+
+	// Show scroll position indicator
+	if totalLines > maxVisibleLines {
+		stackLines = append(stackLines,
+			fmt.Sprintf("(Showing lines %d-%d of %d)", startLine+1, endLine, totalLines))
+	}
+	stackLines = append(stackLines, "")
+
+	// Render visible portion of stack
+	for i := startLine; i < endLine; i++ {
+		frame := stack[i]
+		lineNum := i + 1
+
+		// Highlight the currently selected level (last item in stack)
+		if i == len(stack)-1 {
+			stackLines = append(stackLines, highlightStyle.Render(fmt.Sprintf("%d. %s ← SELECTED", lineNum, frame)))
+		} else {
+			stackLines = append(stackLines, fmt.Sprintf("%d. %s", lineNum, frame))
+		}
+	}
+
+	help := helpStyle.Render("\n\nArrows/PgUp/PgDn: Scroll | Home: Top | Esc: Back to flamegraph")
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		title,
+		info,
+		strings.Join(stackLines, "\n"),
+		help,
+	)
+
+	return borderStyle.Render(content)
 }
 
 // buildFramesList creates a flat list of all frames for navigation

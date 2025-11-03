@@ -150,11 +150,11 @@ func (m heatmapViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return tea.KeyMsg{Type: tea.KeyEsc}
 			}
 		case "up":
-			if m.selectedRow > 1 {
+			if m.selectedRow > 0 {
 				m.selectedRow--
 				m.viewport.SetContent(m.renderHeatmap())
 				// Auto-scroll viewport if cursor moves above visible area
-				if m.selectedRow-1 < m.viewport.YOffset {
+				if m.selectedRow > 0 && m.selectedRow-1 < m.viewport.YOffset {
 					m.viewport.LineUp(1)
 				}
 			}
@@ -163,13 +163,15 @@ func (m heatmapViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedRow++
 				m.viewport.SetContent(m.renderHeatmap())
 				// Auto-scroll viewport if cursor moves below visible area
-				visibleBottom := m.viewport.YOffset + m.viewport.Height
-				if m.selectedRow-1 >= visibleBottom {
-					m.viewport.LineDown(1)
+				if m.selectedRow > 0 {
+					visibleBottom := m.viewport.YOffset + m.viewport.Height
+					if m.selectedRow-1 >= visibleBottom {
+						m.viewport.LineDown(1)
+					}
 				}
 			}
 		case "left":
-			if m.selectedCol > 1 {
+			if m.selectedCol > 0 {
 				m.selectedCol--
 				m.viewport.SetContent(m.renderHeatmap())
 			}
@@ -294,7 +296,26 @@ func (m heatmapViewer) View() string {
 
 	// Add selection info to title
 	selectionInfo := ""
-	if m.selectedRow > 0 && m.selectedRow <= len(m.categories) && m.selectedCol > 0 && m.selectedCol <= len(m.timestamps) {
+	if m.selectedRow == 0 && m.selectedCol == 0 {
+		// Top-left corner - all data
+		selectionInfo = " | Selected: All categories, all times"
+	} else if m.selectedRow == 0 && m.selectedCol > 0 && m.selectedCol <= len(m.timestamps) {
+		// Header row with specific column - all categories for this time
+		timestamp := m.timestamps[m.selectedCol-1]
+		var timeText string
+		if m.interval == "1 MINUTE" || m.interval == "10 MINUTE" {
+			timeText = timestamp.In(m.tzLocation).Format("15:04:05")
+		} else if m.interval == "1 HOUR" {
+			timeText = timestamp.In(m.tzLocation).Format("15:00:00")
+		} else {
+			timeText = timestamp.In(m.tzLocation).Format("2006-01-02 15:04:05")
+		}
+		selectionInfo = fmt.Sprintf(" | Selected Column: %s (all categories)", timeText)
+	} else if m.selectedCol == 0 && m.selectedRow > 0 && m.selectedRow <= len(m.categories) {
+		// Category label - this category for all times
+		category := m.categories[m.selectedRow-1]
+		selectionInfo = fmt.Sprintf(" | Selected Row: %s (all times)", category)
+	} else if m.selectedRow > 0 && m.selectedRow <= len(m.categories) && m.selectedCol > 0 && m.selectedCol <= len(m.timestamps) {
 		// Both row and column selected (specific cell)
 		category := m.categories[m.selectedRow-1]
 		timestamp := m.timestamps[m.selectedCol-1]
@@ -313,22 +334,6 @@ func (m heatmapViewer) View() string {
 		} else {
 			selectionInfo = fmt.Sprintf(" | Selected: %s @ %s", category, timeText)
 		}
-	} else if m.selectedRow > 0 && m.selectedRow <= len(m.categories) {
-		// Only row selected
-		category := m.categories[m.selectedRow-1]
-		selectionInfo = fmt.Sprintf(" | Selected Row: %s (all times)", category)
-	} else if m.selectedCol > 0 && m.selectedCol <= len(m.timestamps) {
-		// Only column selected
-		timestamp := m.timestamps[m.selectedCol-1]
-		var timeText string
-		if m.interval == "1 MINUTE" || m.interval == "10 MINUTE" {
-			timeText = timestamp.In(m.tzLocation).Format("15:04:05")
-		} else if m.interval == "1 HOUR" {
-			timeText = timestamp.In(m.tzLocation).Format("15:00:00")
-		} else {
-			timeText = timestamp.In(m.tzLocation).Format("2006-01-02 15:04:05")
-		}
-		selectionInfo = fmt.Sprintf(" | Selected Column: %s (all categories)", timeText)
 	}
 	title += selectionInfo
 
@@ -376,22 +381,38 @@ func (m heatmapViewer) renderHeatmapHeader() string {
 	// Header row - category column + timestamp columns
 	headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true)
 	categoryHeader := getCategoryName(m.categoryType)
-	// Header is always shown without selection indicator
-	categoryHeader = "  " + categoryHeader
-	sb.WriteString(headerStyle.Render(fmt.Sprintf("%-*s", maxCatLen+2, categoryHeader)))
+
+	// Show selection on category header if col 0 is selected
+	if m.selectedCol == 0 {
+		selectedStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15")).
+			Background(lipgloss.Color("237")).
+			Bold(true)
+		categoryHeader = "▼ " + categoryHeader
+		sb.WriteString(selectedStyle.Render(fmt.Sprintf("%-*s", maxCatLen+2, categoryHeader)))
+	} else {
+		categoryHeader = "  " + categoryHeader
+		sb.WriteString(headerStyle.Render(fmt.Sprintf("%-*s", maxCatLen+2, categoryHeader)))
+	}
 	sb.WriteString(" ")
 
 	// Timestamp column headers (use dots)
 	for i := range m.timestamps {
 		colNum := i + 1
 		// Show selection on header timestamp
-		if m.selectedCol == colNum {
-			// Selected column indicator - bright and larger
+		if m.selectedCol == colNum && m.selectedRow == 0 {
+			// Selected column indicator when on header row - bright and larger
 			selectedStyle := lipgloss.NewStyle().
 				Foreground(lipgloss.Color("15")).
 				Background(lipgloss.Color("237")).
 				Bold(true)
 			sb.WriteString(selectedStyle.Render("▼"))
+		} else if m.selectedCol == colNum {
+			// Column is selected but we're not on header row - just show indicator
+			selectedStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("11")).
+				Bold(true)
+			sb.WriteString(selectedStyle.Render("•"))
 		} else {
 			sb.WriteString(headerStyle.Render("•"))
 		}
@@ -421,16 +442,27 @@ func (m heatmapViewer) renderHeatmap() string {
 		rowNum := i + 1
 		isRowSelected := m.selectedRow == rowNum
 
-		// Category name column - highlight if this row is selected
+		// Category name column - highlight if this row or col 0 is selected
 		var catStyle lipgloss.Style
 		catText := category
-		if isRowSelected {
-			// Highlight selected row's category name
+		if isRowSelected && m.selectedCol == 0 {
+			// Both row and col 0 selected - this category label is the focus
+			catStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("15")).
+				Background(lipgloss.Color("237")).
+				Bold(true)
+			catText = "◆ " + catText
+		} else if isRowSelected {
+			// Row selected - show row indicator
 			catStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("15")).
 				Background(lipgloss.Color("237")).
 				Bold(true)
 			catText = "▶ " + catText
+		} else if m.selectedCol == 0 {
+			// Col 0 selected but not this row - just show dimmed
+			catStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+			catText = "  " + catText
 		} else {
 			catStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
 			catText = "  " + catText
@@ -443,32 +475,37 @@ func (m heatmapViewer) renderHeatmap() string {
 			colNum := j + 1
 			value, exists := m.valueMap[category][timestamp]
 
+			// Check selection state for cursor
+			isColSelected := m.selectedCol == colNum
+			isCellSelected := isRowSelected && isColSelected
+
+			var cellStyle lipgloss.Style
+
 			if !exists {
-				sb.WriteString(" ")
+				// Empty cell - show cursor only at intersection
+				if isCellSelected {
+					// Selected empty cell (intersection)
+					cellStyle = lipgloss.NewStyle().
+						Background(lipgloss.Color("15")).
+						Foreground(lipgloss.Color("8"))
+					sb.WriteString(cellStyle.Render("·"))
+				} else {
+					// Normal empty cell
+					sb.WriteString(" ")
+				}
 				continue
 			}
 
 			// Calculate color based on value
 			color := m.getColorForValue(value)
 
-			// Check selection state for crosshair effect
-			isColSelected := m.selectedCol == colNum
-			isCellSelected := isRowSelected && isColSelected
-
-			var cellStyle lipgloss.Style
 			if isCellSelected {
-				// The actual selected cell (intersection) - brightest with border
+				// The selected cell (intersection) - cursor position
 				cellStyle = lipgloss.NewStyle().
 					Background(lipgloss.Color("15")).
 					Foreground(lipgloss.Color("0")).
 					Bold(true)
 				sb.WriteString(cellStyle.Render("●"))
-			} else if isRowSelected || isColSelected {
-				// Crosshair highlight - dimmed cell showing row or column selection
-				cellStyle = lipgloss.NewStyle().
-					Background(color).
-					Foreground(lipgloss.Color("15"))
-				sb.WriteString(cellStyle.Render("▪"))
 			} else {
 				// Normal cell
 				cellStyle = lipgloss.NewStyle().
@@ -651,32 +688,27 @@ func (m heatmapViewer) executeAction() (tea.Model, tea.Cmd) {
 	var fromTime, toTime time.Time
 
 	if m.selectedRow > 0 && m.selectedCol > 0 {
-		// Specific cell selected
+		// Specific cell selected - use specific category and time interval
 		categoryValue = m.categories[m.selectedRow-1]
 		timestamp := m.timestamps[m.selectedCol-1]
 		fromTime = timestamp
 		toTime = timestamp.Add(time.Duration(m.intervalSecs) * time.Second)
-	} else if m.selectedRow > 0 {
-		// Row header selected - use global time range
+	} else if m.selectedRow > 0 && m.selectedCol == 0 {
+		// Category label selected (first column) - use this category for whole time range
 		categoryValue = m.categories[m.selectedRow-1]
 		fromTime = m.fromTime
 		toTime = m.toTime
-	} else if m.selectedCol > 0 {
-		// Column header selected
+	} else if m.selectedRow == 0 && m.selectedCol > 0 {
+		// Column header selected (first row) - use all categories for this time period
 		timestamp := m.timestamps[m.selectedCol-1]
-		var timeWindow time.Duration
-		if m.interval == "1 MINUTE" {
-			timeWindow = 5 * time.Minute
-		} else if m.interval == "10 MINUTE" {
-			timeWindow = 30 * time.Minute
-		} else if m.interval == "1 HOUR" {
-			timeWindow = 2 * time.Hour
-		} else {
-			timeWindow = 24 * time.Hour
-		}
-		fromTime = timestamp.Add(-timeWindow / 2)
-		toTime = timestamp.Add(timeWindow / 2)
-		categoryValue = ""
+		fromTime = timestamp
+		toTime = timestamp.Add(time.Duration(m.intervalSecs) * time.Second)
+		categoryValue = "" // Empty means all categories
+	} else if m.selectedRow == 0 && m.selectedCol == 0 {
+		// Top-left corner - all categories, all times
+		fromTime = m.fromTime
+		toTime = m.toTime
+		categoryValue = "" // Empty means all categories
 	}
 
 	// Execute the action by returning appropriate message

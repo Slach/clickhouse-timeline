@@ -396,12 +396,27 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				traceType = TraceReal
 			}
+			// If categoryValue is empty (all categories selected), use empty category type to skip filter
+			categoryType := a.categoryType
+			if msg.CategoryValue == "" {
+				categoryType = ""
+			}
 			// Use new bubbletea flamegraph viewer
-			return a, a.ShowFlamegraphViewer(a.categoryType, msg.CategoryValue, traceType, msg.FromTime, msg.ToTime, a.cluster)
+			return a, a.ShowFlamegraphViewer(categoryType, msg.CategoryValue, traceType, msg.FromTime, msg.ToTime, a.cluster)
 		case "profile_events":
-			return a, a.ShowProfileEvents(a.categoryType, msg.CategoryValue, msg.FromTime, msg.ToTime, a.cluster)
+			// If categoryValue is empty (all categories selected), use empty category type to skip filter
+			categoryType := a.categoryType
+			if msg.CategoryValue == "" {
+				categoryType = ""
+			}
+			return a, a.ShowProfileEvents(categoryType, msg.CategoryValue, msg.FromTime, msg.ToTime, a.cluster)
 		case "explain":
-			return a, a.ShowExplain(a.categoryType, msg.CategoryValue, msg.FromTime, msg.ToTime, a.cluster)
+			// If categoryValue is empty (all categories selected), use empty category type to skip filter
+			categoryType := a.categoryType
+			if msg.CategoryValue == "" {
+				categoryType = ""
+			}
+			return a, a.ShowExplain(categoryType, msg.CategoryValue, msg.FromTime, msg.ToTime, a.cluster)
 		case "zoom_in":
 			a.state.FromTime = msg.FromTime
 			a.state.ToTime = msg.ToTime
@@ -538,7 +553,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 
 		case "esc":
-			// Go back to main page
+			// Special handling for pages that need internal ESC handling
+			// Let flamegraph handle ESC first (for closing details view)
+			if a.currentPage == pageFlamegraph && a.flamegraphHandler != nil {
+				// Check if flamegraph is showing details
+				if viewer, ok := a.flamegraphHandler.(flamegraphViewer); ok && viewer.ShowingDetails {
+					// Let flamegraph handle ESC to close details
+					a.flamegraphHandler, cmd = a.flamegraphHandler.Update(msg)
+					cmds = append(cmds, cmd)
+					return a, tea.Batch(cmds...)
+				}
+				// Otherwise, exit flamegraph to main page
+			}
+			// For other pages, go back to main page
 			a.SwitchToMainPage("")
 			return a, nil
 		}
@@ -759,6 +786,14 @@ func (a *App) View() string {
 			var suggestionLines []string
 			maxSuggestions := 8 // Show max 8 suggestions
 
+			// Ensure scroll offset is within bounds
+			if a.suggestionScrollOffset >= len(a.commandSuggestions) {
+				a.suggestionScrollOffset = len(a.commandSuggestions) - 1
+			}
+			if a.suggestionScrollOffset < 0 {
+				a.suggestionScrollOffset = 0
+			}
+
 			// Calculate the visible window based on scroll offset
 			endIdx := a.suggestionScrollOffset + maxSuggestions
 			if endIdx > len(a.commandSuggestions) {
@@ -835,9 +870,14 @@ func (a *App) updateCommandSuggestions() {
 	}
 
 	a.commandSuggestions = suggestions
-	// Reset selection if list changed
+	// Reset selection and scroll offset if list changed
 	if a.selectedSuggestion >= len(suggestions) {
 		a.selectedSuggestion = 0
+		a.suggestionScrollOffset = 0
+	}
+	// Also reset scroll offset if it's out of bounds
+	if a.suggestionScrollOffset >= len(suggestions) {
+		a.suggestionScrollOffset = 0
 	}
 }
 

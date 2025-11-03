@@ -24,6 +24,8 @@ type clusterSelector struct {
 	clusters []string
 	loading  bool
 	err      error
+	width    int
+	height   int
 }
 
 func newClusterSelector(width, height int) clusterSelector {
@@ -34,6 +36,8 @@ func newClusterSelector(width, height int) clusterSelector {
 		list:     listModel,
 		clusters: []string{},
 		loading:  true,
+		width:    width,
+		height:   height,
 	}
 }
 
@@ -52,8 +56,8 @@ func (m clusterSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.list = widgets.NewFilteredList(
 				"Select Cluster",
 				[]string{fmt.Sprintf("Error: %v", msg.Err)},
-				m.list.SelectedIndex(),
-				m.list.SelectedIndex(),
+				m.width,
+				m.height,
 			)
 			return m, nil
 		}
@@ -63,15 +67,15 @@ func (m clusterSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.list = widgets.NewFilteredList(
 				"Select Cluster",
 				[]string{"No clusters found"},
-				m.list.SelectedIndex(),
-				m.list.SelectedIndex(),
+				m.width,
+				m.height,
 			)
 		} else {
 			m.list = widgets.NewFilteredList(
 				"Select Cluster",
 				m.clusters,
-				m.list.SelectedIndex(),
-				m.list.SelectedIndex(),
+				m.width,
+				m.height,
 			)
 		}
 		return m, nil
