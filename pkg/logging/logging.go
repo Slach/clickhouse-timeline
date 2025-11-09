@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Slach/clickhouse-timeline/pkg/config"
 	"github.com/Slach/clickhouse-timeline/pkg/types"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
@@ -92,7 +93,22 @@ func (h errorStackHook) Run(e *zerolog.Event, level zerolog.Level, _ string) {
 	}
 }
 
-func InitLogFile(cliInstance *types.CLI, version string) error {
+func parseLogLevel(levelStr string) zerolog.Level {
+	switch strings.ToLower(levelStr) {
+	case "debug":
+		return zerolog.DebugLevel
+	case "info":
+		return zerolog.InfoLevel
+	case "warn", "warning":
+		return zerolog.WarnLevel
+	case "error":
+		return zerolog.ErrorLevel
+	default:
+		return zerolog.InfoLevel // default
+	}
+}
+
+func InitLogFile(cliInstance *types.CLI, cfg *config.Config, version string) error {
 	logPath := ""
 	if cliInstance != nil && cliInstance.LogPath != "" {
 		logPath = cliInstance.LogPath
@@ -118,12 +134,21 @@ func InitLogFile(cliInstance *types.CLI, version string) error {
 		return errors.Wrap(err, "failed to open log file")
 	}
 
+	// Determine log level: CLI flag > config file > default (info)
+	logLevel := zerolog.InfoLevel
+	if cliInstance != nil && cliInstance.LogLevel != "" {
+		logLevel = parseLogLevel(cliInstance.LogLevel)
+	} else if cfg != nil && cfg.Logging.Level != "" {
+		logLevel = parseLogLevel(cfg.Logging.Level)
+	}
+
 	// Build logger that writes pretty output to the file (with timestamp and caller).
 	baseLogger := zerolog.New(zerolog.ConsoleWriter{
 		Out:        logFile,
 		NoColor:    true,
 		TimeFormat: "2006-01-02 15:04:05.000",
 	}).
+		Level(logLevel).
 		With().
 		Timestamp().
 		Caller().

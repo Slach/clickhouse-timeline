@@ -28,6 +28,7 @@ func NewRootCommand(cli *types.CLI, version string) *cobra.Command {
 	// Add global flags
 	rootCmd.PersistentFlags().StringVar(&cli.ConfigPath, "config", "", "Path to config file (default: ~/.clickhouse-timeline/clickhouse-timeline.yml)")
 	rootCmd.PersistentFlags().StringVar(&cli.LogPath, "log", "", "Path to log file (default: ~/.clickhouse-timeline/clickhouse-timeline.log)")
+	rootCmd.PersistentFlags().StringVar(&cli.LogLevel, "log-level", "", "Log level: debug, info, warn, error (default: info)")
 	rootCmd.PersistentFlags().BoolVar(&cli.Pprof, "pprof", false, "Enable CPU and memory profiling")
 	rootCmd.PersistentFlags().StringVar(&cli.PprofPath, "pprof-path", "", "Path to store pprof files (default: ~/.clickhouse-timeline/)")
 	rootCmd.PersistentFlags().StringVar(&cli.FromTime, "from", "", "Start time (in any parsable format, see https://github.com/araddon/dateparse)")
@@ -38,6 +39,7 @@ func NewRootCommand(cli *types.CLI, version string) *cobra.Command {
 	rootCmd.PersistentFlags().StringVar(&cli.Metric, "metric", "", "Metric to visualize (count, memoryUsage, cpuUsage, etc)")
 	rootCmd.PersistentFlags().StringVar(&cli.Category, "category", "", "Category to group by (query_hash, tables, hosts, errors)")
 	rootCmd.PersistentFlags().BoolVar(&cli.FlamegraphNative, "flamegraph-native", false, "Use native flamegraph viewer instead of flamelens")
+	rootCmd.PersistentFlags().BoolVar(&cli.DisableMouse, "disable-mouse", false, "Disable mouse support to allow normal terminal text selection")
 
 	heatmapCmd := &cobra.Command{
 		Use:   "heatmap",
@@ -168,16 +170,17 @@ func RunRootCommand(cliInstance *types.CLI, version string, cmd *cobra.Command, 
 		defer pprof.Stop(cliInstance.PprofPath)
 	}
 
-	// Initialize logging
-	if initLogErr := logging.InitLogFile(cliInstance, version); initLogErr != nil {
-		fmt.Println(initLogErr.Error())
-		log.Fatal().Stack().Err(initLogErr).Msg("failed to initialize logger")
-	}
-
+	// Load config first (needed for logging level)
 	cfg, configErr := config.Load(cliInstance, home)
 	if configErr != nil {
 		fmt.Println(configErr.Error())
 		log.Fatal().Stack().Err(configErr).Send()
+	}
+
+	// Initialize logging with config
+	if initLogErr := logging.InitLogFile(cliInstance, cfg, version); initLogErr != nil {
+		fmt.Println(initLogErr.Error())
+		log.Fatal().Stack().Err(initLogErr).Msg("failed to initialize logger")
 	}
 
 	app := tui.NewApp(cfg, version)

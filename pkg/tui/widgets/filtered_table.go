@@ -53,16 +53,18 @@ func NewFilteredTable(title string, headers []string, width, height int) Filtere
 // NewFilteredTableBubbleWithWidths creates a new filtered table with custom column widths
 func NewFilteredTableBubbleWithWidths(title string, headers []string, widths []int, width, height int) FilteredTable {
 	// Create columns with custom widths
+	// headers are lowercase keys, we'll capitalize them for display
 	columns := make([]table.Column, len(headers))
 	for i, header := range headers {
 		columnWidth := widths[i]
 		if columnWidth < 5 {
 			columnWidth = 5
 		}
-		columns[i] = table.NewColumn(header, header, columnWidth).
+		// Use header as key (lowercase), but capitalize for title display
+		displayTitle := strings.Title(header)
+		columns[i] = table.NewColumn(header, displayTitle, columnWidth).
 			WithStyle(lipgloss.NewStyle().Align(lipgloss.Left))
 	}
-
 	return createFilteredTableBubble(title, headers, columns, width, height)
 }
 
@@ -70,8 +72,12 @@ func NewFilteredTableBubbleWithWidths(title string, headers []string, widths []i
 func createFilteredTableBubble(title string, headers []string, columns []table.Column, width, height int) FilteredTable {
 
 	// Calculate visible rows for the table viewport
-	// Account for: title (1), filter input when active (2), help text (1), borders (2)
-	visibleRows := height - 6
+	// Account for: title (1 if non-empty, 0 if empty), filter input when active (2), help text (1), borders (2)
+	overhead := 6
+	if strings.TrimSpace(title) == "" {
+		overhead = 5 // No title line if empty
+	}
+	visibleRows := height - overhead
 	if visibleRows < 5 {
 		visibleRows = 5
 	}
@@ -82,8 +88,6 @@ func createFilteredTableBubble(title string, headers []string, columns []table.C
 		WithMaxTotalWidth(width).
 		Focused(true).
 		WithTargetWidth(width).
-		WithHorizontalFreezeColumnCount(1).
-		SelectableRows(true).
 		Border(table.Border{
 			Top:    "─",
 			Left:   "│",
@@ -134,12 +138,24 @@ func (m *FilteredTable) SetSize(width, height int) {
 	m.height = height
 
 	// Calculate visible rows for the table viewport
-	visibleRows := height - 6
+	// Account for: title (1 if non-empty, 0 if empty), filter input when active (2), help text (1), borders (2)
+	overhead := 6
+	if strings.TrimSpace(m.title) == "" {
+		overhead = 5 // No title line if empty
+	}
+	visibleRows := height - overhead
 	if visibleRows < 5 {
 		visibleRows = 5
 	}
 
 	m.table = m.table.WithTargetWidth(width).WithPageSize(visibleRows)
+}
+
+// SetBorderColor updates the border color of the table
+func (m *FilteredTable) SetBorderColor(color lipgloss.Color) {
+	// Apply base style with border foreground color
+	baseStyle := lipgloss.NewStyle().BorderForeground(color)
+	m.table = m.table.WithBaseStyle(baseStyle)
 }
 
 // AddRow adds a row to the table
@@ -302,7 +318,22 @@ func (m FilteredTable) View() string {
 
 	footer := helpText + rowInfo
 
-	return lipgloss.JoinVertical(lipgloss.Left, title, m.table.View(), footer)
+	// Only include title if it's not empty (avoids blank line when title is "")
+	var result string
+	if strings.TrimSpace(m.title) == "" {
+		result = lipgloss.JoinVertical(lipgloss.Left, m.table.View(), footer)
+	} else {
+		result = lipgloss.JoinVertical(lipgloss.Left, title, m.table.View(), footer)
+	}
+
+	// Debug: count actual lines rendered
+	actualLines := strings.Count(result, "\n") + 1
+	if actualLines != m.height {
+		// Log only if there's a mismatch
+		_ = actualLines // Suppress unused variable warning in production
+	}
+
+	return result
 }
 
 // applyFilter filters the table based on the filter text
@@ -358,4 +389,9 @@ func (m FilteredTable) SelectedRows() []table.Row {
 func (m FilteredTable) GetRowCount() int {
 	// This is approximate - bubble-table doesn't expose this directly
 	return len(m.allRows)
+}
+
+// IsFiltering returns true if the table is currently in filter mode
+func (m FilteredTable) IsFiltering() bool {
+	return m.filtering
 }

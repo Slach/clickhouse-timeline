@@ -111,6 +111,7 @@ type App struct {
 	scaleType           ScaleType
 	categoryValue       string
 	flamegraphTimeStamp time.Time
+	lastLogsConfig      *LogConfig // Remember last logs configuration
 
 	// Compatibility accessors for old handlers (to be removed during migration)
 	clickHouse      *client.Client
@@ -348,8 +349,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle logs configuration completion
 		return a, a.ShowLogsViewer(msg.Config)
 
-	case LogsDataMsg:
-		// Forward to logs handler if active
+	case DatabasesLoadedMsg, TablesLoadedMsg, ColumnsLoadedMsg, LogsDataMsg:
+		// Forward logs-related messages to logs handler if active
 		if a.currentPage == pageLogs && a.logsHandler != nil {
 			a.logsHandler, cmd = a.logsHandler.Update(msg)
 			cmds = append(cmds, cmd)
@@ -538,6 +539,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Global key handlers
 		switch msg.String() {
 		case ":":
+			// Don't intercept ':' if logs table is in filter mode
+			if a.currentPage == pageLogs && a.logsHandler != nil {
+				if lv, ok := a.logsHandler.(logsViewer); ok {
+					if lv.IsTableFiltering() {
+						// Pass through to logs handler - user is typing filter text
+						break
+					}
+				}
+			}
 			// Enter command mode
 			a.commandMode = true
 			a.bubbleCommandInput.Focus()
@@ -554,6 +564,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "esc":
 			// Special handling for pages that need internal ESC handling
+			// Let logs handler handle ESC first (for saving config and closing dropdowns)
+			if a.currentPage == pageLogs && a.logsHandler != nil {
+				// Let logs handler process ESC (it will handle dropdown closing and config saving)
+				a.logsHandler, cmd = a.logsHandler.Update(msg)
+				cmds = append(cmds, cmd)
+				return a, tea.Batch(cmds...)
+			}
 			// Let flamegraph handle ESC first (for closing details view)
 			if a.currentPage == pageFlamegraph && a.flamegraphHandler != nil {
 				// Check if flamegraph is showing details
@@ -979,7 +996,7 @@ func (a *App) executeCommand(commandName string) tea.Cmd {
 		return a.ShowMemory()
 
 	case CmdLogs:
-		a.handleLogsCommand()
+		return a.handleLogsCommand()
 
 	case CmdAudit:
 		return a.ShowAudit()
@@ -1001,7 +1018,29 @@ func (a *App) Run() error {
 		}
 	}()
 
-	p := tea.NewProgram(a, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	// Determine if mouse support should be enabled
+	// Priority: CLI flag > config file > default (true)
+	usingMouse := true
+	if a.cfg != nil && !a.cfg.UI.UsingMouse {
+		usingMouse = false
+	}
+	if a.state.CLI != nil && a.state.CLI.DisableMouse {
+		usingMouse = false
+	}
+
+	log.Debug().
+		Bool("using_mouse", usingMouse).
+		Bool("config_using_mouse", a.cfg.UI.UsingMouse).
+		Bool("cli_disable_mouse", a.state.CLI != nil && a.state.CLI.DisableMouse).
+		Msg("Mouse support configuration")
+
+	// Build program options
+	opts := []tea.ProgramOption{tea.WithAltScreen()}
+	if usingMouse {
+		opts = append(opts, tea.WithMouseCellMotion())
+	}
+
+	p := tea.NewProgram(a, opts...)
 	_, err := p.Run()
 	return err
 }

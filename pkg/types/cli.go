@@ -16,9 +16,11 @@ type CLI struct {
 	Category         string
 	ConfigPath       string
 	LogPath          string
+	LogLevel         string
 	Pprof            bool
 	PprofPath        string
 	FlamegraphNative bool
+	DisableMouse     bool
 	LogsParams       LogsParams
 }
 

@@ -23,8 +23,18 @@ type Context struct {
 	TLSCa     string `yaml:"tls_ca"`
 }
 
+type Logging struct {
+	Level string `yaml:"level"` // debug, info, warn, error
+}
+
+type UI struct {
+	UsingMouse bool `yaml:"using_mouse"` // Enable mouse support (default: true)
+}
+
 type Config struct {
 	Contexts []Context `yaml:"contexts"`
+	Logging  Logging   `yaml:"logging"`
+	UI       UI        `yaml:"ui"`
 }
 
 func Load(cliInstance *types.CLI, home string) (*Config, error) {
@@ -39,6 +49,9 @@ func Load(cliInstance *types.CLI, home string) (*Config, error) {
 	}
 
 	var cfg Config
+	// Set default values
+	cfg.UI.UsingMouse = true
+
 	if unmarshalErr := yaml.Unmarshal(data, &cfg); unmarshalErr != nil {
 		return nil, errors.WithStack(unmarshalErr) // Wrap with stack trace
 	}

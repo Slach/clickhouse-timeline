@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -14,19 +15,1326 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// LogFilter represents a filter condition
-type LogFilter struct {
-	Field    string
-	Operator string
-	Value    string
-}
-
 // LogEntry represents a single log entry
 type LogEntry struct {
 	Time      time.Time
 	Message   string
 	Level     string
 	AllFields map[string]interface{}
+}
+
+// logLevelCount is used for sorting and displaying level statistics
+type logLevelCount struct {
+	level string
+	count int
+}
+
+// dropdown field with text input and filtering
+type dropdown struct {
+	label       string
+	input       textinput.Model
+	options     []string
+	filtered    []string
+	selected    int
+	value       string
+	showOptions bool
+	required    bool
+}
+
+func newDropdown(label string, width int, required bool) dropdown {
+	input := textinput.New()
+	input.Width = width
+	input.Placeholder = "Type to filter..."
+
+	return dropdown{
+		label:       label,
+		input:       input,
+		required:    required,
+		showOptions: false,
+		selected:    0,
+	}
+}
+
+func (d *dropdown) SetOptions(options []string) {
+	d.options = options
+	d.filtered = options
+	if len(options) > 0 && d.value == "" {
+		d.value = options[0]
+	}
+	// Update selected index to match current value
+	d.selected = 0
+	if d.value != "" {
+		for i, opt := range d.filtered {
+			if opt == d.value {
+				d.selected = i
+				break
+			}
+		}
+	}
+}
+
+func (d *dropdown) SetValue(value string) {
+	d.value = value
+	d.input.SetValue(value)
+	// Update selected index to match the value in filtered list
+	d.selected = 0
+	for i, opt := range d.filtered {
+		if opt == value {
+			d.selected = i
+			break
+		}
+	}
+}
+
+func (d *dropdown) Focus() {
+	d.input.Focus()
+	d.showOptions = true
+	// Find current value in filtered options and select it
+	if d.value != "" {
+		for i, opt := range d.filtered {
+			if opt == d.value {
+				d.selected = i
+				break
+			}
+		}
+	}
+}
+
+func (d *dropdown) Blur() {
+	d.input.Blur()
+	// When losing focus, confirm the current selection if dropdown was open
+	if d.showOptions && len(d.filtered) > 0 {
+		d.value = d.filtered[d.selected]
+		d.input.SetValue(d.value)
+	}
+	d.showOptions = false
+}
+
+func (d *dropdown) Update(msg tea.Msg) (tea.Cmd, bool) {
+	var cmd tea.Cmd
+	handled := false
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		if !d.showOptions {
+			return nil, false
+		}
+
+		switch msg.String() {
+		case "enter":
+			if len(d.filtered) > 0 {
+				d.value = d.filtered[d.selected]
+				d.input.SetValue(d.value)
+				d.showOptions = false
+				handled = true
+			}
+			return nil, handled
+
+		case "up":
+			if d.selected > 0 {
+				d.selected--
+				handled = true
+			}
+			return nil, handled
+
+		case "down":
+			if d.selected < len(d.filtered)-1 {
+				d.selected++
+				handled = true
+			}
+			return nil, handled
+
+		case "esc":
+			d.showOptions = false
+			d.input.SetValue(d.value)
+			handled = true
+			return nil, handled
+		}
+	}
+
+	oldValue := d.input.Value()
+	d.input, cmd = d.input.Update(msg)
+	newValue := d.input.Value()
+
+	// Filter options when text changes
+	if oldValue != newValue && d.showOptions {
+		d.filterOptions(newValue)
+		d.selected = 0
+	}
+
+	return cmd, false
+}
+
+func (d *dropdown) filterOptions(filter string) {
+	if filter == "" {
+		d.filtered = d.options
+		return
+	}
+
+	filter = strings.ToLower(filter)
+	d.filtered = make([]string, 0)
+
+	for _, opt := range d.options {
+		if strings.Contains(strings.ToLower(opt), filter) {
+			d.filtered = append(d.filtered, opt)
+		}
+	}
+}
+
+func (d *dropdown) View(focused bool) string {
+	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
+	if d.required {
+		labelStyle = labelStyle.Bold(true)
+	}
+
+	label := labelStyle.Render(d.label + ":")
+
+	inputStyle := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("240"))
+
+	if focused {
+		inputStyle = inputStyle.BorderForeground(lipgloss.Color("6"))
+	}
+
+	var content string
+	if d.showOptions && focused {
+		// Show filtered dropdown on new line with scrolling
+		var options strings.Builder
+		maxShow := 5
+
+		// Calculate scroll offset to keep selected item visible
+		scrollOffset := 0
+		if d.selected >= maxShow {
+			// If selected is beyond visible window, scroll to center it
+			scrollOffset = d.selected - maxShow/2
+			if scrollOffset < 0 {
+				scrollOffset = 0
+			}
+			// Don't scroll past the end
+			if scrollOffset+maxShow > len(d.filtered) {
+				scrollOffset = len(d.filtered) - maxShow
+				if scrollOffset < 0 {
+					scrollOffset = 0
+				}
+			}
+		}
+
+		// Show scroll indicator if there are items before
+		if scrollOffset > 0 {
+			options.WriteString(fmt.Sprintf("  ↑ %d more above\n", scrollOffset))
+		}
+
+		// Show visible window
+		endIdx := scrollOffset + maxShow
+		if endIdx > len(d.filtered) {
+			endIdx = len(d.filtered)
+		}
+
+		for i := scrollOffset; i < endIdx; i++ {
+			opt := d.filtered[i]
+			if i == d.selected {
+				options.WriteString(lipgloss.NewStyle().
+					Foreground(lipgloss.Color("0")).
+					Background(lipgloss.Color("6")).
+					Render(fmt.Sprintf("▶ %s", opt)))
+			} else {
+				options.WriteString(fmt.Sprintf("  %s", opt))
+			}
+			options.WriteString("\n")
+		}
+
+		// Show scroll indicator if there are items after
+		if endIdx < len(d.filtered) {
+			options.WriteString(fmt.Sprintf("  ↓ %d more below\n", len(d.filtered)-endIdx))
+		}
+
+		content = lipgloss.JoinVertical(lipgloss.Left,
+			label,
+			inputStyle.Render(d.input.View()),
+			"",
+			options.String(),
+		)
+	} else {
+		// Show compact view with current value on new line
+		value := d.value
+		if value == "" {
+			value = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("<not set>")
+		}
+		content = lipgloss.JoinVertical(lipgloss.Left,
+			label,
+			inputStyle.Render(value),
+		)
+	}
+
+	return content
+}
+
+// logsConfigForm is the logs configuration form
+type logsConfigForm struct {
+	app *App
+
+	// Available options
+	databases    []string
+	tables       []string
+	allFields    []string
+	timeFields   []string
+	timeMsFields []string
+	dateFields   []string
+	textFields   []string
+
+	// Current configuration
+	config LogConfig
+
+	// Dropdowns
+	dbDropdown     dropdown
+	tableDropdown  dropdown
+	msgDropdown    dropdown
+	timeDropdown   dropdown
+	timeMsDropdown dropdown
+	dateDropdown   dropdown
+	levelDropdown  dropdown
+	windowInput    textinput.Model
+
+	// UI state
+	focusIndex    int // 0-7 for fields, 8=Show Logs, 9=Cancel
+	width         int
+	height        int
+	loading       bool
+	loadingWhat   string
+	err           error
+	autoSubmit    bool
+	restoringData bool // True when restoring from saved config (don't autoload cascades)
+}
+
+func newLogsConfigForm(app *App, width, height int, lastConfig *LogConfig) *logsConfigForm {
+	windowInput := textinput.New()
+	windowInput.Placeholder = "1000"
+	windowInput.SetValue("1000")
+	windowInput.Width = 15
+
+	form := &logsConfigForm{
+		app:            app,
+		dbDropdown:     newDropdown("Database", 30, true),
+		tableDropdown:  newDropdown("Table", 30, true),
+		msgDropdown:    newDropdown("Message Field", 30, true),
+		timeDropdown:   newDropdown("Time Field", 30, true),
+		timeMsDropdown: newDropdown("TimeMs Field", 30, false),
+		dateDropdown:   newDropdown("Date Field", 30, false),
+		levelDropdown:  newDropdown("Level Field", 30, false),
+		windowInput:    windowInput,
+		width:          width,
+		height:         height,
+		loading:        true,
+		loadingWhat:    "databases",
+		config: LogConfig{
+			WindowSize: 1000,
+		},
+	}
+
+	// Apply last config if available (remembers previous choices)
+	if lastConfig != nil {
+		form.config = *lastConfig
+		form.restoringData = true // Mark that we're restoring, not making new selections
+		// Set window input immediately (doesn't depend on loading data)
+		if lastConfig.WindowSize > 0 {
+			form.windowInput.SetValue(fmt.Sprint(lastConfig.WindowSize))
+		}
+		log.Debug().
+			Str("database", lastConfig.Database).
+			Str("table", lastConfig.Table).
+			Str("message", lastConfig.MessageField).
+			Str("time", lastConfig.TimeField).
+			Msg("Restoring logs config from lastConfig")
+		// Note: We set dropdown values after options are loaded in the message handlers
+	}
+
+	// Apply CLI parameters if available (CLI params override saved config)
+	if app.state.CLI != nil {
+		params := app.state.CLI.LogsParams
+		if params.Database != "" {
+			form.config.Database = params.Database
+			form.dbDropdown.SetValue(params.Database)
+		}
+		if params.Table != "" {
+			form.config.Table = params.Table
+			form.tableDropdown.SetValue(params.Table)
+		}
+		if params.Message != "" {
+			form.config.MessageField = params.Message
+			form.msgDropdown.SetValue(params.Message)
+		}
+		if params.Time != "" {
+			form.config.TimeField = params.Time
+			form.timeDropdown.SetValue(params.Time)
+		}
+		if params.TimeMs != "" {
+			form.config.TimeMsField = params.TimeMs
+			form.timeMsDropdown.SetValue(params.TimeMs)
+		}
+		if params.Date != "" {
+			form.config.DateField = params.Date
+			form.dateDropdown.SetValue(params.Date)
+		}
+		if params.Level != "" {
+			form.config.LevelField = params.Level
+			form.levelDropdown.SetValue(params.Level)
+		}
+		if params.Window > 0 {
+			form.config.WindowSize = params.Window
+			form.windowInput.SetValue(fmt.Sprint(params.Window))
+		}
+
+		// Check if we can auto-submit
+		if params.Database != "" && params.Table != "" &&
+			params.Message != "" && params.Time != "" {
+			form.autoSubmit = true
+		}
+	}
+
+	return form
+}
+
+func (m *logsConfigForm) Init() tea.Cmd {
+	m.dbDropdown.Focus()
+	return tea.Batch(
+		textinput.Blink,
+		m.loadDatabases(),
+	)
+}
+
+func (m *logsConfigForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+
+	case DatabasesLoadedMsg:
+		m.loading = false
+		if msg.Err != nil {
+			m.err = msg.Err
+			return m, nil
+		}
+		m.databases = msg.Databases
+
+		// Restore database value BEFORE setting options so SetOptions can find and select it
+		if m.config.Database != "" {
+			log.Debug().
+				Str("database", m.config.Database).
+				Bool("restoring", m.restoringData).
+				Msg("Setting database dropdown value from config")
+			m.dbDropdown.value = m.config.Database
+			m.dbDropdown.input.SetValue(m.config.Database)
+		}
+
+		// Now set options - this will update the selected index to match the value
+		m.dbDropdown.SetOptions(m.databases)
+
+		// If we restored a database, load tables
+		if m.config.Database != "" {
+			// If restoring, load tables in background
+			if m.restoringData {
+				m.loading = true
+				m.loadingWhat = "tables"
+				return m, m.loadTables()
+			} else {
+				// User explicitly selected - auto-load tables
+				return m, m.loadTables()
+			}
+		}
+		return m, nil
+
+	case TablesLoadedMsg:
+		m.loading = false
+		if msg.Err != nil {
+			m.err = msg.Err
+			return m, nil
+		}
+		m.tables = msg.Tables
+
+		// Restore table value BEFORE setting options
+		if m.config.Table != "" {
+			m.tableDropdown.value = m.config.Table
+			m.tableDropdown.input.SetValue(m.config.Table)
+		}
+
+		// Now set options - this will update the selected index
+		m.tableDropdown.SetOptions(m.tables)
+
+		// If we restored a table, load columns
+		if m.config.Table != "" {
+			// If restoring, load columns in background
+			if m.restoringData {
+				m.loading = true
+				m.loadingWhat = "columns"
+				return m, m.loadColumns()
+			} else {
+				// User explicitly selected - auto-load columns
+				return m, m.loadColumns()
+			}
+		}
+		return m, nil
+
+	case ColumnsLoadedMsg:
+		m.loading = false
+		if msg.Err != nil {
+			m.err = msg.Err
+			return m, nil
+		}
+
+		m.allFields = msg.AllFields
+		m.timeFields = msg.TimeFields
+		m.timeMsFields = msg.TimeMsFields
+		m.dateFields = msg.DateFields
+		m.textFields = msg.TextFields
+
+		// Smart field type detection for new configurations
+		// Only auto-select if user hasn't already configured these fields
+		if m.config.MessageField == "" && !m.restoringData {
+			// Preferred field names for message (in priority order)
+			preferredMessageNames := []string{"message", "text", "query", "log_message", "msg"}
+
+			// First try to find a preferred field name with String type
+			for _, prefName := range preferredMessageNames {
+				for _, field := range m.textFields {
+					if strings.EqualFold(field, prefName) {
+						if fieldType, ok := msg.FieldTypes[field]; ok {
+							if strings.Contains(fieldType, "String") {
+								m.config.MessageField = field
+								log.Debug().
+									Str("field", field).
+									Str("type", fieldType).
+									Msg("Auto-selected message field based on preferred name and String type")
+								goto messageSelected
+							}
+						}
+					}
+				}
+			}
+
+			// Fallback: Find first String type field for message
+			for _, field := range m.textFields {
+				if fieldType, ok := msg.FieldTypes[field]; ok {
+					if strings.Contains(fieldType, "String") {
+						m.config.MessageField = field
+						log.Debug().
+							Str("field", field).
+							Str("type", fieldType).
+							Msg("Auto-selected message field based on String type (fallback)")
+						break
+					}
+				}
+			}
+		messageSelected:
+		}
+
+		// Auto-select time field if not set
+		if m.config.TimeField == "" && !m.restoringData {
+			// Preferred field names for time (in priority order)
+			preferredTimeNames := []string{"event_time", "time", "timestamp", "event_date_time", "log_time"}
+
+			// First try to find a preferred field name with DateTime type
+			for _, prefName := range preferredTimeNames {
+				for _, field := range m.timeFields {
+					if strings.EqualFold(field, prefName) {
+						m.config.TimeField = field
+						log.Debug().
+							Str("field", field).
+							Msg("Auto-selected time field based on preferred name")
+						goto timeSelected
+					}
+				}
+			}
+
+			// Fallback: Use first DateTime field
+			if len(m.timeFields) > 0 {
+				m.config.TimeField = m.timeFields[0]
+				log.Debug().
+					Str("field", m.timeFields[0]).
+					Msg("Auto-selected time field (first DateTime field)")
+			}
+		timeSelected:
+		}
+
+		if m.config.LevelField == "" && !m.restoringData {
+			// Preferred field names for level (in priority order)
+			preferredLevelNames := []string{"level", "severity", "log_level", "priority"}
+			foundEnum := false // Declare before any goto
+
+			// First try to find a preferred field name with Enum or String type
+			for _, prefName := range preferredLevelNames {
+				for _, field := range m.textFields {
+					if strings.EqualFold(field, prefName) {
+						m.config.LevelField = field
+						if fieldType, ok := msg.FieldTypes[field]; ok {
+							log.Debug().
+								Str("field", field).
+								Str("type", fieldType).
+								Msg("Auto-selected level field based on preferred name")
+						}
+						goto levelSelected
+					}
+				}
+			}
+
+			// Fallback: Find first Enum type field for level
+			for _, field := range m.textFields {
+				if fieldType, ok := msg.FieldTypes[field]; ok {
+					if strings.Contains(fieldType, "Enum") {
+						m.config.LevelField = field
+						foundEnum = true
+						log.Debug().
+							Str("field", field).
+							Str("type", fieldType).
+							Msg("Auto-selected level field based on Enum type")
+						break
+					}
+				}
+			}
+			// Fallback to String type if no Enum found
+			if !foundEnum {
+				for _, field := range m.textFields {
+					if fieldType, ok := msg.FieldTypes[field]; ok {
+						if strings.Contains(fieldType, "String") {
+							m.config.LevelField = field
+							log.Debug().
+								Str("field", field).
+								Str("type", fieldType).
+								Msg("Auto-selected level field based on String type (fallback)")
+							break
+						}
+					}
+				}
+			}
+		levelSelected:
+		}
+
+		// Restore field values BEFORE setting options
+		if m.config.MessageField != "" {
+			m.msgDropdown.value = m.config.MessageField
+			m.msgDropdown.input.SetValue(m.config.MessageField)
+		}
+		if m.config.TimeField != "" {
+			m.timeDropdown.value = m.config.TimeField
+			m.timeDropdown.input.SetValue(m.config.TimeField)
+		}
+		if m.config.TimeMsField != "" {
+			m.timeMsDropdown.value = m.config.TimeMsField
+			m.timeMsDropdown.input.SetValue(m.config.TimeMsField)
+		}
+		if m.config.DateField != "" {
+			m.dateDropdown.value = m.config.DateField
+			m.dateDropdown.input.SetValue(m.config.DateField)
+		}
+		if m.config.LevelField != "" {
+			m.levelDropdown.value = m.config.LevelField
+			m.levelDropdown.input.SetValue(m.config.LevelField)
+		}
+
+		// Now set options - this will update selected indices
+		m.msgDropdown.SetOptions(m.textFields)
+		m.timeDropdown.SetOptions(m.timeFields)
+
+		timeMsOpts := append([]string{""}, m.timeMsFields...)
+		m.timeMsDropdown.SetOptions(timeMsOpts)
+
+		dateOpts := append([]string{""}, m.dateFields...)
+		m.dateDropdown.SetOptions(dateOpts)
+
+		levelOpts := append([]string{""}, m.textFields...)
+		m.levelDropdown.SetOptions(levelOpts)
+
+		// Mark restoration as complete
+		m.restoringData = false
+
+		// Auto-submit if all required fields are set (CLI mode)
+		if m.autoSubmit {
+			m.autoSubmit = false
+			return m, m.submit()
+		}
+
+		return m, nil
+
+	case tea.KeyMsg:
+		// Check for Esc first, before dropdown processes it
+		if msg.String() == "esc" {
+			// Check if any dropdown has options showing
+			dropdownOpen := m.dbDropdown.showOptions ||
+				m.tableDropdown.showOptions ||
+				m.msgDropdown.showOptions ||
+				m.timeDropdown.showOptions ||
+				m.timeMsDropdown.showOptions ||
+				m.dateDropdown.showOptions ||
+				m.levelDropdown.showOptions
+
+			// If no dropdown is open, exit the form
+			if !dropdownOpen {
+				m.saveCurrentConfig()
+				m.app.SwitchToMainPage("Returned from :logs")
+				return m, nil
+			}
+			// Otherwise, let dropdown handle closing (fall through to focused component)
+		}
+
+		switch msg.String() {
+		case "ctrl+c":
+			m.saveCurrentConfig()
+			m.app.SwitchToMainPage("Returned from :logs")
+			return m, nil
+
+		case "tab":
+			oldFocusIndex := m.focusIndex
+			m.focusIndex = (m.focusIndex + 1) % 10
+			m.updateFocus()
+			// Check if we need to trigger cascading loads after tab
+			return m, m.checkCascadingLoads(oldFocusIndex)
+
+		case "shift+tab":
+			oldFocusIndex := m.focusIndex
+			m.focusIndex = (m.focusIndex + 9) % 10
+			m.updateFocus()
+			// Check if we need to trigger cascading loads after shift+tab
+			return m, m.checkCascadingLoads(oldFocusIndex)
+
+		case "enter":
+			// Handle button presses
+			if m.focusIndex == 8 {
+				// Show Logs button
+				return m, m.submit()
+			} else if m.focusIndex == 9 {
+				// Cancel button
+				m.saveCurrentConfig()
+				m.app.SwitchToMainPage("Returned from :logs")
+				return m, nil
+			}
+			// Otherwise, let dropdown handle enter
+		}
+	}
+
+	// Update focused component
+	var cmd tea.Cmd
+	var handled bool
+
+	switch m.focusIndex {
+	case 0:
+		wasOpen := m.dbDropdown.showOptions
+		cmd, handled = m.dbDropdown.Update(msg)
+		if !handled {
+			// Allow arrow navigation between fields when dropdown is closed
+			if keyMsg, ok := msg.(tea.KeyMsg); ok {
+				switch keyMsg.String() {
+				case "down":
+					oldFocusIndex := m.focusIndex
+					m.focusIndex = 1
+					m.updateFocus()
+					return m, m.checkCascadingLoads(oldFocusIndex)
+				case "up":
+					oldFocusIndex := m.focusIndex
+					m.focusIndex = 9
+					m.updateFocus()
+					return m, m.checkCascadingLoads(oldFocusIndex)
+				}
+			}
+		}
+
+		// Check if dropdown was just closed (selection made)
+		nowClosed := !m.dbDropdown.showOptions
+		if wasOpen && nowClosed {
+			// Dropdown was closed, move to next field
+			m.focusIndex = 1
+			m.updateFocus()
+		}
+
+		if m.dbDropdown.value != m.config.Database {
+			m.config.Database = m.dbDropdown.value
+			if !m.dbDropdown.showOptions {
+				// User explicitly changed selection - clear restoration flag
+				m.restoringData = false
+				// Load tables when selection is confirmed
+				m.loading = true
+				m.loadingWhat = "tables"
+				return m, tea.Batch(cmd, m.loadTables())
+			}
+		}
+	case 1:
+		wasOpen := m.tableDropdown.showOptions
+		cmd, handled = m.tableDropdown.Update(msg)
+		if !handled {
+			if keyMsg, ok := msg.(tea.KeyMsg); ok {
+				switch keyMsg.String() {
+				case "down":
+					oldFocusIndex := m.focusIndex
+					m.focusIndex = 2
+					m.updateFocus()
+					return m, m.checkCascadingLoads(oldFocusIndex)
+				case "up":
+					oldFocusIndex := m.focusIndex
+					m.focusIndex = 0
+					m.updateFocus()
+					return m, m.checkCascadingLoads(oldFocusIndex)
+				}
+			}
+		}
+
+		// Check if dropdown was just closed (selection made)
+		nowClosed := !m.tableDropdown.showOptions
+		if wasOpen && nowClosed {
+			// Dropdown was closed, move to next field
+			m.focusIndex = 2
+			m.updateFocus()
+		}
+
+		if m.tableDropdown.value != m.config.Table {
+			m.config.Table = m.tableDropdown.value
+			if !m.tableDropdown.showOptions {
+				// User explicitly changed selection - clear restoration flag
+				m.restoringData = false
+				// Load columns when selection is confirmed
+				m.loading = true
+				m.loadingWhat = "columns"
+				return m, tea.Batch(cmd, m.loadColumns())
+			}
+		}
+	case 2:
+		wasOpen := m.msgDropdown.showOptions
+		cmd, handled = m.msgDropdown.Update(msg)
+		if !handled {
+			if keyMsg, ok := msg.(tea.KeyMsg); ok {
+				switch keyMsg.String() {
+				case "down":
+					m.focusIndex = 3
+					m.updateFocus()
+					return m, nil
+				case "up":
+					m.focusIndex = 1
+					m.updateFocus()
+					return m, nil
+				}
+			}
+		}
+
+		// Check if dropdown was just closed (selection made)
+		nowClosed := !m.msgDropdown.showOptions
+		if wasOpen && nowClosed {
+			// Dropdown was closed, move to next field
+			m.focusIndex = 3
+			m.updateFocus()
+		}
+
+		m.config.MessageField = m.msgDropdown.value
+	case 3:
+		wasOpen := m.timeDropdown.showOptions
+		cmd, handled = m.timeDropdown.Update(msg)
+		if !handled {
+			if keyMsg, ok := msg.(tea.KeyMsg); ok {
+				switch keyMsg.String() {
+				case "down":
+					m.focusIndex = 4
+					m.updateFocus()
+					return m, nil
+				case "up":
+					m.focusIndex = 2
+					m.updateFocus()
+					return m, nil
+				}
+			}
+		}
+
+		// Check if dropdown was just closed (selection made)
+		nowClosed := !m.timeDropdown.showOptions
+		if wasOpen && nowClosed {
+			// Dropdown was closed, move to next field
+			m.focusIndex = 4
+			m.updateFocus()
+		}
+
+		m.config.TimeField = m.timeDropdown.value
+	case 4:
+		wasOpen := m.timeMsDropdown.showOptions
+		cmd, handled = m.timeMsDropdown.Update(msg)
+		if !handled {
+			if keyMsg, ok := msg.(tea.KeyMsg); ok {
+				switch keyMsg.String() {
+				case "down":
+					m.focusIndex = 5
+					m.updateFocus()
+					return m, nil
+				case "up":
+					m.focusIndex = 3
+					m.updateFocus()
+					return m, nil
+				}
+			}
+		}
+
+		// Check if dropdown was just closed (selection made)
+		nowClosed := !m.timeMsDropdown.showOptions
+		if wasOpen && nowClosed {
+			// Dropdown was closed, move to next field
+			m.focusIndex = 5
+			m.updateFocus()
+		}
+
+		m.config.TimeMsField = m.timeMsDropdown.value
+	case 5:
+		wasOpen := m.dateDropdown.showOptions
+		cmd, handled = m.dateDropdown.Update(msg)
+		if !handled {
+			if keyMsg, ok := msg.(tea.KeyMsg); ok {
+				switch keyMsg.String() {
+				case "down":
+					m.focusIndex = 6
+					m.updateFocus()
+					return m, nil
+				case "up":
+					m.focusIndex = 4
+					m.updateFocus()
+					return m, nil
+				}
+			}
+		}
+
+		// Check if dropdown was just closed (selection made)
+		nowClosed := !m.dateDropdown.showOptions
+		if wasOpen && nowClosed {
+			// Dropdown was closed, move to next field
+			m.focusIndex = 6
+			m.updateFocus()
+		}
+
+		m.config.DateField = m.dateDropdown.value
+	case 6:
+		wasOpen := m.levelDropdown.showOptions
+		cmd, handled = m.levelDropdown.Update(msg)
+		if !handled {
+			if keyMsg, ok := msg.(tea.KeyMsg); ok {
+				switch keyMsg.String() {
+				case "down":
+					m.focusIndex = 7
+					m.updateFocus()
+					return m, nil
+				case "up":
+					m.focusIndex = 5
+					m.updateFocus()
+					return m, nil
+				}
+			}
+		}
+
+		// Check if dropdown was just closed (selection made)
+		nowClosed := !m.levelDropdown.showOptions
+		if wasOpen && nowClosed {
+			// Dropdown was closed, move to next field
+			m.focusIndex = 7
+			m.updateFocus()
+		}
+
+		m.config.LevelField = m.levelDropdown.value
+	case 7:
+		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			switch keyMsg.String() {
+			case "down":
+				m.focusIndex = 8
+				m.updateFocus()
+				return m, nil
+			case "up":
+				m.focusIndex = 6
+				m.updateFocus()
+				return m, nil
+			}
+		}
+		m.windowInput, cmd = m.windowInput.Update(msg)
+	case 8:
+		// Show Logs button
+		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			switch keyMsg.String() {
+			case "down":
+				m.focusIndex = 9
+				m.updateFocus()
+				return m, nil
+			case "up":
+				m.focusIndex = 7
+				m.updateFocus()
+				return m, nil
+			case "right":
+				m.focusIndex = 9
+				m.updateFocus()
+				return m, nil
+			}
+		}
+	case 9:
+		// Cancel button
+		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			switch keyMsg.String() {
+			case "down":
+				m.focusIndex = 0
+				m.updateFocus()
+				return m, nil
+			case "up":
+				m.focusIndex = 8
+				m.updateFocus()
+				return m, nil
+			case "left":
+				m.focusIndex = 8
+				m.updateFocus()
+				return m, nil
+			}
+		}
+	}
+
+	cmds = append(cmds, cmd)
+	return m, tea.Batch(cmds...)
+}
+
+func (m *logsConfigForm) updateFocus() {
+	m.dbDropdown.Blur()
+	m.tableDropdown.Blur()
+	m.msgDropdown.Blur()
+	m.timeDropdown.Blur()
+	m.timeMsDropdown.Blur()
+	m.dateDropdown.Blur()
+	m.levelDropdown.Blur()
+	m.windowInput.Blur()
+
+	switch m.focusIndex {
+	case 0:
+		m.dbDropdown.Focus()
+	case 1:
+		m.tableDropdown.Focus()
+	case 2:
+		m.msgDropdown.Focus()
+	case 3:
+		m.timeDropdown.Focus()
+	case 4:
+		m.timeMsDropdown.Focus()
+	case 5:
+		m.dateDropdown.Focus()
+	case 6:
+		m.levelDropdown.Focus()
+	case 7:
+		m.windowInput.Focus()
+	}
+}
+
+// checkCascadingLoads checks if database or table values changed and triggers cascading loads
+func (m *logsConfigForm) checkCascadingLoads(oldFocusIndex int) tea.Cmd {
+	// Check if we just left the database dropdown (index 0)
+	if oldFocusIndex == 0 && m.dbDropdown.value != m.config.Database {
+		m.config.Database = m.dbDropdown.value
+		// User changed database via tab - clear restoration flag and load tables
+		m.restoringData = false
+		m.loading = true
+		m.loadingWhat = "tables"
+		return m.loadTables()
+	}
+
+	// Check if we just left the table dropdown (index 1)
+	if oldFocusIndex == 1 && m.tableDropdown.value != m.config.Table {
+		m.config.Table = m.tableDropdown.value
+		// User changed table via tab - clear restoration flag and load columns
+		m.restoringData = false
+		m.loading = true
+		m.loadingWhat = "columns"
+		return m.loadColumns()
+	}
+
+	return nil
+}
+
+func (m *logsConfigForm) saveCurrentConfig() {
+	// Save current form state for next time (even on cancel)
+	// This preserves user choices across sessions
+	m.config.Database = m.dbDropdown.value
+	m.config.Table = m.tableDropdown.value
+	m.config.MessageField = m.msgDropdown.value
+	m.config.TimeField = m.timeDropdown.value
+	m.config.TimeMsField = m.timeMsDropdown.value
+	m.config.DateField = m.dateDropdown.value
+	m.config.LevelField = m.levelDropdown.value
+
+	if windowStr := m.windowInput.Value(); windowStr != "" {
+		if w, err := strconv.Atoi(windowStr); err == nil && w > 0 {
+			m.config.WindowSize = w
+		}
+	}
+
+	configCopy := m.config
+	m.app.lastLogsConfig = &configCopy
+
+	log.Debug().
+		Str("database", configCopy.Database).
+		Str("table", configCopy.Table).
+		Str("message", configCopy.MessageField).
+		Str("time", configCopy.TimeField).
+		Msg("Saved logs config")
+}
+
+func (m *logsConfigForm) View() string {
+	if m.err != nil {
+		return lipgloss.NewStyle().
+			Foreground(lipgloss.Color("9")).
+			Render(fmt.Sprintf("Error: %v\n\nPress ESC to return", m.err))
+	}
+
+	// Title with optional loading indicator
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+	titleText := "Log Explorer Configuration"
+	if m.loading {
+		loadingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+		titleText += " " + loadingStyle.Render(fmt.Sprintf("(loading %s...)", m.loadingWhat))
+	}
+	title := titleStyle.Render(titleText)
+
+	// Form fields in two columns
+	leftCol := lipgloss.JoinVertical(lipgloss.Left,
+		m.dbDropdown.View(m.focusIndex == 0),
+		"",
+		m.tableDropdown.View(m.focusIndex == 1),
+		"",
+		m.msgDropdown.View(m.focusIndex == 2),
+		"",
+		m.timeDropdown.View(m.focusIndex == 3),
+	)
+
+	rightCol := lipgloss.JoinVertical(lipgloss.Left,
+		m.timeMsDropdown.View(m.focusIndex == 4),
+		"",
+		m.dateDropdown.View(m.focusIndex == 5),
+		"",
+		m.levelDropdown.View(m.focusIndex == 6),
+		"",
+		lipgloss.JoinVertical(lipgloss.Left,
+			lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Render("Window Size:"),
+			lipgloss.NewStyle().
+				BorderStyle(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("240")).
+				Render(m.windowInput.View()),
+		),
+	)
+
+	form := lipgloss.JoinHorizontal(lipgloss.Top, leftCol, "    ", rightCol)
+
+	// Buttons at bottom left
+	buttonStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("0")).
+		Background(lipgloss.Color("6")).
+		Padding(0, 2)
+
+	buttonStyleInactive := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("15")).
+		Background(lipgloss.Color("240")).
+		Padding(0, 2)
+
+	var showLogsBtn, cancelBtn string
+	if m.focusIndex == 8 {
+		showLogsBtn = buttonStyle.Render("Show Logs")
+	} else {
+		showLogsBtn = buttonStyleInactive.Render("Show Logs")
+	}
+
+	if m.focusIndex == 9 {
+		cancelBtn = buttonStyle.Render("Cancel")
+	} else {
+		cancelBtn = buttonStyleInactive.Render("Cancel")
+	}
+
+	buttons := lipgloss.JoinHorizontal(lipgloss.Left, showLogsBtn, "  ", cancelBtn)
+
+	// Help
+	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	help := helpStyle.Render("Tab/↑↓: Navigate | Enter: Select/Confirm | ←→: Switch buttons | Type: Filter | Esc: Cancel")
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		title,
+		"",
+		form,
+		"",
+		buttons,
+		"",
+		help,
+	)
+
+	return content
+}
+
+func (m *logsConfigForm) submit() tea.Cmd {
+	// Sync dropdown values to config before validation
+	m.config.Database = m.dbDropdown.value
+	m.config.Table = m.tableDropdown.value
+	m.config.MessageField = m.msgDropdown.value
+	m.config.TimeField = m.timeDropdown.value
+	m.config.TimeMsField = m.timeMsDropdown.value
+	m.config.DateField = m.dateDropdown.value
+	m.config.LevelField = m.levelDropdown.value
+
+	log.Debug().
+		Str("database", m.config.Database).
+		Str("table", m.config.Table).
+		Str("message", m.config.MessageField).
+		Str("time", m.config.TimeField).
+		Msg("Submitting logs config")
+
+	// Validate required fields
+	if m.config.Database == "" || m.config.Table == "" ||
+		m.config.MessageField == "" || m.config.TimeField == "" {
+		m.err = fmt.Errorf("database, table, message field and time field are required")
+		return nil
+	}
+
+	// Parse window size
+	if windowStr := m.windowInput.Value(); windowStr != "" {
+		if w, err := strconv.Atoi(windowStr); err == nil && w > 0 {
+			m.config.WindowSize = w
+		}
+	}
+
+	// Store all fields in config
+	m.config.AllFields = m.allFields
+
+	// Save config for next time (memory persistence)
+	configCopy := m.config
+	m.app.lastLogsConfig = &configCopy
+
+	return func() tea.Msg {
+		return LogsConfigMsg{Config: m.config}
+	}
+}
+
+func (m *logsConfigForm) loadDatabases() tea.Cmd {
+	return func() tea.Msg {
+		if m.app.state.ClickHouse == nil {
+			return DatabasesLoadedMsg{Err: fmt.Errorf("not connected to ClickHouse")}
+		}
+
+		rows, err := m.app.state.ClickHouse.Query("SELECT name FROM system.databases ORDER BY name")
+		if err != nil {
+			return DatabasesLoadedMsg{Err: err}
+		}
+		defer rows.Close()
+
+		var databases []string
+		for rows.Next() {
+			var db string
+			if err := rows.Scan(&db); err != nil {
+				log.Error().Err(err).Msg("error scanning database name")
+				continue
+			}
+			databases = append(databases, db)
+		}
+
+		return DatabasesLoadedMsg{Databases: databases}
+	}
+}
+
+func (m *logsConfigForm) loadTables() tea.Cmd {
+	return func() tea.Msg {
+		if m.app.state.ClickHouse == nil {
+			return TablesLoadedMsg{Err: fmt.Errorf("not connected to ClickHouse")}
+		}
+
+		query := fmt.Sprintf("SHOW TABLES FROM `%s`", m.config.Database)
+		rows, err := m.app.state.ClickHouse.Query(query)
+		if err != nil {
+			return TablesLoadedMsg{Err: err}
+		}
+		defer rows.Close()
+
+		var tables []string
+		for rows.Next() {
+			var tbl string
+			if err := rows.Scan(&tbl); err != nil {
+				log.Error().Err(err).Msg("error scanning table name")
+				continue
+			}
+			tables = append(tables, tbl)
+		}
+
+		return TablesLoadedMsg{Tables: tables}
+	}
+}
+
+func (m *logsConfigForm) loadColumns() tea.Cmd {
+	return func() tea.Msg {
+		if m.app.state.ClickHouse == nil {
+			return ColumnsLoadedMsg{Err: fmt.Errorf("not connected to ClickHouse")}
+		}
+
+		query := fmt.Sprintf(
+			"SELECT name, type FROM system.columns WHERE database='%s' AND table='%s' ORDER BY name",
+			m.config.Database, m.config.Table,
+		)
+		rows, err := m.app.state.ClickHouse.Query(query)
+		if err != nil {
+			return ColumnsLoadedMsg{Err: err}
+		}
+		defer rows.Close()
+
+		var allFields, timeFields, timeMsFields, dateFields, textFields []string
+		fieldTypes := make(map[string]string)
+
+		for rows.Next() {
+			var fieldName, fieldType string
+			if err := rows.Scan(&fieldName, &fieldType); err != nil {
+				log.Error().Err(err).Msg("error scanning column info")
+				continue
+			}
+
+			allFields = append(allFields, fieldName)
+			fieldTypes[fieldName] = fieldType
+
+			// Categorize fields by type
+			if strings.Contains(fieldType, "DateTime64") {
+				timeMsFields = append(timeMsFields, fieldName)
+			} else if strings.Contains(fieldType, "DateTime") {
+				timeFields = append(timeFields, fieldName)
+			} else if strings.Contains(fieldType, "Date") {
+				dateFields = append(dateFields, fieldName)
+			}
+
+			// Text fields (for message and level)
+			if !strings.Contains(fieldType, "Array") &&
+				!strings.Contains(fieldType, "Tuple") &&
+				!strings.Contains(fieldType, "Map") {
+				textFields = append(textFields, fieldName)
+			}
+		}
+
+		return ColumnsLoadedMsg{
+			AllFields:    allFields,
+			TimeFields:   timeFields,
+			TimeMsFields: timeMsFields,
+			DateFields:   dateFields,
+			TextFields:   textFields,
+			FieldTypes:   fieldTypes,
+		}
+	}
+}
+
+// Message types for async operations
+type DatabasesLoadedMsg struct {
+	Databases []string
+	Err       error
+}
+
+type TablesLoadedMsg struct {
+	Tables []string
+	Err    error
+}
+
+type ColumnsLoadedMsg struct {
+	AllFields    []string
+	TimeFields   []string
+	TimeMsFields []string
+	DateFields   []string
+	TextFields   []string
+	FieldTypes   map[string]string // Map of field name to type
+	Err          error
+}
+
+type LogsConfigMsg struct {
+	Config LogConfig
 }
 
 // LogConfig holds configuration for log viewing
@@ -39,248 +1347,130 @@ type LogConfig struct {
 	DateField    string
 	LevelField   string
 	WindowSize   int
+	AllFields    []string // All fields available in the table (for filtering)
+}
+
+// handleLogsCommand shows the logs configuration form
+func (a *App) handleLogsCommand() tea.Cmd {
+	if a.state.ClickHouse == nil {
+		a.SwitchToMainPage("Error: Please connect to a ClickHouse instance first using :connect command")
+		return nil
+	}
+
+	// Show configuration form with last used config if available
+	form := newLogsConfigForm(a, a.width, a.height, a.lastLogsConfig)
+	a.logsHandler = form
+	a.currentPage = pageLogs
+
+	return form.Init()
 }
 
 // LogsDataMsg is sent when log data is loaded
 type LogsDataMsg struct {
-	Entries        []LogEntry
-	FirstEntryTime time.Time
-	LastEntryTime  time.Time
-	TotalRows      int
-	LevelCounts    map[string]int
-	Err            error
+	Entries         []LogEntry
+	FirstEntryTime  time.Time
+	LastEntryTime   time.Time
+	TotalRows       int
+	LevelCounts     map[string]int
+	LevelTimeSeries map[string][]float64 // Time-bucketed counts per level for sparkline
+	TimeLabels      []string             // Time labels for buckets
+	Err             error
 }
 
-// LogsConfigMsg is sent when configuration is completed
-type LogsConfigMsg struct {
-	Config LogConfig
-}
-
-// logsConfigForm is the configuration form for log viewing
-type logsConfigForm struct {
-	databases     []string
-	tables        []string
-	allFields     []string
-	timeFields    []string
-	timeMsFields  []string
-	dateFields    []string
-	messageFields []string
-
-	dbInput        textinput.Model
-	tableInput     textinput.Model
-	msgFieldInput  textinput.Model
-	timeFieldInput textinput.Model
-	windowInput    textinput.Model
-
-	currentField int // 0=db, 1=table, 2=msg, 3=time, 4=window
-	width        int
-	height       int
-	loading      bool
-	err          error
-}
-
-func newLogsConfigForm(width, height int) logsConfigForm {
-	dbInput := textinput.New()
-	dbInput.Placeholder = "database name"
-	dbInput.Width = 40
-	dbInput.Focus()
-
-	tableInput := textinput.New()
-	tableInput.Placeholder = "table name"
-	tableInput.Width = 40
-
-	msgFieldInput := textinput.New()
-	msgFieldInput.Placeholder = "message field name"
-	msgFieldInput.Width = 40
-
-	timeFieldInput := textinput.New()
-	timeFieldInput.Placeholder = "time field name"
-	timeFieldInput.Width = 40
-
-	windowInput := textinput.New()
-	windowInput.Placeholder = "1000"
-	windowInput.SetValue("1000")
-	windowInput.Width = 40
-
-	return logsConfigForm{
-		dbInput:        dbInput,
-		tableInput:     tableInput,
-		msgFieldInput:  msgFieldInput,
-		timeFieldInput: timeFieldInput,
-		windowInput:    windowInput,
-		currentField:   0,
-		width:          width,
-		height:         height,
-	}
-}
-
-func (m logsConfigForm) Init() tea.Cmd {
-	return textinput.Blink
-}
-
-func (m logsConfigForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
-
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "esc", "q":
-			return m, func() tea.Msg {
-				return tea.KeyMsg{Type: tea.KeyEsc}
-			}
-		case "tab", "down":
-			m.currentField = (m.currentField + 1) % 5
-			m.updateFocus()
-		case "shift+tab", "up":
-			m.currentField = (m.currentField + 4) % 5
-			m.updateFocus()
-		case "enter":
-			// Validate and submit
-			if m.dbInput.Value() == "" || m.tableInput.Value() == "" ||
-				m.msgFieldInput.Value() == "" || m.timeFieldInput.Value() == "" {
-				return m, nil
-			}
-
-			windowSize, _ := strconv.Atoi(m.windowInput.Value())
-			if windowSize == 0 {
-				windowSize = 1000
-			}
-
-			config := LogConfig{
-				Database:     m.dbInput.Value(),
-				Table:        m.tableInput.Value(),
-				MessageField: m.msgFieldInput.Value(),
-				TimeField:    m.timeFieldInput.Value(),
-				WindowSize:   windowSize,
-			}
-
-			return m, func() tea.Msg {
-				return LogsConfigMsg{Config: config}
-			}
-		}
-	}
-
-	// Update the active input
-	switch m.currentField {
-	case 0:
-		m.dbInput, cmd = m.dbInput.Update(msg)
-	case 1:
-		m.tableInput, cmd = m.tableInput.Update(msg)
-	case 2:
-		m.msgFieldInput, cmd = m.msgFieldInput.Update(msg)
-	case 3:
-		m.timeFieldInput, cmd = m.timeFieldInput.Update(msg)
-	case 4:
-		m.windowInput, cmd = m.windowInput.Update(msg)
-	}
-
-	return m, cmd
-}
-
-func (m *logsConfigForm) updateFocus() {
-	m.dbInput.Blur()
-	m.tableInput.Blur()
-	m.msgFieldInput.Blur()
-	m.timeFieldInput.Blur()
-	m.windowInput.Blur()
-
-	switch m.currentField {
-	case 0:
-		m.dbInput.Focus()
-	case 1:
-		m.tableInput.Focus()
-	case 2:
-		m.msgFieldInput.Focus()
-	case 3:
-		m.timeFieldInput.Focus()
-	case 4:
-		m.windowInput.Focus()
-	}
-}
-
-func (m logsConfigForm) View() string {
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
-	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
-	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-
-	var sb strings.Builder
-	sb.WriteString(titleStyle.Render("Log Explorer Configuration"))
-	sb.WriteString("\n\n")
-
-	// Database
-	sb.WriteString(labelStyle.Render("Database:"))
-	sb.WriteString("\n")
-	sb.WriteString(m.dbInput.View())
-	sb.WriteString("\n\n")
-
-	// Table
-	sb.WriteString(labelStyle.Render("Table:"))
-	sb.WriteString("\n")
-	sb.WriteString(m.tableInput.View())
-	sb.WriteString("\n\n")
-
-	// Message Field
-	sb.WriteString(labelStyle.Render("Message Field:"))
-	sb.WriteString("\n")
-	sb.WriteString(m.msgFieldInput.View())
-	sb.WriteString("\n\n")
-
-	// Time Field
-	sb.WriteString(labelStyle.Render("Time Field:"))
-	sb.WriteString("\n")
-	sb.WriteString(m.timeFieldInput.View())
-	sb.WriteString("\n\n")
-
-	// Window Size
-	sb.WriteString(labelStyle.Render("Window Size:"))
-	sb.WriteString("\n")
-	sb.WriteString(m.windowInput.View())
-	sb.WriteString("\n\n")
-
-	// Help
-	sb.WriteString(helpStyle.Render("Tab/Shift+Tab: Navigate | Enter: Continue | Esc: Cancel"))
-
-	// Wrap in border
-	borderStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("6")).
-		Padding(1, 2)
-
-	return borderStyle.Render(sb.String())
+// timeRange represents a time range for zoom functionality
+type timeRange struct {
+	from time.Time
+	to   time.Time
 }
 
 // logsViewer is the main log viewer
 type logsViewer struct {
-	config         LogConfig
-	table          widgets.FilteredTable
-	filters        []LogFilter
-	entries        []LogEntry
-	firstEntryTime time.Time
-	lastEntryTime  time.Time
-	totalRows      int
-	levelCounts    map[string]int
-	loading        bool
-	err            error
-	width          int
-	height         int
-	showDetails    bool
-	selectedEntry  LogEntry
+	config          LogConfig
+	table           widgets.FilteredTable
+	entries         []LogEntry
+	firstEntryTime  time.Time
+	lastEntryTime   time.Time
+	totalRows       int
+	levelCounts     map[string]int
+	levelTimeSeries map[string][]float64 // Time-bucketed counts per level for sparkline
+	timeLabels      []string             // Time labels for buckets
+	bucketInterval  int                  // Seconds per bucket
+	loading         bool
+	err             error
+	width                   int
+	height                  int
+	tableHeight             int // Current table height
+	measuredWidgetOverhead  int // Measured overhead: actual rendered lines - allocated height
+	showDetails             bool
+	selectedEntry           LogEntry
+	offset                  int  // Current offset for pagination
+	app                     *App // Reference to app for triggering data loads
+
+	// Interactive sparkline navigation
+	overviewMode   bool        // true = overview visible, false = hidden
+	focusOverview  bool        // true = overview has focus, false = table has focus
+	selectedLevel  int         // 0-3 (error, warning, info, debug)
+	selectedBucket int         // 0 to len(timeLabels)-1
+	zoomStack      []timeRange // History of time ranges for zoom out
+	originalRange  timeRange   // Original time range before any zoom
+
+	// Zoom menu
+	showZoomMenu bool // Show zoom menu
+	zoomMenuIdx  int  // Selected menu item (0-3)
 }
 
 func newLogsViewer(config LogConfig, width, height int) logsViewer {
-	tableModel := widgets.NewFilteredTable(
-		"Log Entries",
-		[]string{"Time", "Level", "Message"},
+	// Calculate column widths to use 100% screen width
+	// Time: 23 chars for "2006-01-02 15:04:05.000"
+	// Message: rest of available width (no separate Level column)
+	timeWidth := 23
+
+	// Account for table borders only (padding is included in column widths):
+	// Left border (1) + column separator (1) + right border (1) = 3 chars
+	borderOverhead := 3
+	messageWidth := width - timeWidth - borderOverhead
+	if messageWidth < 30 {
+		messageWidth = 30
+	}
+
+	headers := []string{"time", "message"}
+	widths := []int{timeWidth, messageWidth}
+
+	// Calculate initial table height
+	// This is just a starting estimate - will be recalculated after first data load
+	// when we can measure the actual title and overview rendering
+	initialTableHeight := height - 10 // Conservative estimate
+	if initialTableHeight < 5 {
+		initialTableHeight = 5
+	}
+
+	log.Debug().
+		Int("screen_width", width).
+		Int("screen_height", height).
+		Int("time_width", timeWidth).
+		Int("message_width", messageWidth).
+		Int("border_overhead", borderOverhead).
+		Int("initial_table_height", initialTableHeight).
+		Int("total_used", timeWidth+messageWidth+borderOverhead).
+		Msg(">>> Logs table dimensions calculation")
+
+	tableModel := widgets.NewFilteredTableBubbleWithWidths(
+		"",
+		headers,
+		widths,
 		width,
-		height-10,
+		initialTableHeight,
 	)
 
 	return logsViewer{
-		config:  config,
-		table:   tableModel,
-		loading: true,
-		width:   width,
-		height:  height,
+		config:                 config,
+		table:                  tableModel,
+		loading:                true,
+		width:                  width,
+		height:                 height,
+		tableHeight:            initialTableHeight,
+		measuredWidgetOverhead: 2, // Initial guess, will be measured after first render
+		overviewMode:           true, // Show overview by default
 	}
 }
 
@@ -288,10 +1478,144 @@ func (m logsViewer) Init() tea.Cmd {
 	return nil
 }
 
+// recalculateTableHeight recalculates and updates table height based on current overview mode
+func (m *logsViewer) recalculateTableHeight() {
+	// Calculate actual title lines (title might wrap on narrow terminals)
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+	pageNum := (m.offset / m.config.WindowSize) + 1
+	title := fmt.Sprintf("Log Entries | Page %d (offset: %d, window: %d) | From: %s To: %s",
+		pageNum,
+		m.offset,
+		m.config.WindowSize,
+		m.firstEntryTime.Format("2006-01-02 15:04:05.000 MST"),
+		m.lastEntryTime.Format("2006-01-02 15:04:05.000 MST"))
+	renderedTitle := titleStyle.Render(title)
+	titleLines := strings.Count(renderedTitle, "\n") + 1
+
+	var actualOverhead int
+
+	if m.overviewMode && len(m.levelTimeSeries) > 0 {
+		// Overview is visible - calculate actual overhead
+		overview := m.renderOverview()
+		borderStyle := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("240"))
+		renderedOverview := borderStyle.Render(overview)
+
+		overviewLines := strings.Count(renderedOverview, "\n") + 1
+		actualOverhead = titleLines + overviewLines
+	} else {
+		// Overview is hidden or no data - only title line
+		actualOverhead = titleLines
+	}
+
+	// Calculate table height based on actual measurements
+	// Available space = screen height - title - overview
+	availableForTable := m.height - actualOverhead
+
+	// Use measured widget overhead from previous renders
+	// Widget overhead = how many extra lines the widget renders beyond what we allocate
+	newTableHeight := availableForTable - m.measuredWidgetOverhead
+
+	if newTableHeight < 5 {
+		newTableHeight = 5
+	}
+
+	log.Debug().
+		Int("screen_height", m.height).
+		Int("title_lines", titleLines).
+		Int("actual_overhead", actualOverhead).
+		Int("available_for_table", availableForTable).
+		Int("measured_widget_overhead", m.measuredWidgetOverhead).
+		Int("old_table_height", m.tableHeight).
+		Int("new_table_height", newTableHeight).
+		Bool("overview_mode", m.overviewMode).
+		Msg(">>> Recalculating table height")
+
+	// Update table height if changed
+	if newTableHeight != m.tableHeight {
+		m.table.SetSize(m.width, newTableHeight)
+		m.tableHeight = newTableHeight
+	}
+}
+
+// getLogLevelColor returns the appropriate color for a log level
+func getLogLevelColor(level string) lipgloss.Color {
+	levelLower := strings.ToLower(level)
+	switch levelLower {
+	case "fatal", "critical", "error", "exception":
+		return lipgloss.Color("9") // Red
+	case "warning", "warn":
+		return lipgloss.Color("11") // Yellow
+	case "debug", "trace":
+		return lipgloss.Color("14") // Cyan
+	case "info", "information", "notice":
+		return lipgloss.Color("10") // Green
+	default:
+		return lipgloss.Color("7") // White/default
+	}
+}
+
 func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+
+		// Recalculate column widths to maintain 100% screen width
+		timeWidth := 23
+		borderOverhead := 3
+		messageWidth := msg.Width - timeWidth - borderOverhead
+		if messageWidth < 30 {
+			messageWidth = 30
+		}
+
+		// Dynamically calculate overhead based on overview visibility
+		var actualOverhead int
+		titleLines := 1
+
+		if m.overviewMode && m.totalRows > 0 {
+			// Overview is visible and we have data - calculate actual overhead
+			overview := m.renderOverview()
+			borderStyle := lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("240"))
+			renderedOverview := borderStyle.Render(overview)
+
+			overviewLines := strings.Count(renderedOverview, "\n") + 1
+			actualOverhead = titleLines + overviewLines
+		} else if m.overviewMode && m.totalRows == 0 {
+			// Overview will be visible but no data yet - use estimate
+			estimatedOverviewLines := 8 // Typical: bar + 4 sparklines + borders + info
+			actualOverhead = titleLines + estimatedOverviewLines
+		} else {
+			// Overview is hidden - only title line
+			actualOverhead = titleLines
+		}
+
+		tableHeight := msg.Height - actualOverhead
+		if tableHeight < 5 {
+			tableHeight = 5
+		}
+
+		log.Debug().
+			Int("new_width", msg.Width).
+			Int("new_height", msg.Height).
+			Int("time_width", timeWidth).
+			Int("message_width", messageWidth).
+			Int("border_overhead", borderOverhead).
+			Int("actual_overhead", actualOverhead).
+			Int("table_height", tableHeight).
+			Bool("overview_mode", m.overviewMode).
+			Msg(">>> Logs table resized")
+
+		// Update table size
+		m.table.SetSize(msg.Width, tableHeight)
+		m.tableHeight = tableHeight
+		return m, nil
+
 	case LogsDataMsg:
 		m.loading = false
 		if msg.Err != nil {
@@ -304,22 +1628,111 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastEntryTime = msg.LastEntryTime
 		m.totalRows = msg.TotalRows
 		m.levelCounts = msg.LevelCounts
+		m.levelTimeSeries = msg.LevelTimeSeries
+		m.timeLabels = msg.TimeLabels
+
+		// Dynamically calculate table height based on overview visibility
+		// First, calculate actual title lines (title might wrap on narrow terminals)
+		titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+		pageNum := (m.offset / m.config.WindowSize) + 1
+		title := fmt.Sprintf("Log Entries | Page %d (offset: %d, window: %d) | From: %s To: %s",
+			pageNum,
+			m.offset,
+			m.config.WindowSize,
+			m.firstEntryTime.Format("2006-01-02 15:04:05.000 MST"),
+			m.lastEntryTime.Format("2006-01-02 15:04:05.000 MST"))
+		renderedTitle := titleStyle.Render(title)
+		titleLines := strings.Count(renderedTitle, "\n") + 1
+
+		var actualOverhead int
+		var overviewLines int
+
+		if m.overviewMode {
+			// Overview is visible - calculate actual overhead
+			overview := m.renderOverview()
+			borderStyle := lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("240"))
+			renderedOverview := borderStyle.Render(overview)
+
+			overviewLines = strings.Count(renderedOverview, "\n") + 1
+			actualOverhead = titleLines + overviewLines
+		} else {
+			// Overview is hidden - only title line
+			overviewLines = 0
+			actualOverhead = titleLines
+		}
+
+		// Calculate table height based on actual measurements
+		// Available space = screen height - title - overview
+		availableForTable := m.height - actualOverhead
+
+		// Use measured widget overhead from previous renders
+		// Widget overhead = how many extra lines the widget renders beyond what we allocate
+		newTableHeight := availableForTable - m.measuredWidgetOverhead
+
+		if newTableHeight < 5 {
+			newTableHeight = 5
+		}
+
+		log.Debug().
+			Int("screen_height", m.height).
+			Int("title_lines", titleLines).
+			Int("overview_lines", overviewLines).
+			Int("actual_overhead", actualOverhead).
+			Int("available_for_table", availableForTable).
+			Int("measured_widget_overhead", m.measuredWidgetOverhead).
+			Int("old_table_height", m.tableHeight).
+			Int("new_table_height", newTableHeight).
+			Bool("overview_mode", m.overviewMode).
+			Msg(">>> Logs dynamic height calculation")
+
+		// Update table height if changed
+		if newTableHeight != m.tableHeight {
+			m.table.SetSize(m.width, newTableHeight)
+			m.tableHeight = newTableHeight
+		}
 
 		// Convert to table rows
 		var rows []table.Row
 		for _, entry := range msg.Entries {
 			timeStr := entry.Time.Format("2006-01-02 15:04:05.000")
+
+			// Apply color to message based on log level
+			messageColor := getLogLevelColor(entry.Level)
+			messageStyled := lipgloss.NewStyle().Foreground(messageColor).Render(entry.Message)
+
 			rowData := table.RowData{
-				"Time":    timeStr,
-				"Level":   entry.Level,
-				"Message": entry.Message,
+				"time":         timeStr,
+				"message":      messageStyled,
+				"_plain_msg":   entry.Message, // Store plain message for matching
+				"_level":       entry.Level,   // Store level for matching
 			}
+
 			rows = append(rows, table.NewRow(rowData))
 		}
 		m.table.SetRows(rows)
 		return m, nil
 
 	case tea.KeyMsg:
+		// Handle zoom menu first (highest priority)
+		if m.showZoomMenu {
+			return m.handleZoomMenuKey(msg)
+		}
+
+		// Handle Tab/Shift+Tab keys for switching focus (when overview mode is active)
+		// BUT: Don't intercept if table is in filter mode - let the filter input handle it
+		if m.overviewMode && (msg.String() == "tab" || msg.String() == "shift+tab") && !m.table.IsFiltering() {
+			m.focusOverview = !m.focusOverview
+			return m, nil
+		}
+
+		// Handle overview navigation when overview has focus
+		if m.overviewMode && m.focusOverview {
+			return m.handleOverviewKey(msg)
+		}
+
+		// Handle details view
 		if m.showDetails {
 			switch msg.String() {
 			case "esc", "q":
@@ -329,19 +1742,67 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Normal table mode keys (or overview mode with table focus)
 		switch msg.String() {
 		case "esc", "q":
+			// If overview is hidden, show it
+			if !m.overviewMode {
+				m.overviewMode = true
+				m.focusOverview = true
+				m.selectedLevel = 0
+				m.selectedBucket = 0
+				m.recalculateTableHeight()
+				return m, nil
+			}
+			// If overview is already visible, exit to main menu
 			return m, func() tea.Msg {
 				return tea.KeyMsg{Type: tea.KeyEsc}
 			}
+		case "ctrl+0":
+			// Toggle overview mode (works even without data)
+			if !m.overviewMode {
+				m.overviewMode = true
+				m.focusOverview = true
+				m.selectedLevel = 0
+				m.selectedBucket = 0
+			} else {
+				// Toggle overview visibility
+				m.overviewMode = !m.overviewMode
+				m.focusOverview = false
+			}
+			m.recalculateTableHeight()
+			return m, nil
 		case "enter":
+			// Don't handle Enter if table is in filter mode - let table widget handle it
+			if m.table.IsFiltering() {
+				// Pass through to table widget to exit filter mode
+				break
+			}
 			// Show details for selected row
 			selected := m.table.HighlightedRow()
 			if selected.Data != nil && len(m.entries) > 0 {
-				// Find corresponding entry
-				timeStr := selected.Data["Time"].(string)
+				// Find corresponding entry by matching time, message, and level
+				// This ensures we find the exact entry even if multiple entries have the same timestamp
+				timeData, ok := selected.Data["time"]
+				if !ok || timeData == nil {
+					return m, nil
+				}
+				timeStr, ok := timeData.(string)
+				if !ok {
+					return m, nil
+				}
+
+				// Get plain message and level for unique matching
+				plainMsgData, _ := selected.Data["_plain_msg"]
+				plainMsg, _ := plainMsgData.(string)
+				levelData, _ := selected.Data["_level"]
+				level, _ := levelData.(string)
+
+				// Search for matching entry
 				for _, entry := range m.entries {
-					if entry.Time.Format("2006-01-02 15:04:05.000") == timeStr {
+					if entry.Time.Format("2006-01-02 15:04:05.000") == timeStr &&
+						entry.Message == plainMsg &&
+						entry.Level == level {
 						m.selectedEntry = entry
 						m.showDetails = true
 						break
@@ -349,17 +1810,199 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
-		case "ctrl+n":
-			// Load newer logs
-			return m, m.loadMoreLogsCmd(true)
-		case "ctrl+p":
-			// Load older logs
-			return m, m.loadMoreLogsCmd(false)
+		case "ctrl+pgdown":
+			// Load next window (older records)
+			if !m.loading && m.app != nil {
+				m.loading = true
+				newOffset := m.offset + m.config.WindowSize
+				m.offset = newOffset
+				log.Debug().
+					Int("new_offset", newOffset).
+					Msg("Loading next window (Ctrl+PgDown)")
+				return m, m.app.fetchLogsDataCmd(m.config, newOffset)
+			}
+			return m, nil
+		case "ctrl+pgup":
+			// Load previous window (newer records)
+			if !m.loading && m.app != nil && m.offset > 0 {
+				m.loading = true
+				newOffset := m.offset - m.config.WindowSize
+				if newOffset < 0 {
+					newOffset = 0
+				}
+				m.offset = newOffset
+				log.Debug().
+					Int("new_offset", newOffset).
+					Msg("Loading previous window (Ctrl+PgUp)")
+				return m, m.app.fetchLogsDataCmd(m.config, newOffset)
+			}
+			return m, nil
 		}
 	}
 
 	m.table, cmd = m.table.Update(msg)
 	return m, cmd
+}
+
+// handleOverviewKey handles key events when in overview/sparkline navigation mode
+func (m logsViewer) handleOverviewKey(msg tea.Msg) (tea.Model, tea.Cmd) {
+	keyMsg, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+
+	// Get available levels for navigation
+	priorityLevels := []string{"error", "warning", "info", "debug"}
+	availableLevels := []string{}
+	for _, level := range priorityLevels {
+		if values, exists := m.levelTimeSeries[level]; exists && len(values) > 0 {
+			availableLevels = append(availableLevels, level)
+		}
+	}
+
+	if len(availableLevels) == 0 || len(m.timeLabels) == 0 {
+		m.overviewMode = false
+		return m, nil
+	}
+
+	// Get the current level name and its data length for bounds checking
+	var currentLevelDataLen int
+	if m.selectedLevel < len(availableLevels) {
+		currentLevelName := availableLevels[m.selectedLevel]
+		currentLevelDataLen = len(m.levelTimeSeries[currentLevelName])
+	} else {
+		currentLevelDataLen = len(m.timeLabels)
+	}
+
+	switch keyMsg.String() {
+	case "up", "k":
+		// Navigate to previous level
+		if m.selectedLevel > 0 {
+			m.selectedLevel--
+			// Adjust bucket if it's beyond the new level's data length
+			newLevelName := availableLevels[m.selectedLevel]
+			newLevelDataLen := len(m.levelTimeSeries[newLevelName])
+			if m.selectedBucket >= newLevelDataLen {
+				m.selectedBucket = newLevelDataLen - 1
+			}
+		}
+
+	case "down", "j":
+		// Navigate to next level
+		if m.selectedLevel < len(availableLevels)-1 {
+			m.selectedLevel++
+			// Adjust bucket if it's beyond the new level's data length
+			newLevelName := availableLevels[m.selectedLevel]
+			newLevelDataLen := len(m.levelTimeSeries[newLevelName])
+			if m.selectedBucket >= newLevelDataLen {
+				m.selectedBucket = newLevelDataLen - 1
+			}
+		}
+
+	case "left", "h":
+		// Navigate to previous bucket
+		if m.selectedBucket > 0 {
+			m.selectedBucket--
+		}
+
+	case "right", "l":
+		// Navigate to next bucket (use current level's data length)
+		if m.selectedBucket < currentLevelDataLen-1 {
+			m.selectedBucket++
+		}
+
+	case "home":
+		// Jump to first bucket
+		m.selectedBucket = 0
+
+	case "end":
+		// Jump to last bucket (use current level's data length)
+		m.selectedBucket = currentLevelDataLen - 1
+
+	case "enter":
+		// Show zoom menu
+		m.showZoomMenu = true
+		m.zoomMenuIdx = 0
+		return m, nil
+	}
+
+	return m, nil
+}
+
+// handleZoomMenuKey handles key events when zoom menu is shown
+func (m logsViewer) handleZoomMenuKey(msg tea.Msg) (tea.Model, tea.Cmd) {
+	keyMsg, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+
+	menuOptions := 4 // Zoom in, Zoom out, Reset, Cancel
+
+	switch keyMsg.String() {
+	case "esc", "q":
+		// Close menu
+		m.showZoomMenu = false
+		return m, nil
+
+	case "up", "k":
+		// Navigate up in menu
+		if m.zoomMenuIdx > 0 {
+			m.zoomMenuIdx--
+		}
+
+	case "down", "j":
+		// Navigate down in menu
+		if m.zoomMenuIdx < menuOptions-1 {
+			m.zoomMenuIdx++
+		}
+
+	case "enter":
+		// Execute selected action
+		return m.executeZoomAction()
+	}
+
+	return m, nil
+}
+
+// executeZoomAction performs the selected zoom menu action
+func (m logsViewer) executeZoomAction() (tea.Model, tea.Cmd) {
+	m.showZoomMenu = false
+
+	switch m.zoomMenuIdx {
+	case 0: // Zoom to this time bucket
+		return m.zoomToBucket()
+	case 1: // Zoom out (restore previous)
+		return m.zoomOut()
+	case 2: // Reset to original range
+		return m.resetZoom()
+	case 3: // Cancel
+		return m, nil
+	}
+
+	return m, nil
+}
+
+// zoomToBucket zooms into the selected time bucket
+func (m logsViewer) zoomToBucket() (tea.Model, tea.Cmd) {
+	// TODO: Implement in Phase 4
+	log.Debug().
+		Int("bucket_index", m.selectedBucket).
+		Msg(">>> Zoom to bucket (not yet implemented)")
+	return m, nil
+}
+
+// zoomOut restores the previous time range from zoom stack
+func (m logsViewer) zoomOut() (tea.Model, tea.Cmd) {
+	// TODO: Implement in Phase 4
+	log.Debug().Msg(">>> Zoom out (not yet implemented)")
+	return m, nil
+}
+
+// resetZoom resets to the original time range
+func (m logsViewer) resetZoom() (tea.Model, tea.Cmd) {
+	// TODO: Implement in Phase 4
+	log.Debug().Msg(">>> Reset zoom (not yet implemented)")
+	return m, nil
 }
 
 func (m logsViewer) View() string {
@@ -375,33 +2018,447 @@ func (m logsViewer) View() string {
 	}
 
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
-	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
-	// Title with stats
-	title := fmt.Sprintf("Log Entries: %s to %s (Total: %d)",
-		m.firstEntryTime.Format("15:04:05"),
-		m.lastEntryTime.Format("15:04:05"),
-		m.totalRows)
-
-	// Level counts
-	var levelStats []string
-	for level, count := range m.levelCounts {
-		levelStats = append(levelStats, fmt.Sprintf("%s:%d", level, count))
+	// Set overview box to use full available width
+	// Width is content width (screen minus borders: left + right = 2)
+	overviewContentWidth := m.width - 2
+	if overviewContentWidth < 40 {
+		overviewContentWidth = 40
 	}
-	stats := strings.Join(levelStats, " | ")
 
-	help := "Enter: Details | Ctrl+N: Newer | Ctrl+P: Older | /: Filter | Esc: Exit"
+	// Change border color based on focus state
+	borderColor := lipgloss.Color("240") // Default: gray when blurred
+	if m.overviewMode && m.focusOverview {
+		borderColor = lipgloss.Color("15") // White when focused
+	}
 
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		titleStyle.Render(title),
-		stats,
-		"",
-		m.table.View(),
-		"",
-		helpStyle.Render(help),
-	)
+	borderStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Width(overviewContentWidth)
+
+	// Title with time range and pagination info
+	pageNum := (m.offset / m.config.WindowSize) + 1
+	title := fmt.Sprintf("Log Entries | Page %d (offset: %d, window: %d) | From: %s To: %s",
+		pageNum,
+		m.offset,
+		m.config.WindowSize,
+		m.firstEntryTime.Format("2006-01-02 15:04:05.000 MST"),
+		m.lastEntryTime.Format("2006-01-02 15:04:05.000 MST"))
+
+	// Set table border color based on focus state
+	tableBorderColor := lipgloss.Color("15") // White (focused)
+	if m.overviewMode && m.focusOverview {
+		tableBorderColor = lipgloss.Color("240") // Gray (blurred)
+	}
+	m.table.SetBorderColor(tableBorderColor)
+
+	// Render title and count actual lines (title might wrap on narrow terminals)
+	renderedTitle := titleStyle.Render(title)
+	titleLines := strings.Count(renderedTitle, "\n") + 1
+
+	// Render table view once to avoid multiple calls
+	tableView := m.table.View()
+	tableViewLines := strings.Count(tableView, "\n") + 1
+
+	// Build overview with timeline bar (only if overview mode is active)
+	var content string
+	var overviewRenderedLines int
+
+	if m.overviewMode {
+		overview := m.renderOverview()
+		overviewRendered := borderStyle.Render(overview)
+		overviewRenderedLines = strings.Count(overviewRendered, "\n") + 1
+
+		// Join all parts using lipgloss to avoid extra newlines
+		// lipgloss.JoinVertical adds exactly one newline between components
+		content = lipgloss.JoinVertical(lipgloss.Left,
+			renderedTitle,
+			overviewRendered,
+			tableView)
+	} else {
+		overviewRenderedLines = 0
+		// No overview, just title and table
+		content = lipgloss.JoinVertical(lipgloss.Left,
+			renderedTitle,
+			tableView)
+	}
+
+	// Count actual rendered lines
+	totalContentLines := strings.Count(content, "\n") + 1
+
+	// Detect and log overflow
+	overflowAmount := totalContentLines - m.height
+	hasOverflow := overflowAmount > 0
+
+	// Debug logging with detailed breakdown
+	log.Debug().
+		Int("screen_height", m.height).
+		Int("title_lines", titleLines).
+		Int("overview_rendered_lines", overviewRenderedLines).
+		Int("table_height_allocated", m.tableHeight).
+		Int("table_view_actual_lines", tableViewLines).
+		Int("total_content_lines", totalContentLines).
+		Int("expected_total", titleLines+overviewRenderedLines+tableViewLines).
+		Int("overflow_amount", overflowAmount).
+		Int("missing_lines", (titleLines+overviewRenderedLines+tableViewLines)-totalContentLines).
+		Bool("overflow", hasOverflow).
+		Bool("overview_mode", m.overviewMode).
+		Bool("focus_overview", m.focusOverview).
+		Str("calculation", fmt.Sprintf("%d(title) + %d(overview) + %d(table) = %d(expected) vs %d(actual)",
+			titleLines, overviewRenderedLines, tableViewLines,
+			titleLines+overviewRenderedLines+tableViewLines, totalContentLines)).
+		Str("title_text", title).
+		Int("title_text_length", len(title)).
+		Int("table_widget_overhead_actual", tableViewLines-m.tableHeight).
+		Msg(">>> Logs layout line counts")
+
+	// Measure actual widget overhead for next calculation
+	// actual overhead = how many lines it rendered - how many we allocated
+	actualWidgetOverhead := tableViewLines - m.tableHeight
+
+	// Update measured overhead if it changed (for next render)
+	if actualWidgetOverhead != m.measuredWidgetOverhead {
+		log.Info().
+			Int("old_measured_overhead", m.measuredWidgetOverhead).
+			Int("new_measured_overhead", actualWidgetOverhead).
+			Msg("Widget overhead measurement updated")
+		// Note: We can't update m here because View() has value receiver
+		// This will be updated on next Update() cycle
+	}
+
+	// If overflow detected, log warning
+	if hasOverflow {
+		log.Warn().
+			Int("overflow_lines", overflowAmount).
+			Int("current_widget_overhead", m.measuredWidgetOverhead).
+			Int("actual_widget_overhead", actualWidgetOverhead).
+			Msg("Layout overflow detected - will adjust on next render")
+	}
+
+	// Show zoom menu instead of normal content when active
+	if m.showZoomMenu {
+		// Render base content dimmed in background
+		dimmedContent := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(content)
+		// Overlay menu on top
+		return dimmedContent + "\n" + m.renderZoomMenu()
+	}
+
+	// Debug: log the first 3 lines of content to verify title is included
+	lines := strings.Split(content, "\n")
+	var preview string
+	if len(lines) > 3 {
+		preview = strings.Join(lines[:3], " | ")
+	} else {
+		preview = strings.Join(lines, " | ")
+	}
+	log.Debug().
+		Str("first_3_lines", preview).
+		Int("total_lines", len(lines)).
+		Msg(">>> Logs View() output preview")
 
 	return content
+}
+
+func (m logsViewer) renderOverview() string {
+	if m.totalRows == 0 {
+		return "No log entries to display"
+	}
+
+	if len(m.levelCounts) == 0 {
+		return fmt.Sprintf("Total log entries: %d (no level field selected for breakdown)", m.totalRows)
+	}
+
+	// Sort levels by count (descending)
+	var sortedLevels []logLevelCount
+	for level, count := range m.levelCounts {
+		sortedLevels = append(sortedLevels, logLevelCount{level, count})
+	}
+
+	// Simple bubble sort by count descending
+	for i := 0; i < len(sortedLevels)-1; i++ {
+		for j := i + 1; j < len(sortedLevels); j++ {
+			if sortedLevels[j].count > sortedLevels[i].count {
+				sortedLevels[i], sortedLevels[j] = sortedLevels[j], sortedLevels[i]
+			}
+		}
+	}
+
+	// Color mapping for log levels (using background colors like old tview version)
+	levelBgColors := map[string]lipgloss.Color{
+		"error":       lipgloss.Color("9"),  // Red
+		"exception":   lipgloss.Color("9"),  // Red
+		"fatal":       lipgloss.Color("9"),  // Red
+		"critical":    lipgloss.Color("9"),  // Red
+		"warning":     lipgloss.Color("11"), // Yellow
+		"warn":        lipgloss.Color("11"), // Yellow
+		"debug":       lipgloss.Color("11"), // Yellow
+		"trace":       lipgloss.Color("11"), // Yellow
+		"info":        lipgloss.Color("10"), // Green
+		"information": lipgloss.Color("10"), // Green
+		"unknown":     lipgloss.Color("8"),  // Gray
+	}
+
+	// Build timeline bar - calculate width dynamically
+	// Content width matches the border's inner width (screen minus left + right borders)
+	contentWidth := m.width - 2
+	if contentWidth < 40 {
+		contentWidth = 40
+	}
+
+	var builder strings.Builder
+	prefixText := fmt.Sprintf("Total: %d | ", m.totalRows)
+	builder.WriteString(prefixText)
+
+	// Calculate available width for bar segments (content minus prefix)
+	availableWidth := contentWidth - len(prefixText)
+	if availableWidth < 20 {
+		availableWidth = 20
+	}
+
+	log.Debug().
+		Int("screen_width", m.width).
+		Int("content_width", contentWidth).
+		Int("prefix_length", len(prefixText)).
+		Int("bar_available_width", availableWidth).
+		Msg(">>> Overview bar width calculation")
+
+	// Create visual bar with background colors
+	for _, lc := range sortedLevels {
+		if lc.count == 0 {
+			continue
+		}
+
+		proportion := float64(lc.count) / float64(m.totalRows)
+		segmentWidth := int(proportion * float64(availableWidth))
+		if segmentWidth == 0 && lc.count > 0 {
+			segmentWidth = 1 // At least 1 char for visible levels
+		}
+
+		// Get background color for this level
+		levelLower := strings.ToLower(lc.level)
+		bgColor := levelBgColors[levelLower]
+		if bgColor == "" {
+			bgColor = lipgloss.Color("6") // Default cyan
+		}
+
+		// Create label text for this segment
+		labelText := fmt.Sprintf("%s:%d", lc.level, lc.count)
+
+		// If segment is wide enough to fit the label, embed it
+		var segment string
+		if segmentWidth >= len(labelText) {
+			// Calculate padding to center the label
+			padding := (segmentWidth - len(labelText)) / 2
+			leftPad := strings.Repeat(" ", padding)
+			rightPad := strings.Repeat(" ", segmentWidth-padding-len(labelText))
+			segment = leftPad + labelText + rightPad
+		} else {
+			// Segment too small for label, just fill with spaces
+			segment = strings.Repeat(" ", segmentWidth)
+		}
+
+		// Apply background color styling
+		segmentStyle := lipgloss.NewStyle().
+			Background(bgColor).
+			Foreground(lipgloss.Color("0")) // Black text on colored background
+		builder.WriteString(segmentStyle.Render(segment))
+
+	}
+
+	// Add sparkline visualization below the bar
+	sparklineData := m.generateSparklineForLevels(sortedLevels)
+	if sparklineData != "" {
+		builder.WriteString("\n")
+		builder.WriteString("Timeline:\n")
+		builder.WriteString(sparklineData)
+	}
+
+	// Add selection info when overview has focus
+	if m.overviewMode {
+		helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // Gray
+
+		if m.focusOverview && m.selectedBucket >= 0 && m.selectedBucket < len(m.timeLabels) {
+			// Get available levels
+			priorityLevels := []string{"error", "warning", "info", "debug"}
+			availableLevels := []string{}
+			for _, level := range priorityLevels {
+				if values, exists := m.levelTimeSeries[level]; exists && len(values) > 0 {
+					availableLevels = append(availableLevels, level)
+				}
+			}
+
+			if m.selectedLevel < len(availableLevels) {
+				levelName := availableLevels[m.selectedLevel]
+				timeLabel := m.timeLabels[m.selectedBucket]
+
+				// Add bounds check before accessing levelTimeSeries array
+				if m.selectedBucket < len(m.levelTimeSeries[levelName]) {
+					value := m.levelTimeSeries[levelName][m.selectedBucket]
+
+					infoStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // Yellow
+
+					infoLine := infoStyle.Render(fmt.Sprintf("[%s @ %s] Value: %.0f events",
+						strings.ToUpper(levelName), timeLabel, value))
+					helpLine := helpStyle.Render(" | ↑↓←→: Navigate | Enter: Zoom | Tab/Shift+Tab: Switch to Table | Esc: Exit")
+
+					builder.WriteString("\n")
+					builder.WriteString(infoLine + helpLine)
+				}
+			}
+		} else if !m.focusOverview {
+			// Overview visible but table has focus
+			builder.WriteString("\n")
+			builder.WriteString(helpStyle.Render("[Table Focus] Tab/Shift+Tab: Switch to Overview | Ctrl+0: Hide Overview | Esc: Exit"))
+		}
+	}
+
+	return builder.String()
+}
+
+// generateSparklineForLevels creates a multi-row sparkline showing level distribution over time
+func (m logsViewer) generateSparklineForLevels(sortedLevels []logLevelCount) string {
+	if len(m.levelTimeSeries) == 0 {
+		return ""
+	}
+
+	// Show top 3-4 priority levels
+	priorityLevels := []string{"error", "warning", "info", "debug"}
+
+	// Validate that all levels have the same number of data points (for width consistency)
+	var expectedWidth int
+	for _, level := range priorityLevels {
+		if values, exists := m.levelTimeSeries[level]; exists && len(values) > 0 {
+			if expectedWidth == 0 {
+				expectedWidth = len(values)
+			} else if len(values) != expectedWidth {
+				log.Warn().
+					Str("level", level).
+					Int("expected_width", expectedWidth).
+					Int("actual_width", len(values)).
+					Msg("Sparkline width mismatch detected")
+			}
+		}
+	}
+
+	var lines []string
+	levelIdx := 0
+	for _, level := range priorityLevels {
+		values, exists := m.levelTimeSeries[level]
+		if !exists || len(values) == 0 {
+			continue
+		}
+
+		// Generate sparkline characters
+		sparklineChars := m.generateSparklineChars(values)
+
+		// Apply color based on level
+		color := getLogLevelColor(level)
+
+		// Build sparkline with individual character styling for cursor
+		var styledSparkline strings.Builder
+		for i, char := range sparklineChars {
+			// Check if this bucket is selected (cursor position)
+			// Only show selection when overview has focus
+			isSelected := m.overviewMode && m.focusOverview && m.selectedLevel == levelIdx && m.selectedBucket == i
+
+			if isSelected {
+				// Highlight selected bucket with inverted colors
+				// Swap foreground and background for clean inline cursor
+				highlightStyle := lipgloss.NewStyle().
+					Foreground(lipgloss.Color("0")).      // Black foreground
+					Background(color).                     // Use level color as background
+					Bold(true)
+				styledSparkline.WriteString(highlightStyle.Render(string(char)))
+			} else {
+				// Normal style
+				normalStyle := lipgloss.NewStyle().Foreground(color)
+				styledSparkline.WriteString(normalStyle.Render(string(char)))
+			}
+		}
+
+		// Add label (uppercase, padded to 10 chars for 14-char total to match bar prefix)
+		label := fmt.Sprintf("  %-10s: ", strings.ToUpper(level))
+		lines = append(lines, label+styledSparkline.String())
+
+		levelIdx++
+
+		// Limit to 4 rows
+		if len(lines) >= 4 {
+			break
+		}
+	}
+
+	if len(lines) == 0 {
+		return ""
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+}
+
+// generateSparklineChars converts values to sparkline characters
+// Zero values are rendered as spaces to show sparse data gaps
+func (m logsViewer) generateSparklineChars(values []float64) []rune {
+	if len(values) == 0 {
+		return []rune{}
+	}
+
+	// Find min/max among non-zero values for proper scaling
+	var minVal, maxVal float64
+	hasNonZero := false
+	for _, v := range values {
+		if v > 0 {
+			if !hasNonZero {
+				minVal = v
+				maxVal = v
+				hasNonZero = true
+			} else {
+				if v < minVal {
+					minVal = v
+				}
+				if v > maxVal {
+					maxVal = v
+				}
+			}
+		}
+	}
+
+	// If all values are zero, return all spaces
+	if !hasNonZero {
+		chars := make([]rune, len(values))
+		for i := range chars {
+			chars[i] = ' '
+		}
+		return chars
+	}
+
+	rangeVal := maxVal - minVal
+	if rangeVal == 0 {
+		rangeVal = 1
+	}
+
+	// Sparkline character set (8 levels)
+	sparks := []rune("▁▂▃▄▅▆▇█")
+	chars := make([]rune, len(values))
+
+	for i, v := range values {
+		if v == 0 {
+			// Show space for empty buckets (sparse data)
+			chars[i] = ' '
+		} else {
+			// Scale non-zero value to sparkline character
+			pos := int(((v - minVal) / rangeVal) * float64(len(sparks)-1))
+			if pos < 0 {
+				pos = 0
+			}
+			if pos >= len(sparks) {
+				pos = len(sparks) - 1
+			}
+			chars[i] = sparks[pos]
+		}
+	}
+
+	return chars
 }
 
 func (m logsViewer) renderDetails() string {
@@ -448,40 +2505,100 @@ func (m logsViewer) renderDetails() string {
 	return borderStyle.Render(sb.String())
 }
 
-func (m logsViewer) loadMoreLogsCmd(newer bool) tea.Cmd {
-	return func() tea.Msg {
-		// TODO: Implement pagination
-		return nil
-	}
+// IsTableFiltering returns true if the table is currently in filter mode
+func (m logsViewer) IsTableFiltering() bool {
+	return m.table.IsFiltering()
 }
 
-// ShowLogs displays the log explorer
-func (a *App) ShowLogs() tea.Cmd {
-	if a.state.ClickHouse == nil {
-		a.SwitchToMainPage("Error: Please connect to a ClickHouse instance first using :connect command")
-		return nil
+// renderZoomMenu renders the zoom action menu
+func (m logsViewer) renderZoomMenu() string {
+	if !m.showZoomMenu {
+		return ""
 	}
 
-	// Show configuration form
-	form := newLogsConfigForm(a.width, a.height)
-	a.logsHandler = form
-	a.currentPage = pageLogs
+	// Get bucket time info for display
+	var bucketTimeInfo string
+	if m.selectedBucket >= 0 && m.selectedBucket < len(m.timeLabels) {
+		bucketTimeInfo = m.timeLabels[m.selectedBucket]
+		// TODO: Add end time when bucketInterval is available
+	}
 
-	return nil
+	// Menu options
+	options := []string{
+		"Zoom to this time bucket",
+		"Zoom out (restore previous)",
+		"Reset to original range",
+		"Cancel",
+	}
+
+	// Disable options if not applicable
+	canZoomOut := len(m.zoomStack) > 0
+	canReset := len(m.zoomStack) > 0
+
+	// Build menu content
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+	selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true) // Yellow
+	normalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("7"))               // White
+	disabledStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))             // Gray
+	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+
+	var content strings.Builder
+	content.WriteString(titleStyle.Render("Zoom to Time Bucket"))
+	content.WriteString("\n")
+	content.WriteString(bucketTimeInfo)
+	content.WriteString("\n\n")
+
+	for i, option := range options {
+		var line string
+		isDisabled := (i == 1 && !canZoomOut) || (i == 2 && !canReset)
+
+		if i == m.zoomMenuIdx {
+			line = "> " + selectedStyle.Render(option)
+		} else if isDisabled {
+			line = "  " + disabledStyle.Render(option)
+		} else {
+			line = "  " + normalStyle.Render(option)
+		}
+		content.WriteString(line)
+		content.WriteString("\n")
+	}
+
+	content.WriteString("\n")
+	content.WriteString(helpStyle.Render("↑↓: Navigate | Enter: Select | Esc: Cancel"))
+
+	// Wrap in border
+	menuStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("6")).
+		Padding(1, 2).
+		Width(45)
+
+	menuBox := menuStyle.Render(content.String())
+
+	// Center the menu on screen
+	return lipgloss.Place(
+		m.width,
+		m.height,
+		lipgloss.Center,
+		lipgloss.Center,
+		menuBox,
+	)
 }
 
 // ShowLogsViewer shows the log viewer with the given configuration
 func (a *App) ShowLogsViewer(config LogConfig) tea.Cmd {
 	viewer := newLogsViewer(config, a.width, a.height)
+	viewer.app = a    // Set app reference for pagination
+	viewer.offset = 0 // Start at offset 0
 	a.logsHandler = viewer
 	a.currentPage = pageLogs
 
 	// Start async data fetch
-	return a.fetchLogsDataCmd(config)
+	return a.fetchLogsDataCmd(config, 0)
 }
 
 // fetchLogsDataCmd fetches log data from ClickHouse
-func (a *App) fetchLogsDataCmd(config LogConfig) tea.Cmd {
+func (a *App) fetchLogsDataCmd(config LogConfig, offset int) tea.Cmd {
 	return func() tea.Msg {
 		// Build query
 		selectFields := []string{config.TimeField, config.MessageField}
@@ -490,12 +2607,13 @@ func (a *App) fetchLogsDataCmd(config LogConfig) tea.Cmd {
 		}
 
 		query := fmt.Sprintf(
-			"SELECT %s FROM `%s`.`%s` ORDER BY %s DESC LIMIT %d",
+			"SELECT %s FROM `%s`.`%s` ORDER BY %s DESC LIMIT %d OFFSET %d",
 			strings.Join(selectFields, ", "),
 			config.Database,
 			config.Table,
 			config.TimeField,
 			config.WindowSize,
+			offset,
 		)
 
 		rows, err := a.state.ClickHouse.Query(query)
@@ -550,17 +2668,203 @@ func (a *App) fetchLogsDataCmd(config LogConfig) tea.Cmd {
 			entries[i], entries[j] = entries[j], entries[i]
 		}
 
+		// Query time-bucketed counts for sparkline visualization
+		// Calculate optimal bucket count based on available width inside overview box
+		// The overview box uses overviewContentWidth = screen_width - 2
+		// Inside that box, we have the content area which uses the full width
+		// Sparkline width = content_width - label_width(14)
+		// Label format: "  ERROR     : " = 14 chars (matches bar prefix "Total: 1000 | ")
+		overviewContentWidth := a.width - 2
+		labelWidth := 14
+		sparklineWidth := overviewContentWidth - labelWidth
+
+		if sparklineWidth < 40 {
+			sparklineWidth = 40 // Minimum width for readability
+		}
+		if sparklineWidth > 200 {
+			sparklineWidth = 200 // Maximum width to avoid excessive queries
+		}
+
+		log.Debug().
+			Int("screen_width", a.width).
+			Int("overview_content_width", overviewContentWidth).
+			Int("label_width", labelWidth).
+			Int("sparkline_width_calculated", overviewContentWidth-labelWidth).
+			Int("sparkline_width_final", sparklineWidth).
+			Int("bucket_count", sparklineWidth).
+			Msg(">>> Sparkline width calculation")
+
+		levelTimeSeries, timeLabels := a.fetchTimeSeriesData(config, firstTime, lastTime, sparklineWidth)
+
 		return LogsDataMsg{
-			Entries:        entries,
-			FirstEntryTime: firstTime,
-			LastEntryTime:  lastTime,
-			TotalRows:      len(entries),
-			LevelCounts:    levelCounts,
+			Entries:         entries,
+			FirstEntryTime:  firstTime,
+			LastEntryTime:   lastTime,
+			TotalRows:       len(entries),
+			LevelCounts:     levelCounts,
+			LevelTimeSeries: levelTimeSeries,
+			TimeLabels:      timeLabels,
 		}
 	}
 }
 
-// handleLogsCommand handles the :logs command
-func (a *App) handleLogsCommand() {
-	a.ShowLogs()
+// fetchTimeSeriesData queries time-bucketed log counts for sparkline visualization
+func (a *App) fetchTimeSeriesData(config LogConfig, startTime, endTime time.Time, sparklineWidth int) (map[string][]float64, []string) {
+	if startTime.IsZero() || endTime.IsZero() || config.LevelField == "" {
+		return nil, nil
+	}
+
+	// Use sparklineWidth as bucket count - one character per bucket
+	buckets := sparklineWidth
+	if buckets < 20 {
+		buckets = 20
+	}
+	if buckets > 200 {
+		buckets = 200
+	}
+
+	// Calculate interval in seconds
+	timeRange := endTime.Sub(startTime).Seconds()
+	if timeRange <= 0 {
+		return nil, nil
+	}
+	intervalSeconds := int(math.Ceil(timeRange / float64(buckets)))
+	if intervalSeconds < 1 {
+		intervalSeconds = 1
+	}
+
+	// Build query using fixed time buckets to ensure all levels have same timestamps and width
+	query := fmt.Sprintf(`
+		SELECT
+			%s as level,
+			toUnixTimestamp(toStartOfInterval(%s, INTERVAL %d SECOND)) as bucket_ts,
+			count() as cnt
+		FROM %s.%s
+		WHERE %s BETWEEN '%s' AND '%s'
+		GROUP BY level, bucket_ts
+		ORDER BY level, bucket_ts
+	`,
+		config.LevelField,
+		config.TimeField,
+		intervalSeconds,
+		config.Database,
+		config.Table,
+		config.TimeField,
+		startTime.Format("2006-01-02 15:04:05"),
+		endTime.Format("2006-01-02 15:04:05"),
+	)
+
+	log.Debug().
+		Str("query", query).
+		Int("buckets", buckets).
+		Int("interval_seconds", intervalSeconds).
+		Msg("Fetching time-series data for sparkline")
+
+	rows, err := a.state.ClickHouse.Query(query)
+	if err != nil {
+		log.Error().Err(err).Msg("Error querying time-series data")
+		return nil, nil
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Error().Err(closeErr).Msg("can't close time-series query")
+		}
+	}()
+
+	// Generate expected bucket timestamps for the entire time range
+	// This ensures all levels have the same timestamps and width
+	startUnix := startTime.Unix()
+	endUnix := endTime.Unix()
+	expectedBuckets := make([]int64, 0, buckets)
+	for ts := startUnix; ts <= endUnix; ts += int64(intervalSeconds) {
+		expectedBuckets = append(expectedBuckets, ts)
+		if len(expectedBuckets) >= buckets {
+			break
+		}
+	}
+	// Ensure we have exactly buckets timestamps
+	if len(expectedBuckets) < buckets {
+		// Pad with remaining timestamps if needed
+		lastTs := expectedBuckets[len(expectedBuckets)-1]
+		for len(expectedBuckets) < buckets {
+			lastTs += int64(intervalSeconds)
+			expectedBuckets = append(expectedBuckets, lastTs)
+		}
+	}
+
+	log.Debug().
+		Int("expected_buckets", len(expectedBuckets)).
+		Msg("Generated expected bucket timestamps")
+
+	// Parse query results into map[level]map[timestamp]count
+	levelBucketCounts := make(map[string]map[int64]float64)
+
+	for rows.Next() {
+		var level string
+		var bucketTs int64
+		var count float64
+
+		if err := rows.Scan(&level, &bucketTs, &count); err != nil {
+			log.Error().Err(err).Msg("Error scanning time-series row")
+			continue
+		}
+
+		levelLower := strings.ToLower(level)
+
+		// Normalize level aliases to canonical names for consistent sparkline display
+		switch levelLower {
+		case "information", "notice":
+			levelLower = "info"
+		case "warn":
+			levelLower = "warning"
+		case "exception", "critical", "fatal":
+			levelLower = "error"
+		case "trace":
+			levelLower = "debug"
+		}
+
+		if levelBucketCounts[levelLower] == nil {
+			levelBucketCounts[levelLower] = make(map[int64]float64)
+		}
+		levelBucketCounts[levelLower][bucketTs] = count
+	}
+
+	// Build aligned time series for each level with exactly 'buckets' data points
+	levelTimeSeries := make(map[string][]float64)
+	for level, bucketCounts := range levelBucketCounts {
+		values := make([]float64, len(expectedBuckets))
+		for i, ts := range expectedBuckets {
+			if count, exists := bucketCounts[ts]; exists {
+				values[i] = count
+			}
+			// else: values[i] = 0 (default for float64)
+		}
+		levelTimeSeries[level] = values
+
+		log.Debug().
+			Str("level", level).
+			Int("data_points", len(values)).
+			Int("non_zero_points", len(bucketCounts)).
+			Msg("Built aligned time series for level")
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Error().Err(err).Msg("Error reading time-series rows")
+		return nil, nil
+	}
+
+	// Generate time labels from expected bucket timestamps
+	timeLabels := make([]string, len(expectedBuckets))
+	for i, ts := range expectedBuckets {
+		t := time.Unix(ts, 0)
+		timeLabels[i] = t.Format("15:04:05")
+	}
+
+	log.Debug().
+		Int("levels_count", len(levelTimeSeries)).
+		Int("bucket_count", len(expectedBuckets)).
+		Int("interval_seconds", intervalSeconds).
+		Msg("Time-series data fetched successfully with fixed time buckets")
+
+	return levelTimeSeries, timeLabels
 }
