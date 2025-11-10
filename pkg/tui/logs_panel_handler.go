@@ -23,6 +23,13 @@ type LogEntry struct {
 	AllFields map[string]interface{}
 }
 
+// LogFilter represents a filter condition
+type LogFilter struct {
+	Field    string
+	Operator string
+	Value    string
+}
+
 // logLevelCount is used for sorting and displaying level statistics
 type logLevelCount struct {
 	level string
@@ -1417,6 +1424,16 @@ type logsViewer struct {
 	// Zoom menu
 	showZoomMenu bool // Show zoom menu
 	zoomMenuIdx  int  // Selected menu item (0-3)
+
+	// Filter form
+	showFilterForm    bool        // Whether filter form is visible
+	filters           []LogFilter // Active filters
+	allFields         []string    // All available fields from table
+	filterFieldDD     dropdown    // Filter field dropdown
+	filterOperatorDD  dropdown    // Filter operator dropdown
+	filterValueInput  textinput.Model // Filter value input
+	filterFocusIdx    int         // 0=field, 1=operator, 2=value, 3=add button
+	selectedFilterIdx int         // Index of selected filter button for removal (-1 if none)
 }
 
 func newLogsViewer(config LogConfig, width, height int) logsViewer {
@@ -1462,6 +1479,16 @@ func newLogsViewer(config LogConfig, width, height int) logsViewer {
 		initialTableHeight,
 	)
 
+	// Initialize filter form components
+	filterFieldDD := newDropdown("Field", 20, true)
+	filterOperatorDD := newDropdown("Operator", 15, true)
+	filterOperatorDD.SetOptions([]string{"=", "!=", ">", "<", ">=", "<=", "LIKE", "NOT LIKE"})
+	filterOperatorDD.SetValue("=")
+
+	filterValueInput := textinput.New()
+	filterValueInput.Placeholder = "Filter value..."
+	filterValueInput.Width = 30
+
 	return logsViewer{
 		config:                 config,
 		table:                  tableModel,
@@ -1471,6 +1498,14 @@ func newLogsViewer(config LogConfig, width, height int) logsViewer {
 		tableHeight:            initialTableHeight,
 		measuredWidgetOverhead: 2, // Initial guess, will be measured after first render
 		overviewMode:           true, // Show overview by default
+		showFilterForm:         false,
+		filters:                []LogFilter{},
+		allFields:              []string{},
+		filterFieldDD:          filterFieldDD,
+		filterOperatorDD:       filterOperatorDD,
+		filterValueInput:       filterValueInput,
+		filterFocusIdx:         0,
+		selectedFilterIdx:      -1,
 	}
 }
 
@@ -1494,6 +1529,17 @@ func (m *logsViewer) recalculateTableHeight() {
 
 	var actualOverhead int
 
+	// Account for filter form if visible
+	var filterFormLines int
+	if m.showFilterForm {
+		filterForm := m.renderFilterForm()
+		borderStyle := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("240"))
+		renderedFilterForm := borderStyle.Render(filterForm)
+		filterFormLines = strings.Count(renderedFilterForm, "\n") + 1
+	}
+
 	if m.overviewMode && len(m.levelTimeSeries) > 0 {
 		// Overview is visible - calculate actual overhead
 		overview := m.renderOverview()
@@ -1503,10 +1549,10 @@ func (m *logsViewer) recalculateTableHeight() {
 		renderedOverview := borderStyle.Render(overview)
 
 		overviewLines := strings.Count(renderedOverview, "\n") + 1
-		actualOverhead = titleLines + overviewLines
+		actualOverhead = titleLines + filterFormLines + overviewLines
 	} else {
-		// Overview is hidden or no data - only title line
-		actualOverhead = titleLines
+		// Overview is hidden or no data - only title line (and filter form if shown)
+		actualOverhead = titleLines + filterFormLines
 	}
 
 	// Calculate table height based on actual measurements
@@ -2064,25 +2110,35 @@ func (m logsViewer) View() string {
 	// Build overview with timeline bar (only if overview mode is active)
 	var content string
 	var overviewRenderedLines int
+	var filterFormLines int
 
+	// Build components list
+	components := []string{renderedTitle}
+
+	// Add filter form if visible
+	if m.showFilterForm {
+		filterForm := m.renderFilterForm()
+		filterFormBordered := borderStyle.Render(filterForm)
+		filterFormLines = strings.Count(filterFormBordered, "\n") + 1
+		components = append(components, filterFormBordered)
+	}
+
+	// Add overview if visible
 	if m.overviewMode {
 		overview := m.renderOverview()
 		overviewRendered := borderStyle.Render(overview)
 		overviewRenderedLines = strings.Count(overviewRendered, "\n") + 1
-
-		// Join all parts using lipgloss to avoid extra newlines
-		// lipgloss.JoinVertical adds exactly one newline between components
-		content = lipgloss.JoinVertical(lipgloss.Left,
-			renderedTitle,
-			overviewRendered,
-			tableView)
+		components = append(components, overviewRendered)
 	} else {
 		overviewRenderedLines = 0
-		// No overview, just title and table
-		content = lipgloss.JoinVertical(lipgloss.Left,
-			renderedTitle,
-			tableView)
 	}
+
+	// Add table
+	components = append(components, tableView)
+
+	// Join all parts using lipgloss to avoid extra newlines
+	// lipgloss.JoinVertical adds exactly one newline between components
+	content = lipgloss.JoinVertical(lipgloss.Left, components...)
 
 	// Count actual rendered lines
 	totalContentLines := strings.Count(content, "\n") + 1
@@ -2095,19 +2151,21 @@ func (m logsViewer) View() string {
 	log.Debug().
 		Int("screen_height", m.height).
 		Int("title_lines", titleLines).
+		Int("filter_form_lines", filterFormLines).
 		Int("overview_rendered_lines", overviewRenderedLines).
 		Int("table_height_allocated", m.tableHeight).
 		Int("table_view_actual_lines", tableViewLines).
 		Int("total_content_lines", totalContentLines).
-		Int("expected_total", titleLines+overviewRenderedLines+tableViewLines).
+		Int("expected_total", titleLines+filterFormLines+overviewRenderedLines+tableViewLines).
 		Int("overflow_amount", overflowAmount).
-		Int("missing_lines", (titleLines+overviewRenderedLines+tableViewLines)-totalContentLines).
+		Int("missing_lines", (titleLines+filterFormLines+overviewRenderedLines+tableViewLines)-totalContentLines).
 		Bool("overflow", hasOverflow).
 		Bool("overview_mode", m.overviewMode).
 		Bool("focus_overview", m.focusOverview).
-		Str("calculation", fmt.Sprintf("%d(title) + %d(overview) + %d(table) = %d(expected) vs %d(actual)",
-			titleLines, overviewRenderedLines, tableViewLines,
-			titleLines+overviewRenderedLines+tableViewLines, totalContentLines)).
+		Bool("show_filter_form", m.showFilterForm).
+		Str("calculation", fmt.Sprintf("%d(title) + %d(filter) + %d(overview) + %d(table) = %d(expected) vs %d(actual)",
+			titleLines, filterFormLines, overviewRenderedLines, tableViewLines,
+			titleLines+filterFormLines+overviewRenderedLines+tableViewLines, totalContentLines)).
 		Str("title_text", title).
 		Int("title_text_length", len(title)).
 		Int("table_widget_overhead_actual", tableViewLines-m.tableHeight).
@@ -2158,6 +2216,107 @@ func (m logsViewer) View() string {
 		Msg(">>> Logs View() output preview")
 
 	return content
+}
+
+func (m logsViewer) renderFilterForm() string {
+	if !m.showFilterForm {
+		return ""
+	}
+
+	var builder strings.Builder
+
+	// Title
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14")) // Cyan
+	builder.WriteString(titleStyle.Render("Filters"))
+	builder.WriteString("\n")
+
+	// Filter input form
+	fieldLabel := lipgloss.NewStyle().Foreground(lipgloss.Color("yellow")).Render("Field: ")
+	operatorLabel := lipgloss.NewStyle().Foreground(lipgloss.Color("yellow")).Render("Operator: ")
+	valueLabel := lipgloss.NewStyle().Foreground(lipgloss.Color("yellow")).Render("Value: ")
+
+	// Render dropdowns and input
+	fieldView := m.filterFieldDD.input.View()
+	if m.filterFocusIdx == 0 {
+		fieldView = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true).Render(fieldView)
+	}
+
+	operatorView := m.filterOperatorDD.input.View()
+	if m.filterFocusIdx == 1 {
+		operatorView = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true).Render(operatorView)
+	}
+
+	valueView := m.filterValueInput.View()
+	if m.filterFocusIdx == 2 {
+		valueView = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true).Render(valueView)
+	}
+
+	// Add Filter button
+	addButtonStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10")) // Green
+	if m.filterFocusIdx == 3 {
+		addButtonStyle = addButtonStyle.Background(lipgloss.Color("10")).Foreground(lipgloss.Color("0")) // Inverted when focused
+	}
+	addButton := addButtonStyle.Render(" [Add Filter] ")
+
+	// Build filter input row
+	builder.WriteString(fieldLabel + fieldView + "  " + operatorLabel + operatorView + "  " + valueLabel + valueView + "  " + addButton)
+	builder.WriteString("\n")
+
+	// Show dropdown options if applicable
+	if m.filterFocusIdx == 0 && m.filterFieldDD.showOptions && len(m.filterFieldDD.filtered) > 0 {
+		builder.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("Options: "))
+		for i, opt := range m.filterFieldDD.filtered {
+			if i == m.filterFieldDD.selected {
+				builder.WriteString(lipgloss.NewStyle().Background(lipgloss.Color("240")).Foreground(lipgloss.Color("15")).Render(opt))
+			} else {
+				builder.WriteString(opt)
+			}
+			if i < len(m.filterFieldDD.filtered)-1 {
+				builder.WriteString(" | ")
+			}
+			if i >= 5 { // Limit display to 6 options
+				builder.WriteString(" ...")
+				break
+			}
+		}
+		builder.WriteString("\n")
+	}
+
+	if m.filterFocusIdx == 1 && m.filterOperatorDD.showOptions && len(m.filterOperatorDD.filtered) > 0 {
+		builder.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("Operators: "))
+		for i, opt := range m.filterOperatorDD.filtered {
+			if i == m.filterOperatorDD.selected {
+				builder.WriteString(lipgloss.NewStyle().Background(lipgloss.Color("240")).Foreground(lipgloss.Color("15")).Render(opt))
+			} else {
+				builder.WriteString(opt)
+			}
+			if i < len(m.filterOperatorDD.filtered)-1 {
+				builder.WriteString(" | ")
+			}
+		}
+		builder.WriteString("\n")
+	}
+
+	// Display active filters with delete buttons
+	if len(m.filters) > 0 {
+		builder.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("Active filters: "))
+		for i, filter := range m.filters {
+			filterBtnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // Yellow
+			if m.selectedFilterIdx == i {
+				filterBtnStyle = filterBtnStyle.Background(lipgloss.Color("11")).Foreground(lipgloss.Color("0")) // Inverted when selected
+			}
+			filterText := fmt.Sprintf(" [%s %s %s] ✕ ", filter.Field, filter.Operator, filter.Value)
+			builder.WriteString(filterBtnStyle.Render(filterText))
+			builder.WriteString("  ")
+		}
+		builder.WriteString("\n")
+	}
+
+	// Help text
+	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	builder.WriteString(helpStyle.Render("Tab: Next field | Enter: Add/Remove filter | Ctrl+F: Hide filters | Esc: Close"))
+
+	return builder.String()
 }
 
 func (m logsViewer) renderOverview() string {
