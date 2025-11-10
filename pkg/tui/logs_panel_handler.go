@@ -1766,6 +1766,27 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleZoomMenuKey(msg)
 		}
 
+		// Handle filter form (second highest priority)
+		if m.showFilterForm {
+			return m.handleFilterFormKey(msg)
+		}
+
+		// Check for Ctrl+F to toggle filter form
+		if msg.String() == "ctrl+f" && !m.table.IsFiltering() {
+			m.showFilterForm = !m.showFilterForm
+			if m.showFilterForm {
+				// Initialize field options if not already done
+				if len(m.filterFieldDD.options) == 0 && len(m.allFields) > 0 {
+					m.filterFieldDD.SetOptions(m.allFields)
+				}
+				// Focus first field
+				m.filterFocusIdx = 0
+				m.filterFieldDD.Focus()
+			}
+			m.recalculateTableHeight()
+			return m, nil
+		}
+
 		// Handle Tab/Shift+Tab keys for switching focus (when overview mode is active)
 		// BUT: Don't intercept if table is in filter mode - let the filter input handle it
 		if m.overviewMode && (msg.String() == "tab" || msg.String() == "shift+tab") && !m.table.IsFiltering() {
@@ -1865,7 +1886,7 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				log.Debug().
 					Int("new_offset", newOffset).
 					Msg("Loading next window (Ctrl+PgDown)")
-				return m, m.app.fetchLogsDataCmd(m.config, newOffset)
+				return m, m.app.fetchLogsDataCmd(m.config, newOffset, m.filters)
 			}
 			return m, nil
 		case "ctrl+pgup":
@@ -1880,7 +1901,7 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				log.Debug().
 					Int("new_offset", newOffset).
 					Msg("Loading previous window (Ctrl+PgUp)")
-				return m, m.app.fetchLogsDataCmd(m.config, newOffset)
+				return m, m.app.fetchLogsDataCmd(m.config, newOffset, m.filters)
 			}
 			return m, nil
 		}
@@ -1888,6 +1909,147 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	m.table, cmd = m.table.Update(msg)
 	return m, cmd
+}
+
+// handleFilterFormKey handles key events when filter form is active
+func (m logsViewer) handleFilterFormKey(msg tea.Msg) (tea.Model, tea.Cmd) {
+	keyMsg, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+
+	switch keyMsg.String() {
+	case "ctrl+f", "esc":
+		// Close filter form
+		m.showFilterForm = false
+		m.filterFieldDD.Blur()
+		m.filterOperatorDD.Blur()
+		m.filterValueInput.Blur()
+		m.recalculateTableHeight()
+		return m, nil
+
+	case "tab":
+		// Move to next field
+		m.blurCurrentFilterField()
+		m.filterFocusIdx = (m.filterFocusIdx + 1) % 4
+		m.focusCurrentFilterField()
+		return m, nil
+
+	case "shift+tab":
+		// Move to previous field
+		m.blurCurrentFilterField()
+		m.filterFocusIdx = (m.filterFocusIdx - 1 + 4) % 4
+		m.focusCurrentFilterField()
+		return m, nil
+
+	case "enter":
+		// Add filter if on Add button, or remove filter if on filter button
+		if m.filterFocusIdx == 3 {
+			// Add filter
+			field := m.filterFieldDD.value
+			operator := m.filterOperatorDD.value
+			value := m.filterValueInput.Value()
+
+			if field != "" && operator != "" && value != "" {
+				m.filters = append(m.filters, LogFilter{
+					Field:    field,
+					Operator: operator,
+					Value:    value,
+				})
+
+				// Clear value input for next filter
+				m.filterValueInput.SetValue("")
+
+				// Trigger data reload with new filters
+				m.loading = true
+				m.offset = 0 // Reset to first page when filter changes
+				if m.app != nil {
+					return m, m.app.fetchLogsDataCmd(m.config, 0, m.filters)
+				}
+			}
+		} else if m.selectedFilterIdx >= 0 && m.selectedFilterIdx < len(m.filters) {
+			// Remove selected filter
+			m.filters = append(m.filters[:m.selectedFilterIdx], m.filters[m.selectedFilterIdx+1:]...)
+			m.selectedFilterIdx = -1
+
+			// Trigger data reload without this filter
+			m.loading = true
+			m.offset = 0 // Reset to first page when filter changes
+			if m.app != nil {
+				return m, m.app.fetchLogsDataCmd(m.config, 0, m.filters)
+			}
+		}
+		return m, nil
+
+	case "left":
+		// Navigate between filter buttons
+		if len(m.filters) > 0 {
+			if m.selectedFilterIdx < 0 {
+				m.selectedFilterIdx = len(m.filters) - 1
+			} else if m.selectedFilterIdx > 0 {
+				m.selectedFilterIdx--
+			}
+		}
+		return m, nil
+
+	case "right":
+		// Navigate between filter buttons
+		if len(m.filters) > 0 {
+			if m.selectedFilterIdx < 0 {
+				m.selectedFilterIdx = 0
+			} else if m.selectedFilterIdx < len(m.filters)-1 {
+				m.selectedFilterIdx++
+			}
+		}
+		return m, nil
+	}
+
+	// Delegate to active field
+	switch m.filterFocusIdx {
+	case 0: // Field dropdown
+		cmd, handled := m.filterFieldDD.Update(msg)
+		if handled {
+			return m, cmd
+		}
+
+	case 1: // Operator dropdown
+		cmd, handled := m.filterOperatorDD.Update(msg)
+		if handled {
+			return m, cmd
+		}
+
+	case 2: // Value input
+		m.filterValueInput, cmd = m.filterValueInput.Update(msg)
+		return m, cmd
+	}
+
+	return m, nil
+}
+
+// blurCurrentFilterField removes focus from currently focused filter field
+func (m *logsViewer) blurCurrentFilterField() {
+	switch m.filterFocusIdx {
+	case 0:
+		m.filterFieldDD.Blur()
+	case 1:
+		m.filterOperatorDD.Blur()
+	case 2:
+		m.filterValueInput.Blur()
+	}
+}
+
+// focusCurrentFilterField sets focus to currently selected filter field
+func (m *logsViewer) focusCurrentFilterField() {
+	switch m.filterFocusIdx {
+	case 0:
+		m.filterFieldDD.Focus()
+	case 1:
+		m.filterOperatorDD.Focus()
+	case 2:
+		m.filterValueInput.Focus()
+	}
 }
 
 // handleOverviewKey handles key events when in overview/sparkline navigation mode
@@ -2644,17 +2806,55 @@ func (m logsViewer) renderDetails() string {
 	sb.WriteString(m.selectedEntry.Message)
 	sb.WriteString("\n\n")
 
-	// Show all fields if available
+	// Show all fields if available (sorted alphabetically)
 	if len(m.selectedEntry.AllFields) > 0 {
-		sb.WriteString(labelStyle.Render("Additional Fields:"))
-		sb.WriteString("\n")
-		for k, v := range m.selectedEntry.AllFields {
-			sb.WriteString(fmt.Sprintf("%s: %v\n", k, v))
+		sb.WriteString(titleStyle.Render("All Fields"))
+		sb.WriteString("\n\n")
+
+		// Sort field names
+		var fieldNames []string
+		for fieldName := range m.selectedEntry.AllFields {
+			fieldNames = append(fieldNames, fieldName)
 		}
+		// Simple bubble sort
+		for i := 0; i < len(fieldNames)-1; i++ {
+			for j := i + 1; j < len(fieldNames); j++ {
+				if fieldNames[i] > fieldNames[j] {
+					fieldNames[i], fieldNames[j] = fieldNames[j], fieldNames[i]
+				}
+			}
+		}
+
+		// Display sorted fields
+		for _, fieldName := range fieldNames {
+			value := m.selectedEntry.AllFields[fieldName]
+
+			// Format value based on type
+			var valueStr string
+			switch v := value.(type) {
+			case []byte:
+				valueStr = string(v)
+			case time.Time:
+				valueStr = v.Format("2006-01-02 15:04:05.000 MST")
+			case nil:
+				valueStr = "NULL"
+			default:
+				valueStr = fmt.Sprintf("%v", v)
+			}
+
+			// Truncate very long values
+			if len(valueStr) > 200 {
+				valueStr = valueStr[:197] + "..."
+			}
+
+			sb.WriteString(labelStyle.Render(fieldName + ": "))
+			sb.WriteString(valueStr)
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\n")
 	}
 
-	sb.WriteString("\n")
-	sb.WriteString(helpStyle.Render("Press ESC to return"))
+	sb.WriteString(helpStyle.Render("Press ESC to return | ↑↓: Scroll"))
 
 	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -2744,38 +2944,112 @@ func (m logsViewer) renderZoomMenu() string {
 	)
 }
 
+// buildWhereClause builds SQL WHERE clause from log filters
+func buildWhereClause(filters []LogFilter) (string, []interface{}) {
+	if len(filters) == 0 {
+		return "", nil
+	}
+
+	var conditions []string
+	var args []interface{}
+
+	for _, filter := range filters {
+		// Escape field name by wrapping in backticks
+		field := "`" + strings.ReplaceAll(filter.Field, "`", "``") + "`"
+
+		switch filter.Operator {
+		case "LIKE", "NOT LIKE":
+			conditions = append(conditions, fmt.Sprintf("%s %s ?", field, filter.Operator))
+			args = append(args, "%"+filter.Value+"%")
+		default:
+			conditions = append(conditions, fmt.Sprintf("%s %s ?", field, filter.Operator))
+			args = append(args, filter.Value)
+		}
+	}
+
+	whereClause := strings.Join(conditions, " AND ")
+	return whereClause, args
+}
+
+// fetchAllTableFields fetches all column names from a table
+func (a *App) fetchAllTableFields(database, table string) []string {
+	query := fmt.Sprintf("DESCRIBE TABLE `%s`.`%s`", database, table)
+	rows, err := a.state.ClickHouse.Query(query)
+	if err != nil {
+		log.Error().Err(err).Str("database", database).Str("table", table).Msg("Error describing table")
+		return nil
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Error().Err(closeErr).Msg("Error closing describe table query")
+		}
+	}()
+
+	var fields []string
+	for rows.Next() {
+		var name, typeStr, defaultType, defaultExpr, comment, codecExpr, ttlExpr string
+		if err := rows.Scan(&name, &typeStr, &defaultType, &defaultExpr, &comment, &codecExpr, &ttlExpr); err != nil {
+			log.Error().Err(err).Msg("Error scanning table field")
+			continue
+		}
+		fields = append(fields, name)
+	}
+
+	return fields
+}
+
 // ShowLogsViewer shows the log viewer with the given configuration
 func (a *App) ShowLogsViewer(config LogConfig) tea.Cmd {
 	viewer := newLogsViewer(config, a.width, a.height)
 	viewer.app = a    // Set app reference for pagination
 	viewer.offset = 0 // Start at offset 0
+
+	// Fetch all table fields for filter dropdown
+	viewer.allFields = a.fetchAllTableFields(config.Database, config.Table)
+	if len(viewer.allFields) > 0 {
+		viewer.filterFieldDD.SetOptions(viewer.allFields)
+	}
+
 	a.logsHandler = viewer
 	a.currentPage = pageLogs
 
 	// Start async data fetch
-	return a.fetchLogsDataCmd(config, 0)
+	return a.fetchLogsDataCmd(config, 0, nil)
 }
 
 // fetchLogsDataCmd fetches log data from ClickHouse
-func (a *App) fetchLogsDataCmd(config LogConfig, offset int) tea.Cmd {
+func (a *App) fetchLogsDataCmd(config LogConfig, offset int, filters []LogFilter) tea.Cmd {
 	return func() tea.Msg {
-		// Build query
-		selectFields := []string{config.TimeField, config.MessageField}
-		if config.LevelField != "" {
-			selectFields = append(selectFields, config.LevelField)
-		}
-
-		query := fmt.Sprintf(
-			"SELECT %s FROM `%s`.`%s` ORDER BY %s DESC LIMIT %d OFFSET %d",
-			strings.Join(selectFields, ", "),
+		// Build query - select all fields (*)
+		queryBuilder := fmt.Sprintf(
+			"SELECT * FROM `%s`.`%s`",
 			config.Database,
 			config.Table,
+		)
+
+		// Build WHERE clause from filters
+		whereClause, whereArgs := buildWhereClause(filters)
+		var args []interface{}
+
+		if whereClause != "" {
+			queryBuilder += " WHERE " + whereClause
+			args = append(args, whereArgs...)
+		}
+
+		// Add ORDER BY and LIMIT
+		queryBuilder += fmt.Sprintf(
+			" ORDER BY %s DESC LIMIT %d OFFSET %d",
 			config.TimeField,
 			config.WindowSize,
 			offset,
 		)
 
-		rows, err := a.state.ClickHouse.Query(query)
+		log.Debug().
+			Str("query", queryBuilder).
+			Interface("args", args).
+			Msg("Executing logs query with filters")
+
+		rows, err := a.state.ClickHouse.Query(queryBuilder, args...)
 		if err != nil {
 			return LogsDataMsg{Err: fmt.Errorf("error executing query: %v", err)}
 		}
@@ -2785,23 +3059,61 @@ func (a *App) fetchLogsDataCmd(config LogConfig, offset int) tea.Cmd {
 			}
 		}()
 
+		// Get column types
+		colTypes, err := rows.ColumnTypes()
+		if err != nil {
+			return LogsDataMsg{Err: fmt.Errorf("error getting column types: %v", err)}
+		}
+
 		var entries []LogEntry
 		levelCounts := make(map[string]int)
 		var firstTime, lastTime time.Time
 
 		for rows.Next() {
-			var entry LogEntry
-			var values []interface{}
-
-			// Prepare scan destinations
-			values = append(values, &entry.Time)
-			values = append(values, &entry.Message)
-			if config.LevelField != "" {
-				values = append(values, &entry.Level)
+			entry := LogEntry{
+				AllFields: make(map[string]interface{}),
 			}
 
-			if err := rows.Scan(values...); err != nil {
+			// Prepare scan destinations for all columns
+			scanArgs := make([]interface{}, len(colTypes))
+			fieldValues := make([]interface{}, len(colTypes))
+
+			for i, col := range colTypes {
+				fieldName := col.Name()
+
+				// Assign to struct fields for known columns
+				switch fieldName {
+				case config.TimeField:
+					scanArgs[i] = &entry.Time
+				case config.MessageField:
+					scanArgs[i] = &entry.Message
+				case config.LevelField:
+					scanArgs[i] = &entry.Level
+				default:
+					// Store other fields in AllFields map
+					fieldValues[i] = new(interface{})
+					scanArgs[i] = fieldValues[i]
+				}
+			}
+
+			if err := rows.Scan(scanArgs...); err != nil {
 				return LogsDataMsg{Err: fmt.Errorf("error scanning row: %v", err)}
+			}
+
+			// Populate AllFields map with non-primary fields
+			for i, col := range colTypes {
+				fieldName := col.Name()
+
+				// Skip primary fields (already in struct)
+				switch fieldName {
+				case config.TimeField, config.MessageField, config.LevelField:
+					// Skip - already in struct
+				default:
+					if fieldValues[i] != nil {
+						val := *fieldValues[i].(*interface{})
+						entry.AllFields[fieldName] = val
+					}
+				}
 			}
 
 			entries = append(entries, entry)
