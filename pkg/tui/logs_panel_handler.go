@@ -1916,8 +1916,19 @@ func (m logsViewer) handleFilterFormKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case "tab":
 		// Move to next field
+		// Navigation order: Field(0) -> Operator(1) -> Value(2) -> Add(3) -> Active Filters(4) -> Field(0)
 		m.blurCurrentFilterField()
-		m.filterFocusIdx = (m.filterFocusIdx + 1) % 4
+		maxIdx := 3
+		if len(m.filters) > 0 {
+			maxIdx = 4 // Include active filters list if there are filters
+		}
+		m.filterFocusIdx = (m.filterFocusIdx + 1) % (maxIdx + 1)
+		if m.filterFocusIdx == 4 && len(m.filters) > 0 {
+			// When entering active filters section, select first filter
+			m.selectedFilterIdx = 0
+		} else {
+			m.selectedFilterIdx = -1
+		}
 		m.focusCurrentFilterField()
 		return m, nil
 
@@ -1928,17 +1939,28 @@ func (m logsViewer) handleFilterFormKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.filterFieldDD.Blur()
 			m.filterOperatorDD.Blur()
 			m.filterValueInput.Blur()
+			m.selectedFilterIdx = -1
 			m.recalculateTableHeight()
 			return m, nil
 		}
 		// Otherwise, move to previous field
 		m.blurCurrentFilterField()
-		m.filterFocusIdx = (m.filterFocusIdx - 1 + 4) % 4
+		maxIdx := 3
+		if len(m.filters) > 0 {
+			maxIdx = 4
+		}
+		m.filterFocusIdx = (m.filterFocusIdx - 1 + maxIdx + 1) % (maxIdx + 1)
+		if m.filterFocusIdx == 4 && len(m.filters) > 0 {
+			// When entering active filters section, select last filter
+			m.selectedFilterIdx = len(m.filters) - 1
+		} else {
+			m.selectedFilterIdx = -1
+		}
 		m.focusCurrentFilterField()
 		return m, nil
 
 	case "enter":
-		// Add filter if on Add button, or remove filter if on filter button
+		// Add filter if on Add button, or remove filter if in active filters section
 		if m.filterFocusIdx == 3 {
 			// Add filter
 			field := m.filterFieldDD.value
@@ -1962,41 +1984,42 @@ func (m logsViewer) handleFilterFormKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.app.fetchLogsDataCmd(m.config, 0, m.filters, m.width)
 				}
 			}
-		} else if m.selectedFilterIdx >= 0 && m.selectedFilterIdx < len(m.filters) {
-			// Remove selected filter
-			m.filters = append(m.filters[:m.selectedFilterIdx], m.filters[m.selectedFilterIdx+1:]...)
-			m.selectedFilterIdx = -1
+		} else if m.filterFocusIdx == 4 && m.selectedFilterIdx >= 0 && m.selectedFilterIdx < len(m.filters) {
+			// Remove selected filter when in active filters section
+			return m.removeSelectedFilter()
+		}
+		return m, nil
 
-			// Trigger data reload without this filter
-			m.loading = true
-			m.offset = 0 // Reset to first page when filter changes
-			if m.app != nil {
-				return m, m.app.fetchLogsDataCmd(m.config, 0, m.filters, m.width)
-			}
+	case "delete", "backspace":
+		// Delete selected filter when in active filters section
+		if m.filterFocusIdx == 4 && m.selectedFilterIdx >= 0 && m.selectedFilterIdx < len(m.filters) {
+			return m.removeSelectedFilter()
+		}
+		// If not in active filters section, let backspace work normally for text input
+		if keyMsg.String() == "backspace" {
+			break // Fall through to delegate to active field
 		}
 		return m, nil
 
 	case "left":
-		// Navigate between filter buttons
-		if len(m.filters) > 0 {
-			if m.selectedFilterIdx < 0 {
-				m.selectedFilterIdx = len(m.filters) - 1
-			} else if m.selectedFilterIdx > 0 {
+		// Navigate between filter buttons (only when in active filters section)
+		if m.filterFocusIdx == 4 && len(m.filters) > 0 {
+			if m.selectedFilterIdx > 0 {
 				m.selectedFilterIdx--
 			}
+			return m, nil
 		}
-		return m, nil
+		// Otherwise let the key fall through to text input handling
 
 	case "right":
-		// Navigate between filter buttons
-		if len(m.filters) > 0 {
-			if m.selectedFilterIdx < 0 {
-				m.selectedFilterIdx = 0
-			} else if m.selectedFilterIdx < len(m.filters)-1 {
+		// Navigate between filter buttons (only when in active filters section)
+		if m.filterFocusIdx == 4 && len(m.filters) > 0 {
+			if m.selectedFilterIdx < len(m.filters)-1 {
 				m.selectedFilterIdx++
 			}
+			return m, nil
 		}
-		return m, nil
+		// Otherwise let the key fall through to text input handling
 	}
 
 	// Delegate to active field
@@ -2042,7 +2065,38 @@ func (m *logsViewer) focusCurrentFilterField() {
 		m.filterOperatorDD.Focus()
 	case 2:
 		m.filterValueInput.Focus()
+	// case 3: Add button - no focus action needed
+	// case 4: Active filters list - no focus action needed, selectedFilterIdx handles selection
 	}
+}
+
+// removeSelectedFilter removes the currently selected filter and triggers data reload
+func (m logsViewer) removeSelectedFilter() (tea.Model, tea.Cmd) {
+	if m.selectedFilterIdx < 0 || m.selectedFilterIdx >= len(m.filters) {
+		return m, nil
+	}
+
+	// Remove the filter
+	m.filters = append(m.filters[:m.selectedFilterIdx], m.filters[m.selectedFilterIdx+1:]...)
+
+	// Adjust selection after removal
+	if len(m.filters) == 0 {
+		// No more filters, move focus back to Add button
+		m.selectedFilterIdx = -1
+		m.filterFocusIdx = 3
+	} else if m.selectedFilterIdx >= len(m.filters) {
+		// Was last filter, select new last
+		m.selectedFilterIdx = len(m.filters) - 1
+	}
+	// else: keep same index (now points to next filter)
+
+	// Trigger data reload without this filter
+	m.loading = true
+	m.offset = 0 // Reset to first page when filter changes
+	if m.app != nil {
+		return m, m.app.fetchLogsDataCmd(m.config, 0, m.filters, m.width)
+	}
+	return m, nil
 }
 
 // handleOverviewKey handles key events when in overview/sparkline navigation mode
@@ -2460,11 +2514,18 @@ func (m logsViewer) renderFilterForm() string {
 
 	// Display active filters with delete buttons
 	if len(m.filters) > 0 {
-		builder.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("Active filters: "))
+		// Show label with highlight when active filters section has focus
+		labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+		if m.filterFocusIdx == 4 {
+			labelStyle = labelStyle.Foreground(lipgloss.Color("14")).Bold(true) // Cyan bold when focused
+		}
+		builder.WriteString(labelStyle.Render("Active filters: "))
+
 		for i, filter := range m.filters {
 			filterBtnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // Yellow
-			if m.selectedFilterIdx == i {
-				filterBtnStyle = filterBtnStyle.Background(lipgloss.Color("11")).Foreground(lipgloss.Color("0")) // Inverted when selected
+			if m.filterFocusIdx == 4 && m.selectedFilterIdx == i {
+				// Inverted when selected AND in active filters section
+				filterBtnStyle = filterBtnStyle.Background(lipgloss.Color("11")).Foreground(lipgloss.Color("0"))
 			}
 			filterText := fmt.Sprintf(" [%s %s %s] ✕ ", filter.Field, filter.Operator, filter.Value)
 			builder.WriteString(filterBtnStyle.Render(filterText))
@@ -2473,9 +2534,19 @@ func (m logsViewer) renderFilterForm() string {
 		builder.WriteString("\n")
 	}
 
-	// Help text
+	// Help text - context-sensitive
 	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	builder.WriteString(helpStyle.Render("Tab: Next field | Enter: Add/Remove filter | Ctrl+F: Hide filters | Esc: Close"))
+	var helpText string
+	if m.filterFocusIdx == 4 {
+		// When navigating active filters
+		helpText = "←/→: Select filter | Enter/Delete: Remove filter | Tab: Back to form | Esc: Close"
+	} else {
+		helpText = "Tab: Next field | Enter: Add filter | Ctrl+F/Esc: Close"
+		if len(m.filters) > 0 {
+			helpText = "Tab: Next field (incl. active filters) | Enter: Add filter | Ctrl+F/Esc: Close"
+		}
+	}
+	builder.WriteString(helpStyle.Render(helpText))
 
 	return builder.String()
 }
