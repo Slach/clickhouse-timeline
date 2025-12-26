@@ -23,6 +23,7 @@ type FilteredTable struct {
 	onSelect     func(selectedRow table.Row)
 	maxCellWidth int
 	pageSize     int
+	showHelp     bool // Whether to show help footer
 }
 
 // NewFilteredTable creates a new filtered table
@@ -124,12 +125,18 @@ func createFilteredTableBubble(title string, headers []string, columns []table.C
 		width:        width,
 		height:       height,
 		maxCellWidth: 5000, // Allow long SQL queries
+		showHelp:     true, // Show help footer by default
 	}
 }
 
 // SetOnSelect sets the callback when a row is selected
 func (m *FilteredTable) SetOnSelect(callback func(selectedRow table.Row)) {
 	m.onSelect = callback
+}
+
+// SetShowHelp controls whether the help footer is shown
+func (m *FilteredTable) SetShowHelp(show bool) {
+	m.showHelp = show
 }
 
 // SetSize updates the dimensions
@@ -285,45 +292,54 @@ func (m FilteredTable) View() string {
 		return lipgloss.JoinVertical(lipgloss.Left, title, filterView, m.table.View())
 	}
 
-	// Add help text footer with pagination info
-	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	// Conditionally add help text footer with pagination info
+	var result string
+	if m.showHelp {
+		helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
-	// Get current page info from table
-	visibleRows := len(m.allRows)
-	if m.filterInput.Value() != "" {
-		// Count filtered rows
-		filterLower := strings.ToLower(m.filterInput.Value())
-		visibleRows = 0
-		for _, row := range m.allRows {
-			match := false
-			for _, header := range m.headers {
-				if cellValue, ok := row.Data[header].(string); ok {
-					if strings.Contains(strings.ToLower(cellValue), filterLower) {
-						match = true
-						break
+		// Get current page info from table
+		visibleRows := len(m.allRows)
+		if m.filterInput.Value() != "" {
+			// Count filtered rows
+			filterLower := strings.ToLower(m.filterInput.Value())
+			visibleRows = 0
+			for _, row := range m.allRows {
+				match := false
+				for _, header := range m.headers {
+					if cellValue, ok := row.Data[header].(string); ok {
+						if strings.Contains(strings.ToLower(cellValue), filterLower) {
+							match = true
+							break
+						}
 					}
 				}
-			}
-			if match {
-				visibleRows++
+				if match {
+					visibleRows++
+				}
 			}
 		}
-	}
 
-	helpText := helpStyle.Render("↑↓: Scroll | PgUp/PgDn: Fast scroll | /: Filter | Enter: Select | ESC: Back")
+		helpText := helpStyle.Render("↑↓: Scroll | PgUp/PgDn: Fast scroll | /: Filter | Enter: Select | ESC: Back")
 
-	// Add row count info
-	infoStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	rowInfo := infoStyle.Render(fmt.Sprintf("  [Total rows: %d]", visibleRows))
+		// Add row count info
+		infoStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+		rowInfo := infoStyle.Render(fmt.Sprintf("  [Total rows: %d]", visibleRows))
 
-	footer := helpText + rowInfo
+		footer := helpText + rowInfo
 
-	// Only include title if it's not empty (avoids blank line when title is "")
-	var result string
-	if strings.TrimSpace(m.title) == "" {
-		result = lipgloss.JoinVertical(lipgloss.Left, m.table.View(), footer)
+		// Only include title if it's not empty (avoids blank line when title is "")
+		if strings.TrimSpace(m.title) == "" {
+			result = lipgloss.JoinVertical(lipgloss.Left, m.table.View(), footer)
+		} else {
+			result = lipgloss.JoinVertical(lipgloss.Left, title, m.table.View(), footer)
+		}
 	} else {
-		result = lipgloss.JoinVertical(lipgloss.Left, title, m.table.View(), footer)
+		// No help footer - just show table with optional title
+		if strings.TrimSpace(m.title) == "" {
+			result = m.table.View()
+		} else {
+			result = lipgloss.JoinVertical(lipgloss.Left, title, m.table.View())
+		}
 	}
 
 	// Debug: count actual lines rendered

@@ -111,8 +111,8 @@ func NewRootCommand(cli *types.CLI, version string) *cobra.Command {
 			return RunSubCommand(cli, version, cmd, args)
 		},
 	}
-	logsCmd.Flags().StringVar(&cli.LogsParams.Database, "database", "", "Database which will use for look log")
-	logsCmd.Flags().StringVar(&cli.LogsParams.Table, "table", "", "Database which will use for look log")
+	logsCmd.Flags().StringVar(&cli.LogsParams.Database, "database", "", "Database to use for log lookup")
+	logsCmd.Flags().StringVar(&cli.LogsParams.Table, "table", "", "Table to use for log lookup")
 	logsCmd.Flags().StringVar(&cli.LogsParams.Message, "message", "", "Column name for message")
 	logsCmd.Flags().StringVar(&cli.LogsParams.Time, "time", "", "Column name for time")
 	logsCmd.Flags().StringVar(&cli.LogsParams.TimeMs, "time-ms", "", "Column name for time with milliseconds")
