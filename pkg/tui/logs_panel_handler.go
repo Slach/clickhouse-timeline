@@ -1808,8 +1808,9 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg {
 				return tea.KeyMsg{Type: tea.KeyEsc}
 			}
-		case "ctrl+0":
+		case "0":
 			// Toggle overview mode (works even without data)
+			// Note: Ctrl+0 is not a valid terminal sequence, so we use just "0"
 			if !m.overviewMode {
 				m.overviewMode = true
 				m.focusOverview = true
@@ -2631,7 +2632,7 @@ func (m logsViewer) renderOverview() string {
 		} else if !m.focusOverview {
 			// Overview visible but table has focus
 			builder.WriteString("\n")
-			builder.WriteString(helpStyle.Render("[Table Focus] Tab/Shift+Tab: Switch to Overview | Ctrl+0: Hide Overview | Esc: Exit"))
+			builder.WriteString(helpStyle.Render("[Table Focus] Tab/Shift+Tab: Switch to Overview | 0: Hide Overview | Esc: Exit"))
 		}
 	}
 
