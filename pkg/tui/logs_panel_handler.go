@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1478,6 +1479,8 @@ func newLogsViewer(config LogConfig, width, height int) logsViewer {
 		width,
 		initialTableHeight,
 	)
+	// Hide the FilteredTable's built-in help footer since we have our own main help line
+	tableModel.SetShowHelp(false)
 
 	// Initialize filter form components
 	filterFieldDD := newDropdown("Field", 20, true)
@@ -1540,6 +1543,9 @@ func (m *logsViewer) recalculateTableHeight() {
 		filterFormLines = strings.Count(renderedFilterForm, "\n") + 1
 	}
 
+	// Main help line is always present at the bottom
+	mainHelpLines := 1
+
 	if m.overviewMode && len(m.levelTimeSeries) > 0 {
 		// Overview is visible - calculate actual overhead
 		overview := m.renderOverview()
@@ -1549,10 +1555,10 @@ func (m *logsViewer) recalculateTableHeight() {
 		renderedOverview := borderStyle.Render(overview)
 
 		overviewLines := strings.Count(renderedOverview, "\n") + 1
-		actualOverhead = titleLines + filterFormLines + overviewLines
+		actualOverhead = titleLines + filterFormLines + overviewLines + mainHelpLines
 	} else {
 		// Overview is hidden or no data - only title line (and filter form if shown)
-		actualOverhead = titleLines + filterFormLines
+		actualOverhead = titleLines + filterFormLines + mainHelpLines
 	}
 
 	// Calculate table height based on actual measurements
@@ -1660,6 +1666,14 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Update table size
 		m.table.SetSize(msg.Width, tableHeight)
 		m.tableHeight = tableHeight
+
+		// If we don't have data yet and aren't loading, trigger initial fetch
+		// This handles the case where ShowLogsViewer was called before WindowSizeMsg
+		if m.totalRows == 0 && !m.loading && m.app != nil {
+			m.loading = true
+			return m, m.app.fetchLogsDataCmd(m.config, 0, m.filters, m.width)
+		}
+
 		return m, nil
 
 	case LogsDataMsg:
@@ -1677,67 +1691,36 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.levelTimeSeries = msg.LevelTimeSeries
 		m.timeLabels = msg.TimeLabels
 
-		// Dynamically calculate table height based on overview visibility
-		// First, calculate actual title lines (title might wrap on narrow terminals)
-		titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
-		pageNum := (m.offset / m.config.WindowSize) + 1
-		title := fmt.Sprintf("Log Entries | Page %d (offset: %d, window: %d) | From: %s To: %s",
-			pageNum,
-			m.offset,
-			m.config.WindowSize,
-			m.firstEntryTime.Format("2006-01-02 15:04:05.000 MST"),
-			m.lastEntryTime.Format("2006-01-02 15:04:05.000 MST"))
-		renderedTitle := titleStyle.Render(title)
-		titleLines := strings.Count(renderedTitle, "\n") + 1
-
-		var actualOverhead int
-		var overviewLines int
-
-		if m.overviewMode {
-			// Overview is visible - calculate actual overhead
-			overview := m.renderOverview()
-			borderStyle := lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("240"))
-			renderedOverview := borderStyle.Render(overview)
-
-			overviewLines = strings.Count(renderedOverview, "\n") + 1
-			actualOverhead = titleLines + overviewLines
-		} else {
-			// Overview is hidden - only title line
-			overviewLines = 0
-			actualOverhead = titleLines
-		}
-
-		// Calculate table height based on actual measurements
-		// Available space = screen height - title - overview
-		availableForTable := m.height - actualOverhead
-
-		// Use measured widget overhead from previous renders
-		// Widget overhead = how many extra lines the widget renders beyond what we allocate
-		newTableHeight := availableForTable - m.measuredWidgetOverhead
-
-		if newTableHeight < 5 {
-			newTableHeight = 5
-		}
-
+		// Debug: Check levelTimeSeries right after assignment
 		log.Debug().
-			Int("screen_height", m.height).
-			Int("title_lines", titleLines).
-			Int("overview_lines", overviewLines).
-			Int("actual_overhead", actualOverhead).
-			Int("available_for_table", availableForTable).
-			Int("measured_widget_overhead", m.measuredWidgetOverhead).
-			Int("old_table_height", m.tableHeight).
-			Int("new_table_height", newTableHeight).
-			Bool("overview_mode", m.overviewMode).
-			Msg(">>> Logs dynamic height calculation")
+			Int("levelTimeSeries_count", len(m.levelTimeSeries)).
+			Interface("levelTimeSeries_keys", func() []string {
+				keys := make([]string, 0, len(m.levelTimeSeries))
+				for k := range m.levelTimeSeries {
+					keys = append(keys, k)
+				}
+				return keys
+			}()).
+			Interface("sample_data", func() map[string]interface{} {
+				sample := make(map[string]interface{})
+				for level, values := range m.levelTimeSeries {
+					nonZero := 0
+					for _, v := range values {
+						if v > 0 {
+							nonZero++
+						}
+					}
+					sample[level] = map[string]int{
+						"total":    len(values),
+						"non_zero": nonZero,
+					}
+				}
+				return sample
+			}()).
+			Msg(">>> LogsDataMsg - levelTimeSeries assigned")
 
-		// Update table height if changed
-		if newTableHeight != m.tableHeight {
-			m.table.SetSize(m.width, newTableHeight)
-			m.tableHeight = newTableHeight
-		}
+		// Recalculate table height based on current state (filter form, overview, etc.)
+		m.recalculateTableHeight()
 
 		// Convert to table rows
 		var rows []table.Row
@@ -1886,7 +1869,7 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				log.Debug().
 					Int("new_offset", newOffset).
 					Msg("Loading next window (Ctrl+PgDown)")
-				return m, m.app.fetchLogsDataCmd(m.config, newOffset, m.filters)
+				return m, m.app.fetchLogsDataCmd(m.config, newOffset, m.filters, m.width)
 			}
 			return m, nil
 		case "ctrl+pgup":
@@ -1901,7 +1884,7 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				log.Debug().
 					Int("new_offset", newOffset).
 					Msg("Loading previous window (Ctrl+PgUp)")
-				return m, m.app.fetchLogsDataCmd(m.config, newOffset, m.filters)
+				return m, m.app.fetchLogsDataCmd(m.config, newOffset, m.filters, m.width)
 			}
 			return m, nil
 		}
@@ -1938,7 +1921,16 @@ func (m logsViewer) handleFilterFormKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "shift+tab":
-		// Move to previous field
+		// If at first field (0), close filter form to allow normal tab navigation
+		if m.filterFocusIdx == 0 {
+			m.showFilterForm = false
+			m.filterFieldDD.Blur()
+			m.filterOperatorDD.Blur()
+			m.filterValueInput.Blur()
+			m.recalculateTableHeight()
+			return m, nil
+		}
+		// Otherwise, move to previous field
 		m.blurCurrentFilterField()
 		m.filterFocusIdx = (m.filterFocusIdx - 1 + 4) % 4
 		m.focusCurrentFilterField()
@@ -1966,7 +1958,7 @@ func (m logsViewer) handleFilterFormKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.loading = true
 				m.offset = 0 // Reset to first page when filter changes
 				if m.app != nil {
-					return m, m.app.fetchLogsDataCmd(m.config, 0, m.filters)
+					return m, m.app.fetchLogsDataCmd(m.config, 0, m.filters, m.width)
 				}
 			}
 		} else if m.selectedFilterIdx >= 0 && m.selectedFilterIdx < len(m.filters) {
@@ -1978,7 +1970,7 @@ func (m logsViewer) handleFilterFormKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.loading = true
 			m.offset = 0 // Reset to first page when filter changes
 			if m.app != nil {
-				return m, m.app.fetchLogsDataCmd(m.config, 0, m.filters)
+				return m, m.app.fetchLogsDataCmd(m.config, 0, m.filters, m.width)
 			}
 		}
 		return m, nil
@@ -2298,6 +2290,10 @@ func (m logsViewer) View() string {
 	// Add table
 	components = append(components, tableView)
 
+	// Add main help line at the bottom
+	mainHelpLine := m.renderMainHelpLine()
+	components = append(components, mainHelpLine)
+
 	// Join all parts using lipgloss to avoid extra newlines
 	// lipgloss.JoinVertical adds exactly one newline between components
 	content = lipgloss.JoinVertical(lipgloss.Left, components...)
@@ -2310,6 +2306,7 @@ func (m logsViewer) View() string {
 	hasOverflow := overflowAmount > 0
 
 	// Debug logging with detailed breakdown
+	mainHelpLines := 1 // Main help line is always 1 line
 	log.Debug().
 		Int("screen_height", m.height).
 		Int("title_lines", titleLines).
@@ -2317,17 +2314,18 @@ func (m logsViewer) View() string {
 		Int("overview_rendered_lines", overviewRenderedLines).
 		Int("table_height_allocated", m.tableHeight).
 		Int("table_view_actual_lines", tableViewLines).
+		Int("main_help_lines", mainHelpLines).
 		Int("total_content_lines", totalContentLines).
-		Int("expected_total", titleLines+filterFormLines+overviewRenderedLines+tableViewLines).
+		Int("expected_total", titleLines+filterFormLines+overviewRenderedLines+tableViewLines+mainHelpLines).
 		Int("overflow_amount", overflowAmount).
-		Int("missing_lines", (titleLines+filterFormLines+overviewRenderedLines+tableViewLines)-totalContentLines).
+		Int("missing_lines", (titleLines+filterFormLines+overviewRenderedLines+tableViewLines+mainHelpLines)-totalContentLines).
 		Bool("overflow", hasOverflow).
 		Bool("overview_mode", m.overviewMode).
 		Bool("focus_overview", m.focusOverview).
 		Bool("show_filter_form", m.showFilterForm).
-		Str("calculation", fmt.Sprintf("%d(title) + %d(filter) + %d(overview) + %d(table) = %d(expected) vs %d(actual)",
-			titleLines, filterFormLines, overviewRenderedLines, tableViewLines,
-			titleLines+filterFormLines+overviewRenderedLines+tableViewLines, totalContentLines)).
+		Str("calculation", fmt.Sprintf("%d(title) + %d(filter) + %d(overview) + %d(table) + %d(help) = %d(expected) vs %d(actual)",
+			titleLines, filterFormLines, overviewRenderedLines, tableViewLines, mainHelpLines,
+			titleLines+filterFormLines+overviewRenderedLines+tableViewLines+mainHelpLines, totalContentLines)).
 		Str("title_text", title).
 		Int("title_text_length", len(title)).
 		Int("table_widget_overhead_actual", tableViewLines-m.tableHeight).
@@ -2528,10 +2526,13 @@ func (m logsViewer) renderOverview() string {
 	}
 
 	var builder strings.Builder
-	prefixText := fmt.Sprintf("Total: %d | ", m.totalRows)
+	// Use fixed-width prefix to match sparkline label width (14 chars)
+	// Format: "Total: 1234 | " with right-aligned number (exactly 14 chars)
+	prefixText := fmt.Sprintf("Total:%5d | ", m.totalRows)
 	builder.WriteString(prefixText)
 
 	// Calculate available width for bar segments (content minus prefix)
+	// This should now always be 14 chars, matching sparklineRowLabelWidth
 	availableWidth := contentWidth - len(prefixText)
 	if availableWidth < 20 {
 		availableWidth = 20
@@ -2643,6 +2644,16 @@ func (m logsViewer) generateSparklineForLevels(sortedLevels []logLevelCount) str
 		return ""
 	}
 
+	// Debug: Show what keys are actually in levelTimeSeries
+	keys := make([]string, 0, len(m.levelTimeSeries))
+	for k := range m.levelTimeSeries {
+		keys = append(keys, k)
+	}
+	log.Debug().
+		Int("levelTimeSeries_count", len(m.levelTimeSeries)).
+		Strs("levelTimeSeries_keys", keys).
+		Msg(">>> generateSparklineForLevels - checking levelTimeSeries keys")
+
 	// Show top 3-4 priority levels
 	priorityLevels := []string{"error", "warning", "info", "debug"}
 
@@ -2667,11 +2678,50 @@ func (m logsViewer) generateSparklineForLevels(sortedLevels []logLevelCount) str
 	for _, level := range priorityLevels {
 		values, exists := m.levelTimeSeries[level]
 		if !exists || len(values) == 0 {
+			log.Debug().
+				Str("level", level).
+				Bool("exists", exists).
+				Int("len", func() int { if values != nil { return len(values) } else { return -1 } }()).
+				Msg(">>> Skipping level - no data")
 			continue
 		}
 
+		// Debug: Check if values are actually non-zero
+		nonZeroCount := 0
+		var sampleValues []float64
+		for i, v := range values {
+			if v > 0 {
+				nonZeroCount++
+				if len(sampleValues) < 5 {
+					sampleValues = append(sampleValues, v)
+				}
+			}
+			if i < 5 && v > 0 {
+				sampleValues = append(sampleValues, v)
+			}
+		}
+
+		log.Debug().
+			Str("level", level).
+			Int("values_count", len(values)).
+			Int("non_zero_count", nonZeroCount).
+			Interface("first_5_non_zero", sampleValues).
+			Msg(">>> Values before sparkline generation")
+
 		// Generate sparkline characters
 		sparklineChars := m.generateSparklineChars(values)
+
+		log.Debug().
+			Str("level", level).
+			Int("sparkline_chars_len", len(sparklineChars)).
+			Str("sparkline_preview", func() string {
+				s := string(sparklineChars)
+				if len(s) > 20 {
+					return s[:20] + "..."
+				}
+				return s
+			}()).
+			Msg(">>> Generated sparkline for level")
 
 		// Apply color based on level
 		color := getLogLevelColor(level)
@@ -2869,6 +2919,19 @@ func (m logsViewer) IsTableFiltering() bool {
 	return m.table.IsFiltering()
 }
 
+// renderMainHelpLine renders the bottom help line with context-aware shortcuts
+func (m logsViewer) renderMainHelpLine() string {
+	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // Gray
+
+	if m.showFilterForm {
+		// When filter form is visible, show filter-related help
+		return helpStyle.Render("Tab/Shift+Tab: Navigate filter fields | Enter: Add/Remove filter | Esc/Ctrl+F: Hide filters")
+	}
+
+	// Normal mode: show all available shortcuts
+	return helpStyle.Render("↑↓/PgUp/PgDn: Scroll | /: Filter table | Ctrl+F: Show filters | Tab: Switch focus | Enter: Details | Esc: Back")
+}
+
 // renderZoomMenu renders the zoom action menu
 func (m logsViewer) renderZoomMenu() string {
 	if !m.showZoomMenu {
@@ -3013,12 +3076,17 @@ func (a *App) ShowLogsViewer(config LogConfig) tea.Cmd {
 	a.logsHandler = viewer
 	a.currentPage = pageLogs
 
-	// Start async data fetch
-	return a.fetchLogsDataCmd(config, 0, nil)
+	// Start async data fetch only if we have valid dimensions
+	// If width is 0, we haven't received WindowSizeMsg yet - data will be fetched
+	// when LogsDataMsg is received after window size is set
+	if a.width > 0 {
+		return a.fetchLogsDataCmd(config, 0, nil, a.width)
+	}
+	return nil
 }
 
 // fetchLogsDataCmd fetches log data from ClickHouse
-func (a *App) fetchLogsDataCmd(config LogConfig, offset int, filters []LogFilter) tea.Cmd {
+func (a *App) fetchLogsDataCmd(config LogConfig, offset int, filters []LogFilter, viewerWidth int) tea.Cmd {
 	return func() tea.Msg {
 		// Build query - select all fields (*)
 		queryBuilder := fmt.Sprintf(
@@ -3141,13 +3209,15 @@ func (a *App) fetchLogsDataCmd(config LogConfig, offset int, filters []LogFilter
 
 		// Query time-bucketed counts for sparkline visualization
 		// Calculate optimal bucket count based on available width inside overview box
-		// The overview box uses overviewContentWidth = screen_width - 2
-		// Inside that box, we have the content area which uses the full width
-		// Sparkline width = content_width - label_width(14)
-		// Label format: "  ERROR     : " = 14 chars (matches bar prefix "Total: 1000 | ")
-		overviewContentWidth := a.width - 2
-		labelWidth := 14
-		sparklineWidth := overviewContentWidth - labelWidth
+		// The overview box uses contentWidth = viewer_width - 2 (borders)
+		// Inside that box, sparkline width = content_width - label_width
+		// Label format: "  ERROR     : " = 14 chars (2 spaces + 10 char padded name + " : ")
+		// This matches BOTH:
+		//   - sparkline row label width in generateSparklineForLevels
+		//   - bar prefix "Total:12345 | " in renderOverview (fixed 14 chars)
+		contentWidth := viewerWidth - 2
+		sparklineRowLabelWidth := 14 // "  ERROR     : " (consistent with display)
+		sparklineWidth := contentWidth - sparklineRowLabelWidth
 
 		if sparklineWidth < 40 {
 			sparklineWidth = 40 // Minimum width for readability
@@ -3157,15 +3227,16 @@ func (a *App) fetchLogsDataCmd(config LogConfig, offset int, filters []LogFilter
 		}
 
 		log.Debug().
-			Int("screen_width", a.width).
-			Int("overview_content_width", overviewContentWidth).
-			Int("label_width", labelWidth).
-			Int("sparkline_width_calculated", overviewContentWidth-labelWidth).
+			Int("viewer_width", viewerWidth).
+			Int("content_width", contentWidth).
+			Int("sparkline_row_label_width", sparklineRowLabelWidth).
+			Int("sparkline_width_calculated", contentWidth-sparklineRowLabelWidth).
 			Int("sparkline_width_final", sparklineWidth).
 			Int("bucket_count", sparklineWidth).
 			Msg(">>> Sparkline width calculation")
 
-		levelTimeSeries, timeLabels := a.fetchTimeSeriesData(config, firstTime, lastTime, sparklineWidth)
+		// Generate sparkline data directly from fetched entries (no second query needed!)
+		levelTimeSeries, timeLabels := generateSparklineFromEntries(entries, config.LevelField, firstTime, lastTime, sparklineWidth)
 
 		return LogsDataMsg{
 			Entries:         entries,
@@ -3179,8 +3250,109 @@ func (a *App) fetchLogsDataCmd(config LogConfig, offset int, filters []LogFilter
 	}
 }
 
+// generateSparklineFromEntries generates sparkline data directly from fetched log entries
+// This avoids making a separate SQL query - we bucket the data we already have
+func generateSparklineFromEntries(entries []LogEntry, levelField string, startTime, endTime time.Time, sparklineWidth int) (map[string][]float64, []string) {
+	if len(entries) == 0 || startTime.IsZero() || endTime.IsZero() {
+		return nil, nil
+	}
+
+	// Use sparklineWidth as bucket count - ensures sparkline fills available width
+	buckets := sparklineWidth
+	if buckets < 20 {
+		buckets = 20
+	}
+	if buckets > 200 {
+		buckets = 200
+	}
+
+	timeRange := endTime.Sub(startTime).Seconds()
+	if timeRange <= 0 {
+		return nil, nil
+	}
+	intervalSeconds := timeRange / float64(buckets)
+	if intervalSeconds < 1 {
+		intervalSeconds = 1
+	}
+
+	// Generate fixed-width bucket timestamps from startTime to endTime
+	// This ensures the sparkline always has exactly `buckets` characters
+	startUnix := startTime.Unix()
+	fixedBuckets := make([]int64, buckets)
+	for i := 0; i < buckets; i++ {
+		fixedBuckets[i] = startUnix + int64(float64(i)*intervalSeconds)
+	}
+
+	// Bucket entries by level and time interval
+	levelBucketCounts := make(map[string]map[int]float64) // map[level]map[bucketIndex]count
+
+	for _, entry := range entries {
+		// Normalize level name (same logic as fetchTimeSeriesData)
+		levelLower := strings.ToLower(entry.Level)
+		switch levelLower {
+		case "information", "notice":
+			levelLower = "info"
+		case "warn":
+			levelLower = "warning"
+		case "exception", "critical", "fatal":
+			levelLower = "error"
+		case "trace":
+			levelLower = "debug"
+		}
+
+		// Calculate which bucket index this entry belongs to
+		entryUnix := entry.Time.Unix()
+		bucketIndex := int(float64(entryUnix-startUnix) / intervalSeconds)
+		if bucketIndex < 0 {
+			bucketIndex = 0
+		}
+		if bucketIndex >= buckets {
+			bucketIndex = buckets - 1
+		}
+
+		if levelBucketCounts[levelLower] == nil {
+			levelBucketCounts[levelLower] = make(map[int]float64)
+		}
+		levelBucketCounts[levelLower][bucketIndex]++
+	}
+
+	log.Debug().
+		Int("entries_count", len(entries)).
+		Int("fixed_buckets_count", len(fixedBuckets)).
+		Int("requested_buckets", buckets).
+		Float64("interval_seconds", intervalSeconds).
+		Msg(">>> Generated sparkline from entries (fixed-width buckets)")
+
+	// Build aligned time series with fixed width
+	levelTimeSeries := make(map[string][]float64)
+	for level, bucketCounts := range levelBucketCounts {
+		values := make([]float64, buckets)
+		for idx, count := range bucketCounts {
+			if idx >= 0 && idx < buckets {
+				values[idx] = count
+			}
+		}
+		levelTimeSeries[level] = values
+
+		log.Debug().
+			Str("level", level).
+			Int("data_points", len(values)).
+			Int("bucketCounts_size", len(bucketCounts)).
+			Msg(">>> Built sparkline for level from entries")
+	}
+
+	// Generate time labels for fixed buckets
+	timeLabels := make([]string, buckets)
+	for i, ts := range fixedBuckets {
+		t := time.Unix(ts, 0)
+		timeLabels[i] = t.Format("15:04:05")
+	}
+
+	return levelTimeSeries, timeLabels
+}
+
 // fetchTimeSeriesData queries time-bucketed log counts for sparkline visualization
-func (a *App) fetchTimeSeriesData(config LogConfig, startTime, endTime time.Time, sparklineWidth int) (map[string][]float64, []string) {
+func (a *App) fetchTimeSeriesData(config LogConfig, startTime, endTime time.Time, sparklineWidth int, filters []LogFilter) (map[string][]float64, []string) {
 	if startTime.IsZero() || endTime.IsZero() || config.LevelField == "" {
 		return nil, nil
 	}
@@ -3204,6 +3376,24 @@ func (a *App) fetchTimeSeriesData(config LogConfig, startTime, endTime time.Time
 		intervalSeconds = 1
 	}
 
+	// Build WHERE clause with time range and filters
+	whereClause := fmt.Sprintf("%s BETWEEN '%s' AND '%s'",
+		config.TimeField,
+		startTime.Format("2006-01-02 15:04:05"),
+		endTime.Format("2006-01-02 15:04:05"))
+
+	// Create args slice for parameterized query
+	var args []interface{}
+
+	// Add user filters if present
+	if len(filters) > 0 {
+		filterWhere, filterArgs := buildWhereClause(filters)
+		if filterWhere != "" {
+			whereClause = whereClause + " AND (" + filterWhere + ")"
+			args = append(args, filterArgs...)
+		}
+	}
+
 	// Build query using fixed time buckets to ensure all levels have same timestamps and width
 	query := fmt.Sprintf(`
 		SELECT
@@ -3211,7 +3401,7 @@ func (a *App) fetchTimeSeriesData(config LogConfig, startTime, endTime time.Time
 			toUnixTimestamp(toStartOfInterval(%s, INTERVAL %d SECOND)) as bucket_ts,
 			count() as cnt
 		FROM %s.%s
-		WHERE %s BETWEEN '%s' AND '%s'
+		WHERE %s
 		GROUP BY level, bucket_ts
 		ORDER BY level, bucket_ts
 	`,
@@ -3220,18 +3410,17 @@ func (a *App) fetchTimeSeriesData(config LogConfig, startTime, endTime time.Time
 		intervalSeconds,
 		config.Database,
 		config.Table,
-		config.TimeField,
-		startTime.Format("2006-01-02 15:04:05"),
-		endTime.Format("2006-01-02 15:04:05"),
+		whereClause,
 	)
 
 	log.Debug().
 		Str("query", query).
 		Int("buckets", buckets).
 		Int("interval_seconds", intervalSeconds).
+		Int("filter_args_count", len(args)).
 		Msg("Fetching time-series data for sparkline")
 
-	rows, err := a.state.ClickHouse.Query(query)
+	rows, err := a.state.ClickHouse.Query(query, args...)
 	if err != nil {
 		log.Error().Err(err).Msg("Error querying time-series data")
 		return nil, nil
@@ -3242,33 +3431,10 @@ func (a *App) fetchTimeSeriesData(config LogConfig, startTime, endTime time.Time
 		}
 	}()
 
-	// Generate expected bucket timestamps for the entire time range
-	// This ensures all levels have the same timestamps and width
-	startUnix := startTime.Unix()
-	endUnix := endTime.Unix()
-	expectedBuckets := make([]int64, 0, buckets)
-	for ts := startUnix; ts <= endUnix; ts += int64(intervalSeconds) {
-		expectedBuckets = append(expectedBuckets, ts)
-		if len(expectedBuckets) >= buckets {
-			break
-		}
-	}
-	// Ensure we have exactly buckets timestamps
-	if len(expectedBuckets) < buckets {
-		// Pad with remaining timestamps if needed
-		lastTs := expectedBuckets[len(expectedBuckets)-1]
-		for len(expectedBuckets) < buckets {
-			lastTs += int64(intervalSeconds)
-			expectedBuckets = append(expectedBuckets, lastTs)
-		}
-	}
-
-	log.Debug().
-		Int("expected_buckets", len(expectedBuckets)).
-		Msg("Generated expected bucket timestamps")
-
 	// Parse query results into map[level]map[timestamp]count
+	// Also collect all unique timestamps from the query (these are the ACTUAL buckets from ClickHouse)
 	levelBucketCounts := make(map[string]map[int64]float64)
+	allBucketTimestamps := make(map[int64]bool)
 
 	for rows.Next() {
 		var level string
@@ -3281,6 +3447,7 @@ func (a *App) fetchTimeSeriesData(config LogConfig, startTime, endTime time.Time
 		}
 
 		levelLower := strings.ToLower(level)
+		originalLevel := levelLower
 
 		// Normalize level aliases to canonical names for consistent sparkline display
 		switch levelLower {
@@ -3294,17 +3461,42 @@ func (a *App) fetchTimeSeriesData(config LogConfig, startTime, endTime time.Time
 			levelLower = "debug"
 		}
 
+		// Debug: Show level normalization
+		if originalLevel != levelLower {
+			log.Debug().
+				Str("original_level", level).
+				Str("lowercased", originalLevel).
+				Str("normalized_level", levelLower).
+				Msg(">>> Sparkline level normalization applied")
+		}
+
 		if levelBucketCounts[levelLower] == nil {
 			levelBucketCounts[levelLower] = make(map[int64]float64)
 		}
 		levelBucketCounts[levelLower][bucketTs] = count
+		allBucketTimestamps[bucketTs] = true  // Track all unique timestamps
 	}
 
-	// Build aligned time series for each level with exactly 'buckets' data points
+	// Convert unique timestamps to sorted slice - these are the ACTUAL buckets from the query
+	actualBuckets := make([]int64, 0, len(allBucketTimestamps))
+	for ts := range allBucketTimestamps {
+		actualBuckets = append(actualBuckets, ts)
+	}
+	// Sort timestamps
+	sort.Slice(actualBuckets, func(i, j int) bool {
+		return actualBuckets[i] < actualBuckets[j]
+	})
+
+	log.Debug().
+		Int("actual_buckets_count", len(actualBuckets)).
+		Int("requested_buckets", buckets).
+		Msg(">>> Using actual bucket timestamps from query")
+
+	// Build aligned time series for each level using ACTUAL bucket timestamps
 	levelTimeSeries := make(map[string][]float64)
 	for level, bucketCounts := range levelBucketCounts {
-		values := make([]float64, len(expectedBuckets))
-		for i, ts := range expectedBuckets {
+		values := make([]float64, len(actualBuckets))
+		for i, ts := range actualBuckets {
 			if count, exists := bucketCounts[ts]; exists {
 				values[i] = count
 			}
@@ -3315,8 +3507,8 @@ func (a *App) fetchTimeSeriesData(config LogConfig, startTime, endTime time.Time
 		log.Debug().
 			Str("level", level).
 			Int("data_points", len(values)).
-			Int("non_zero_points", len(bucketCounts)).
-			Msg("Built aligned time series for level")
+			Int("bucketCounts_size", len(bucketCounts)).
+			Msg(">>> Built aligned time series for level")
 	}
 
 	if err := rows.Err(); err != nil {
@@ -3324,18 +3516,34 @@ func (a *App) fetchTimeSeriesData(config LogConfig, startTime, endTime time.Time
 		return nil, nil
 	}
 
-	// Generate time labels from expected bucket timestamps
-	timeLabels := make([]string, len(expectedBuckets))
-	for i, ts := range expectedBuckets {
+	// Generate time labels from actual bucket timestamps
+	timeLabels := make([]string, len(actualBuckets))
+	for i, ts := range actualBuckets {
 		t := time.Unix(ts, 0)
 		timeLabels[i] = t.Format("15:04:05")
 	}
 
+	// Debug: Check data before returning
+	debugSample := make(map[string]interface{})
+	for level, values := range levelTimeSeries {
+		nonZero := 0
+		for _, v := range values {
+			if v > 0 {
+				nonZero++
+			}
+		}
+		debugSample[level] = map[string]int{
+			"total":    len(values),
+			"non_zero": nonZero,
+		}
+	}
+
 	log.Debug().
 		Int("levels_count", len(levelTimeSeries)).
-		Int("bucket_count", len(expectedBuckets)).
+		Int("bucket_count", len(actualBuckets)).
 		Int("interval_seconds", intervalSeconds).
-		Msg("Time-series data fetched successfully with fixed time buckets")
+		Interface("data_before_return", debugSample).
+		Msg(">>> Time-series data BEFORE RETURN from fetchTimeSeriesData")
 
 	return levelTimeSeries, timeLabels
 }
