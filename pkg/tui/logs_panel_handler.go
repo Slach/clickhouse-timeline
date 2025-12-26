@@ -28,7 +28,19 @@ type LogEntry struct {
 type LogFilter struct {
 	Field    string
 	Operator string
-	Value    string
+	Value    string // empty for IS NULL / IS NOT NULL
+}
+
+// FilterGroup represents a group of filters combined with AND or OR
+type FilterGroup struct {
+	Filters    []LogFilter
+	Combinator string // "AND" or "OR" - how filters within this group are combined
+}
+
+// LogFilterGroups represents multiple filter groups
+type LogFilterGroups struct {
+	Groups          []FilterGroup
+	GroupCombinator string // "AND" or "OR" - how groups are combined with each other
 }
 
 // logLevelCount is used for sorting and displaying level statistics
@@ -1385,6 +1397,13 @@ type LogsDataMsg struct {
 	Err             error
 }
 
+// OverviewDataMsg is sent when overview sparkline data is loaded via LTTB
+type OverviewDataMsg struct {
+	LevelTimeSeries map[string][]float64 // LTTB-downsampled counts per level
+	TimeLabels      []string             // Time labels for LTTB points
+	Err             error
+}
+
 // timeRange represents a time range for zoom functionality
 type timeRange struct {
 	from time.Time
@@ -1411,6 +1430,8 @@ type logsViewer struct {
 	measuredWidgetOverhead  int // Measured overhead: actual rendered lines - allocated height
 	showDetails             bool
 	selectedEntry           LogEntry
+	detailsSelectedIdx      int      // Selected field index in details view (-1 = none, 0-2 = fixed fields, 3+ = AllFields)
+	detailsFieldNames       []string // Cached sorted field names for details view
 	offset                  int  // Current offset for pagination
 	app                     *App // Reference to app for triggering data loads
 
@@ -1427,14 +1448,18 @@ type logsViewer struct {
 	zoomMenuIdx  int  // Selected menu item (0-3)
 
 	// Filter form
-	showFilterForm    bool        // Whether filter form is visible
-	filters           []LogFilter // Active filters
-	allFields         []string    // All available fields from table
-	filterFieldDD     dropdown    // Filter field dropdown
-	filterOperatorDD  dropdown    // Filter operator dropdown
-	filterValueInput  textinput.Model // Filter value input
-	filterFocusIdx    int         // 0=field, 1=operator, 2=value, 3=add button
-	selectedFilterIdx int         // Index of selected filter button for removal (-1 if none)
+	showFilterForm     bool             // Whether filter form is visible
+	filterGroups       LogFilterGroups  // Filter groups with combinators
+	currentGroupIdx    int              // Index of current group being edited
+	allFields          []string         // All available fields from table
+	filterFieldDD      dropdown         // Filter field dropdown
+	filterOperatorDD   dropdown         // Filter operator dropdown
+	filterValueInput   textinput.Model  // Filter value input
+	filterFocusIdx     int              // 0=field, 1=operator, 2=value, 3=add button, 4=active filters, 5=group logic (AND/OR within group), 6=new group, 7=between groups combinator, 8=apply
+	selectedFilterIdx  int              // Index of selected filter within current group (-1 if none)
+	groupCombinatorDD  dropdown         // Dropdown for group combinator (AND/OR between groups)
+	filterCombinatorDD dropdown         // Dropdown for filter combinator (AND/OR within group)
+	filtersChanged     bool             // True when filters changed and need Apply
 }
 
 func newLogsViewer(config LogConfig, width, height int) logsViewer {
@@ -1485,12 +1510,27 @@ func newLogsViewer(config LogConfig, width, height int) logsViewer {
 	// Initialize filter form components
 	filterFieldDD := newDropdown("Field", 20, true)
 	filterOperatorDD := newDropdown("Operator", 15, true)
-	filterOperatorDD.SetOptions([]string{"=", "!=", ">", "<", ">=", "<=", "LIKE", "NOT LIKE"})
+	filterOperatorDD.SetOptions([]string{"=", "!=", ">", "<", ">=", "<=", "LIKE", "NOT LIKE", "IN", "NOT IN", "IS NULL", "IS NOT NULL"})
 	filterOperatorDD.SetValue("=")
 
 	filterValueInput := textinput.New()
 	filterValueInput.Placeholder = "Filter value..."
 	filterValueInput.Width = 30
+
+	// Combinator dropdowns
+	groupCombinatorDD := newDropdown("Groups", 8, false)
+	groupCombinatorDD.SetOptions([]string{"AND", "OR"})
+	groupCombinatorDD.SetValue("AND")
+
+	filterCombinatorDD := newDropdown("Filters", 8, false)
+	filterCombinatorDD.SetOptions([]string{"AND", "OR"})
+	filterCombinatorDD.SetValue("AND")
+
+	// Initialize with one empty group
+	initialGroups := LogFilterGroups{
+		Groups:          []FilterGroup{{Filters: []LogFilter{}, Combinator: "AND"}},
+		GroupCombinator: "AND",
+	}
 
 	return logsViewer{
 		config:                 config,
@@ -1502,18 +1542,65 @@ func newLogsViewer(config LogConfig, width, height int) logsViewer {
 		measuredWidgetOverhead: 2, // Initial guess, will be measured after first render
 		overviewMode:           true, // Show overview by default
 		showFilterForm:         false,
-		filters:                []LogFilter{},
+		filterGroups:           initialGroups,
+		currentGroupIdx:        0,
 		allFields:              []string{},
 		filterFieldDD:          filterFieldDD,
 		filterOperatorDD:       filterOperatorDD,
 		filterValueInput:       filterValueInput,
 		filterFocusIdx:         0,
 		selectedFilterIdx:      -1,
+		groupCombinatorDD:      groupCombinatorDD,
+		filterCombinatorDD:     filterCombinatorDD,
 	}
 }
 
 func (m logsViewer) Init() tea.Cmd {
 	return nil
+}
+
+// getCurrentGroupFilters returns filters from the current group
+func (m *logsViewer) getCurrentGroupFilters() []LogFilter {
+	if m.currentGroupIdx >= 0 && m.currentGroupIdx < len(m.filterGroups.Groups) {
+		return m.filterGroups.Groups[m.currentGroupIdx].Filters
+	}
+	return nil
+}
+
+// addFilterToCurrentGroup adds a filter to the current group
+func (m *logsViewer) addFilterToCurrentGroup(filter LogFilter) {
+	if m.currentGroupIdx >= 0 && m.currentGroupIdx < len(m.filterGroups.Groups) {
+		m.filterGroups.Groups[m.currentGroupIdx].Filters = append(
+			m.filterGroups.Groups[m.currentGroupIdx].Filters, filter)
+	}
+}
+
+// removeFilterFromCurrentGroup removes a filter from the current group by index
+func (m *logsViewer) removeFilterFromCurrentGroup(idx int) {
+	if m.currentGroupIdx >= 0 && m.currentGroupIdx < len(m.filterGroups.Groups) {
+		filters := m.filterGroups.Groups[m.currentGroupIdx].Filters
+		if idx >= 0 && idx < len(filters) {
+			m.filterGroups.Groups[m.currentGroupIdx].Filters = append(filters[:idx], filters[idx+1:]...)
+		}
+	}
+}
+
+// getTotalFilterCount returns total number of filters across all groups
+func (m *logsViewer) getTotalFilterCount() int {
+	count := 0
+	for _, group := range m.filterGroups.Groups {
+		count += len(group.Filters)
+	}
+	return count
+}
+
+// addNewGroup adds a new empty filter group
+func (m *logsViewer) addNewGroup() {
+	m.filterGroups.Groups = append(m.filterGroups.Groups, FilterGroup{
+		Filters:    []LogFilter{},
+		Combinator: "AND",
+	})
+	m.currentGroupIdx = len(m.filterGroups.Groups) - 1
 }
 
 // recalculateTableHeight recalculates and updates table height based on current overview mode
@@ -1546,8 +1633,8 @@ func (m *logsViewer) recalculateTableHeight() {
 	// Main help line is always present at the bottom
 	mainHelpLines := 1
 
-	if m.overviewMode && len(m.levelTimeSeries) > 0 {
-		// Overview is visible - calculate actual overhead
+	if m.overviewMode && m.totalRows > 0 {
+		// Overview is visible and we have data - calculate actual overhead
 		overview := m.renderOverview()
 		borderStyle := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -1556,8 +1643,12 @@ func (m *logsViewer) recalculateTableHeight() {
 
 		overviewLines := strings.Count(renderedOverview, "\n") + 1
 		actualOverhead = titleLines + filterFormLines + overviewLines + mainHelpLines
+	} else if m.overviewMode && m.totalRows == 0 {
+		// Overview will show but no data yet - use estimate
+		estimatedOverviewLines := 8
+		actualOverhead = titleLines + filterFormLines + estimatedOverviewLines + mainHelpLines
 	} else {
-		// Overview is hidden or no data - only title line (and filter form if shown)
+		// Overview is hidden - only title line (and filter form if shown)
 		actualOverhead = titleLines + filterFormLines + mainHelpLines
 	}
 
@@ -1671,7 +1762,7 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// This handles the case where ShowLogsViewer was called before WindowSizeMsg
 		if m.totalRows == 0 && !m.loading && m.app != nil {
 			m.loading = true
-			return m, m.app.fetchLogsDataCmd(m.config, 0, m.filters, m.width)
+			return m, m.app.fetchLogsDataCmd(m.config, 0, m.filterGroups, m.width)
 		}
 
 		return m, nil
@@ -1688,36 +1779,7 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastEntryTime = msg.LastEntryTime
 		m.totalRows = msg.TotalRows
 		m.levelCounts = msg.LevelCounts
-		m.levelTimeSeries = msg.LevelTimeSeries
-		m.timeLabels = msg.TimeLabels
-
-		// Debug: Check levelTimeSeries right after assignment
-		log.Debug().
-			Int("levelTimeSeries_count", len(m.levelTimeSeries)).
-			Interface("levelTimeSeries_keys", func() []string {
-				keys := make([]string, 0, len(m.levelTimeSeries))
-				for k := range m.levelTimeSeries {
-					keys = append(keys, k)
-				}
-				return keys
-			}()).
-			Interface("sample_data", func() map[string]interface{} {
-				sample := make(map[string]interface{})
-				for level, values := range m.levelTimeSeries {
-					nonZero := 0
-					for _, v := range values {
-						if v > 0 {
-							nonZero++
-						}
-					}
-					sample[level] = map[string]int{
-						"total":    len(values),
-						"non_zero": nonZero,
-					}
-				}
-				return sample
-			}()).
-			Msg(">>> LogsDataMsg - levelTimeSeries assigned")
+		// LevelTimeSeries and TimeLabels will be populated by OverviewDataMsg
 
 		// Recalculate table height based on current state (filter form, overview, etc.)
 		m.recalculateTableHeight()
@@ -1741,6 +1803,64 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			rows = append(rows, table.NewRow(rowData))
 		}
 		m.table.SetRows(rows)
+
+		// Trigger overview data fetch if overview is visible and we have time range
+		if m.overviewMode && m.app != nil && !m.app.state.FromTime.IsZero() && !m.app.state.ToTime.IsZero() {
+			// Calculate sparkline width for bucket count
+			contentWidth := m.width - 2
+			sparklineRowLabelWidth := 14 // "  ERROR     : "
+			sparklineWidth := contentWidth - sparklineRowLabelWidth
+			if sparklineWidth < 40 {
+				sparklineWidth = 40
+			}
+			if sparklineWidth > 200 {
+				sparklineWidth = 200
+			}
+
+			log.Debug().
+				Int("sparkline_width", sparklineWidth).
+				Time("from_time", m.app.state.FromTime).
+				Time("to_time", m.app.state.ToTime).
+				Msg(">>> Triggering overview fetch")
+
+			return m, m.app.fetchOverviewDataCmd(m.config, m.app.state.FromTime, m.app.state.ToTime, sparklineWidth, m.filterGroups)
+		}
+		return m, nil
+
+	case OverviewDataMsg:
+		if msg.Err != nil {
+			log.Error().Err(msg.Err).Msg("Error fetching overview data")
+			// Don't show error to user, just log it - overview is optional
+			return m, nil
+		}
+
+		m.levelTimeSeries = msg.LevelTimeSeries
+		m.timeLabels = msg.TimeLabels
+
+		// Calculate bucket interval from time range and number of buckets
+		if m.app != nil && !m.app.state.FromTime.IsZero() && !m.app.state.ToTime.IsZero() && len(m.timeLabels) > 0 {
+			timeRange := m.app.state.ToTime.Sub(m.app.state.FromTime).Seconds()
+			m.bucketInterval = int(timeRange / float64(len(m.timeLabels)))
+			if m.bucketInterval < 1 {
+				m.bucketInterval = 1
+			}
+		}
+
+		// Log keys received
+		keys := make([]string, 0, len(m.levelTimeSeries))
+		for k := range m.levelTimeSeries {
+			keys = append(keys, k)
+		}
+		log.Debug().
+			Int("levelTimeSeries_count", len(m.levelTimeSeries)).
+			Strs("levelTimeSeries_keys", keys).
+			Int("timeLabels_count", len(m.timeLabels)).
+			Int("bucketInterval", m.bucketInterval).
+			Msg(">>> OverviewDataMsg received - data assigned")
+
+		// Recalculate table height because overview size changes when sparklines are added
+		m.recalculateTableHeight()
+
 		return m, nil
 
 	case tea.KeyMsg:
@@ -1784,9 +1904,81 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Handle details view
 		if m.showDetails {
+			// Calculate total selectable fields:
+			// 0 = Time, 1 = Level (if present), 2 = Message, 3+ = AllFields
+			hasLevel := m.selectedEntry.Level != ""
+			fixedFieldCount := 2 // Time, Message
+			if hasLevel {
+				fixedFieldCount = 3 // Time, Level, Message
+			}
+			totalFields := fixedFieldCount + len(m.detailsFieldNames)
+
 			switch msg.String() {
 			case "esc", "q":
 				m.showDetails = false
+				return m, nil
+			case "up", "k":
+				if m.detailsSelectedIdx > 0 {
+					m.detailsSelectedIdx--
+				}
+				return m, nil
+			case "down", "j":
+				if m.detailsSelectedIdx < totalFields-1 {
+					m.detailsSelectedIdx++
+				}
+				return m, nil
+			case "enter":
+				// Add selected field as filter (field = value)
+				var fieldName, fieldValue string
+				if hasLevel {
+					switch m.detailsSelectedIdx {
+					case 0: // Time
+						fieldName = m.config.TimeField
+						fieldValue = m.selectedEntry.Time.Format("2006-01-02 15:04:05")
+					case 1: // Level
+						fieldName = m.config.LevelField
+						fieldValue = m.selectedEntry.Level
+					case 2: // Message
+						fieldName = m.config.MessageField
+						fieldValue = m.selectedEntry.Message
+					default: // AllFields
+						idx := m.detailsSelectedIdx - 3
+						if idx >= 0 && idx < len(m.detailsFieldNames) {
+							fieldName = m.detailsFieldNames[idx]
+							value := m.selectedEntry.AllFields[fieldName]
+							fieldValue = fmt.Sprintf("%v", value)
+						}
+					}
+				} else {
+					switch m.detailsSelectedIdx {
+					case 0: // Time
+						fieldName = m.config.TimeField
+						fieldValue = m.selectedEntry.Time.Format("2006-01-02 15:04:05")
+					case 1: // Message
+						fieldName = m.config.MessageField
+						fieldValue = m.selectedEntry.Message
+					default: // AllFields
+						idx := m.detailsSelectedIdx - 2
+						if idx >= 0 && idx < len(m.detailsFieldNames) {
+							fieldName = m.detailsFieldNames[idx]
+							value := m.selectedEntry.AllFields[fieldName]
+							fieldValue = fmt.Sprintf("%v", value)
+						}
+					}
+				}
+
+				if fieldName != "" {
+					// Add filter to current group
+					m.addFilterToCurrentGroup(LogFilter{
+						Field:    fieldName,
+						Operator: "=",
+						Value:    fieldValue,
+					})
+					m.filtersChanged = true
+					m.showDetails = false
+					m.showFilterForm = true // Show filter form so user can see the added filter
+					m.recalculateTableHeight()
+				}
 				return m, nil
 			}
 			return m, nil
@@ -1816,11 +2008,26 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.focusOverview = true
 				m.selectedLevel = 0
 				m.selectedBucket = 0
-			} else {
-				// Toggle overview visibility
-				m.overviewMode = !m.overviewMode
-				m.focusOverview = false
+				m.recalculateTableHeight()
+
+				// Trigger overview fetch if we have time range and no data yet
+				if m.app != nil && !m.app.state.FromTime.IsZero() && !m.app.state.ToTime.IsZero() && len(m.levelTimeSeries) == 0 {
+					contentWidth := m.width - 2
+					sparklineRowLabelWidth := 14
+					sparklineWidth := contentWidth - sparklineRowLabelWidth
+					if sparklineWidth < 40 {
+						sparklineWidth = 40
+					}
+					if sparklineWidth > 200 {
+						sparklineWidth = 200
+					}
+					return m, m.app.fetchOverviewDataCmd(m.config, m.app.state.FromTime, m.app.state.ToTime, sparklineWidth, m.filterGroups)
+				}
+				return m, nil
 			}
+			// Toggle overview visibility off
+			m.overviewMode = false
+			m.focusOverview = false
 			m.recalculateTableHeight()
 			return m, nil
 		case "enter":
@@ -1856,12 +2063,27 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						entry.Level == level {
 						m.selectedEntry = entry
 						m.showDetails = true
+						// Initialize details navigation
+						m.detailsSelectedIdx = 0 // Start with Time field selected
+						// Cache sorted field names for navigation
+						m.detailsFieldNames = make([]string, 0, len(entry.AllFields))
+						for fieldName := range entry.AllFields {
+							m.detailsFieldNames = append(m.detailsFieldNames, fieldName)
+						}
+						// Sort field names
+						for i := 0; i < len(m.detailsFieldNames)-1; i++ {
+							for j := i + 1; j < len(m.detailsFieldNames); j++ {
+								if m.detailsFieldNames[i] > m.detailsFieldNames[j] {
+									m.detailsFieldNames[i], m.detailsFieldNames[j] = m.detailsFieldNames[j], m.detailsFieldNames[i]
+								}
+							}
+						}
 						break
 					}
 				}
 			}
 			return m, nil
-		case "ctrl+pgdown":
+		case "ctrl+n":
 			// Load next window (older records)
 			if !m.loading && m.app != nil {
 				m.loading = true
@@ -1869,11 +2091,11 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.offset = newOffset
 				log.Debug().
 					Int("new_offset", newOffset).
-					Msg("Loading next window (Ctrl+PgDown)")
-				return m, m.app.fetchLogsDataCmd(m.config, newOffset, m.filters, m.width)
+					Msg("Loading next window (Ctrl+N)")
+				return m, m.app.fetchLogsDataCmd(m.config, newOffset, m.filterGroups, m.width)
 			}
 			return m, nil
-		case "ctrl+pgup":
+		case "ctrl+p":
 			// Load previous window (newer records)
 			if !m.loading && m.app != nil && m.offset > 0 {
 				m.loading = true
@@ -1884,8 +2106,8 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.offset = newOffset
 				log.Debug().
 					Int("new_offset", newOffset).
-					Msg("Loading previous window (Ctrl+PgUp)")
-				return m, m.app.fetchLogsDataCmd(m.config, newOffset, m.filters, m.width)
+					Msg("Loading previous window (Ctrl+P)")
+				return m, m.app.fetchLogsDataCmd(m.config, newOffset, m.filterGroups, m.width)
 			}
 			return m, nil
 		}
@@ -1916,14 +2138,27 @@ func (m logsViewer) handleFilterFormKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case "tab":
 		// Move to next field
-		// Navigation order: Field(0) -> Operator(1) -> Value(2) -> Add(3) -> Active Filters(4) -> Field(0)
+		// Navigation order: Field(0) -> Operator(1) -> Value(2) -> Add(3) -> Active Filters(4) -> Group Logic(5) -> New Group(6) -> Between Groups(7) -> Apply(8) -> Field(0)
+		// Note: Between Groups (7) is only included when there are multiple groups
 		m.blurCurrentFilterField()
+		currentFilters := m.getCurrentGroupFilters()
 		maxIdx := 3
-		if len(m.filters) > 0 {
-			maxIdx = 4 // Include active filters list if there are filters
+		if len(currentFilters) > 0 {
+			maxIdx = 5 // Include active filters list and group logic toggle
+		}
+		if len(m.filterGroups.Groups) > 0 {
+			maxIdx = 8 // Include new group, between groups combinator, and apply button
 		}
 		m.filterFocusIdx = (m.filterFocusIdx + 1) % (maxIdx + 1)
-		if m.filterFocusIdx == 4 && len(m.filters) > 0 {
+		// Skip group logic (5) if no filters in current group
+		if m.filterFocusIdx == 5 && len(currentFilters) == 0 {
+			m.filterFocusIdx = 6
+		}
+		// Skip between groups combinator (7) if only one group exists
+		if m.filterFocusIdx == 7 && len(m.filterGroups.Groups) <= 1 {
+			m.filterFocusIdx = 8
+		}
+		if m.filterFocusIdx == 4 && len(currentFilters) > 0 {
 			// When entering active filters section, select first filter
 			m.selectedFilterIdx = 0
 		} else {
@@ -1945,14 +2180,26 @@ func (m logsViewer) handleFilterFormKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Otherwise, move to previous field
 		m.blurCurrentFilterField()
+		currentFilters := m.getCurrentGroupFilters()
 		maxIdx := 3
-		if len(m.filters) > 0 {
-			maxIdx = 4
+		if len(currentFilters) > 0 {
+			maxIdx = 5 // Include active filters list and group logic toggle
+		}
+		if len(m.filterGroups.Groups) > 0 {
+			maxIdx = 8 // Include new group, between groups combinator, and apply button
 		}
 		m.filterFocusIdx = (m.filterFocusIdx - 1 + maxIdx + 1) % (maxIdx + 1)
-		if m.filterFocusIdx == 4 && len(m.filters) > 0 {
+		// Skip between groups combinator (7) if only one group exists
+		if m.filterFocusIdx == 7 && len(m.filterGroups.Groups) <= 1 {
+			m.filterFocusIdx = 6
+		}
+		// Skip group logic (5) if no filters in current group
+		if m.filterFocusIdx == 5 && len(currentFilters) == 0 {
+			m.filterFocusIdx = 4
+		}
+		if m.filterFocusIdx == 4 && len(currentFilters) > 0 {
 			// When entering active filters section, select last filter
-			m.selectedFilterIdx = len(m.filters) - 1
+			m.selectedFilterIdx = len(currentFilters) - 1
 		} else {
 			m.selectedFilterIdx = -1
 		}
@@ -1967,8 +2214,10 @@ func (m logsViewer) handleFilterFormKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 			operator := m.filterOperatorDD.value
 			value := m.filterValueInput.Value()
 
-			if field != "" && operator != "" && value != "" {
-				m.filters = append(m.filters, LogFilter{
+			// IS NULL and IS NOT NULL don't need a value
+			isNullOperator := operator == "IS NULL" || operator == "IS NOT NULL"
+			if field != "" && operator != "" && (value != "" || isNullOperator) {
+				m.addFilterToCurrentGroup(LogFilter{
 					Field:    field,
 					Operator: operator,
 					Value:    value,
@@ -1976,23 +2225,67 @@ func (m logsViewer) handleFilterFormKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				// Clear value input for next filter
 				m.filterValueInput.SetValue("")
-
-				// Trigger data reload with new filters
+				m.filtersChanged = true // Mark filters as changed, need Apply
+			}
+		} else if m.filterFocusIdx == 4 {
+			currentFilters := m.getCurrentGroupFilters()
+			if m.selectedFilterIdx >= 0 && m.selectedFilterIdx < len(currentFilters) {
+				// Remove selected filter when in active filters section
+				return m.removeSelectedFilter()
+			}
+		} else if m.filterFocusIdx == 5 {
+			// Toggle group logic (AND/OR within current group)
+			if m.currentGroupIdx >= 0 && m.currentGroupIdx < len(m.filterGroups.Groups) {
+				if m.filterGroups.Groups[m.currentGroupIdx].Combinator == "AND" {
+					m.filterGroups.Groups[m.currentGroupIdx].Combinator = "OR"
+				} else {
+					m.filterGroups.Groups[m.currentGroupIdx].Combinator = "AND"
+				}
+				m.filterCombinatorDD.SetValue(m.filterGroups.Groups[m.currentGroupIdx].Combinator)
+				m.filtersChanged = true // Mark filters as changed, need Apply
+			}
+		} else if m.filterFocusIdx == 6 {
+			// Add new group
+			m.addNewGroup()
+			m.filterFocusIdx = 0 // Go back to field selection
+			m.focusCurrentFilterField()
+			return m, nil
+		} else if m.filterFocusIdx == 7 {
+			// Toggle between groups combinator (AND/OR)
+			if m.filterGroups.GroupCombinator == "AND" {
+				m.filterGroups.GroupCombinator = "OR"
+			} else {
+				m.filterGroups.GroupCombinator = "AND"
+			}
+			m.groupCombinatorDD.SetValue(m.filterGroups.GroupCombinator)
+			m.filtersChanged = true // Mark filters as changed, need Apply
+		} else if m.filterFocusIdx == 8 {
+			// Apply filters button
+			if m.filtersChanged && m.app != nil {
 				m.loading = true
 				m.offset = 0 // Reset to first page when filter changes
-				if m.app != nil {
-					return m, m.app.fetchLogsDataCmd(m.config, 0, m.filters, m.width)
+				m.filtersChanged = false
+				// Reset sparklines to force refresh with new filters
+				m.levelTimeSeries = nil
+				m.timeLabels = nil
+				// Calculate sparkline width for overview refresh
+				sparklineWidth := m.width - 20 // Approximate width available for sparklines
+				if sparklineWidth < 40 {
+					sparklineWidth = 40
 				}
+				// Fetch both logs data and overview data with filters
+				return m, tea.Batch(
+					m.app.fetchLogsDataCmd(m.config, 0, m.filterGroups, m.width),
+					m.app.fetchOverviewDataCmd(m.config, m.app.state.FromTime, m.app.state.ToTime, sparklineWidth, m.filterGroups),
+				)
 			}
-		} else if m.filterFocusIdx == 4 && m.selectedFilterIdx >= 0 && m.selectedFilterIdx < len(m.filters) {
-			// Remove selected filter when in active filters section
-			return m.removeSelectedFilter()
 		}
 		return m, nil
 
 	case "delete", "backspace":
 		// Delete selected filter when in active filters section
-		if m.filterFocusIdx == 4 && m.selectedFilterIdx >= 0 && m.selectedFilterIdx < len(m.filters) {
+		currentFilters := m.getCurrentGroupFilters()
+		if m.filterFocusIdx == 4 && m.selectedFilterIdx >= 0 && m.selectedFilterIdx < len(currentFilters) {
 			return m.removeSelectedFilter()
 		}
 		// If not in active filters section, let backspace work normally for text input
@@ -2003,7 +2296,8 @@ func (m logsViewer) handleFilterFormKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case "left":
 		// Navigate between filter buttons (only when in active filters section)
-		if m.filterFocusIdx == 4 && len(m.filters) > 0 {
+		currentFilters := m.getCurrentGroupFilters()
+		if m.filterFocusIdx == 4 && len(currentFilters) > 0 {
 			if m.selectedFilterIdx > 0 {
 				m.selectedFilterIdx--
 			}
@@ -2013,13 +2307,58 @@ func (m logsViewer) handleFilterFormKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case "right":
 		// Navigate between filter buttons (only when in active filters section)
-		if m.filterFocusIdx == 4 && len(m.filters) > 0 {
-			if m.selectedFilterIdx < len(m.filters)-1 {
+		currentFilters := m.getCurrentGroupFilters()
+		if m.filterFocusIdx == 4 && len(currentFilters) > 0 {
+			if m.selectedFilterIdx < len(currentFilters)-1 {
 				m.selectedFilterIdx++
 			}
 			return m, nil
 		}
 		// Otherwise let the key fall through to text input handling
+
+	case "up":
+		// Switch to previous group (only when in active filters section)
+		if m.filterFocusIdx == 4 && len(m.filterGroups.Groups) > 1 {
+			// Find previous group with filters
+			for i := m.currentGroupIdx - 1; i >= 0; i-- {
+				if len(m.filterGroups.Groups[i].Filters) > 0 {
+					m.currentGroupIdx = i
+					m.selectedFilterIdx = 0
+					return m, nil
+				}
+			}
+			// Wrap around to last group with filters
+			for i := len(m.filterGroups.Groups) - 1; i > m.currentGroupIdx; i-- {
+				if len(m.filterGroups.Groups[i].Filters) > 0 {
+					m.currentGroupIdx = i
+					m.selectedFilterIdx = 0
+					return m, nil
+				}
+			}
+			return m, nil
+		}
+
+	case "down":
+		// Switch to next group (only when in active filters section)
+		if m.filterFocusIdx == 4 && len(m.filterGroups.Groups) > 1 {
+			// Find next group with filters
+			for i := m.currentGroupIdx + 1; i < len(m.filterGroups.Groups); i++ {
+				if len(m.filterGroups.Groups[i].Filters) > 0 {
+					m.currentGroupIdx = i
+					m.selectedFilterIdx = 0
+					return m, nil
+				}
+			}
+			// Wrap around to first group with filters
+			for i := 0; i < m.currentGroupIdx; i++ {
+				if len(m.filterGroups.Groups[i].Filters) > 0 {
+					m.currentGroupIdx = i
+					m.selectedFilterIdx = 0
+					return m, nil
+				}
+			}
+			return m, nil
+		}
 	}
 
 	// Delegate to active field
@@ -2072,30 +2411,30 @@ func (m *logsViewer) focusCurrentFilterField() {
 
 // removeSelectedFilter removes the currently selected filter and triggers data reload
 func (m logsViewer) removeSelectedFilter() (tea.Model, tea.Cmd) {
-	if m.selectedFilterIdx < 0 || m.selectedFilterIdx >= len(m.filters) {
+	currentFilters := m.getCurrentGroupFilters()
+	if m.selectedFilterIdx < 0 || m.selectedFilterIdx >= len(currentFilters) {
 		return m, nil
 	}
 
-	// Remove the filter
-	m.filters = append(m.filters[:m.selectedFilterIdx], m.filters[m.selectedFilterIdx+1:]...)
+	// Remove the filter from current group
+	m.removeFilterFromCurrentGroup(m.selectedFilterIdx)
+
+	// Get updated filters count
+	updatedFilters := m.getCurrentGroupFilters()
 
 	// Adjust selection after removal
-	if len(m.filters) == 0 {
-		// No more filters, move focus back to Add button
+	if len(updatedFilters) == 0 {
+		// No more filters in this group, move focus back to Add button
 		m.selectedFilterIdx = -1
 		m.filterFocusIdx = 3
-	} else if m.selectedFilterIdx >= len(m.filters) {
+	} else if m.selectedFilterIdx >= len(updatedFilters) {
 		// Was last filter, select new last
-		m.selectedFilterIdx = len(m.filters) - 1
+		m.selectedFilterIdx = len(updatedFilters) - 1
 	}
 	// else: keep same index (now points to next filter)
 
-	// Trigger data reload without this filter
-	m.loading = true
-	m.offset = 0 // Reset to first page when filter changes
-	if m.app != nil {
-		return m, m.app.fetchLogsDataCmd(m.config, 0, m.filters, m.width)
-	}
+	// Mark filters as changed, need Apply
+	m.filtersChanged = true
 	return m, nil
 }
 
@@ -2239,25 +2578,109 @@ func (m logsViewer) executeZoomAction() (tea.Model, tea.Cmd) {
 
 // zoomToBucket zooms into the selected time bucket
 func (m logsViewer) zoomToBucket() (tea.Model, tea.Cmd) {
-	// TODO: Implement in Phase 4
+	if m.app == nil || m.bucketInterval == 0 || m.selectedBucket < 0 {
+		return m, nil
+	}
+
+	// Save current range to zoom stack for zoom out
+	currentRange := timeRange{
+		from: m.app.state.FromTime,
+		to:   m.app.state.ToTime,
+	}
+
+	// Save original range if this is the first zoom
+	if len(m.zoomStack) == 0 {
+		m.originalRange = currentRange
+	}
+	m.zoomStack = append(m.zoomStack, currentRange)
+
+	// Calculate new time range for selected bucket
+	bucketStart := m.app.state.FromTime.Add(time.Duration(m.selectedBucket*m.bucketInterval) * time.Second)
+	bucketEnd := bucketStart.Add(time.Duration(m.bucketInterval) * time.Second)
+
 	log.Debug().
 		Int("bucket_index", m.selectedBucket).
-		Msg(">>> Zoom to bucket (not yet implemented)")
-	return m, nil
+		Int("bucket_interval", m.bucketInterval).
+		Time("bucket_start", bucketStart).
+		Time("bucket_end", bucketEnd).
+		Msg(">>> Zooming to bucket")
+
+	// Update app state with new time range
+	m.app.state.FromTime = bucketStart
+	m.app.state.ToTime = bucketEnd
+
+	// Reset pagination and clear current data
+	m.offset = 0
+	m.entries = nil
+	m.levelTimeSeries = nil
+	m.timeLabels = nil
+	m.selectedBucket = 0
+	m.loading = true
+
+	// Fetch new data for the zoomed time range
+	return m, m.app.fetchLogsDataCmd(m.config, 0, m.filterGroups, m.width)
 }
 
 // zoomOut restores the previous time range from zoom stack
 func (m logsViewer) zoomOut() (tea.Model, tea.Cmd) {
-	// TODO: Implement in Phase 4
-	log.Debug().Msg(">>> Zoom out (not yet implemented)")
-	return m, nil
+	if m.app == nil || len(m.zoomStack) == 0 {
+		return m, nil
+	}
+
+	// Pop the last range from the stack
+	prevRange := m.zoomStack[len(m.zoomStack)-1]
+	m.zoomStack = m.zoomStack[:len(m.zoomStack)-1]
+
+	log.Debug().
+		Time("from", prevRange.from).
+		Time("to", prevRange.to).
+		Int("stack_depth", len(m.zoomStack)).
+		Msg(">>> Zooming out to previous range")
+
+	// Update app state with previous time range
+	m.app.state.FromTime = prevRange.from
+	m.app.state.ToTime = prevRange.to
+
+	// Reset pagination and clear current data
+	m.offset = 0
+	m.entries = nil
+	m.levelTimeSeries = nil
+	m.timeLabels = nil
+	m.selectedBucket = 0
+	m.loading = true
+
+	// Fetch new data for the restored time range
+	return m, m.app.fetchLogsDataCmd(m.config, 0, m.filterGroups, m.width)
 }
 
 // resetZoom resets to the original time range
 func (m logsViewer) resetZoom() (tea.Model, tea.Cmd) {
-	// TODO: Implement in Phase 4
-	log.Debug().Msg(">>> Reset zoom (not yet implemented)")
-	return m, nil
+	if m.app == nil || m.originalRange.from.IsZero() {
+		return m, nil
+	}
+
+	log.Debug().
+		Time("from", m.originalRange.from).
+		Time("to", m.originalRange.to).
+		Msg(">>> Resetting to original range")
+
+	// Update app state with original time range
+	m.app.state.FromTime = m.originalRange.from
+	m.app.state.ToTime = m.originalRange.to
+
+	// Clear zoom stack
+	m.zoomStack = nil
+
+	// Reset pagination and clear current data
+	m.offset = 0
+	m.entries = nil
+	m.levelTimeSeries = nil
+	m.timeLabels = nil
+	m.selectedBucket = 0
+	m.loading = true
+
+	// Fetch new data for the original time range
+	return m, m.app.fetchLogsDataCmd(m.config, 0, m.filterGroups, m.width)
 }
 
 func (m logsViewer) View() string {
@@ -2324,12 +2747,17 @@ func (m logsViewer) View() string {
 	// Build components list
 	components := []string{renderedTitle}
 
-	// Add filter form if visible
+	// Add filter form if visible, or filter summary if filters are active but form is hidden
 	if m.showFilterForm {
 		filterForm := m.renderFilterForm()
 		filterFormBordered := borderStyle.Render(filterForm)
 		filterFormLines = strings.Count(filterFormBordered, "\n") + 1
 		components = append(components, filterFormBordered)
+	} else if m.getTotalFilterCount() > 0 {
+		// Show compact filter summary when form is hidden but filters are active
+		filterSummary := m.renderFilterSummary()
+		filterFormLines = 1
+		components = append(components, filterSummary)
 	}
 
 	// Add overview if visible
@@ -2392,7 +2820,7 @@ func (m logsViewer) View() string {
 
 	// Update measured overhead if it changed (for next render)
 	if actualWidgetOverhead != m.measuredWidgetOverhead {
-		log.Info().
+		log.Debug().
 			Int("old_measured_overhead", m.measuredWidgetOverhead).
 			Int("new_measured_overhead", actualWidgetOverhead).
 			Msg("Widget overhead measurement updated")
@@ -2477,24 +2905,63 @@ func (m logsViewer) renderFilterForm() string {
 	builder.WriteString(fieldLabel + fieldView + "  " + operatorLabel + operatorView + "  " + valueLabel + valueView + "  " + addButton)
 	builder.WriteString("\n")
 
-	// Show dropdown options if applicable
+	// Show dropdown options if applicable - vertical list with scrolling
 	if m.filterFocusIdx == 0 && m.filterFieldDD.showOptions && len(m.filterFieldDD.filtered) > 0 {
-		builder.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("Options: "))
-		for i, opt := range m.filterFieldDD.filtered {
-			if i == m.filterFieldDD.selected {
-				builder.WriteString(lipgloss.NewStyle().Background(lipgloss.Color("240")).Foreground(lipgloss.Color("15")).Render(opt))
-			} else {
-				builder.WriteString(opt)
+		maxVisible := 10
+		total := len(m.filterFieldDD.filtered)
+		selected := m.filterFieldDD.selected
+
+		// Calculate scroll offset to keep selected item visible
+		scrollOffset := 0
+		if selected >= maxVisible {
+			scrollOffset = selected - maxVisible/2
+			if scrollOffset < 0 {
+				scrollOffset = 0
 			}
-			if i < len(m.filterFieldDD.filtered)-1 {
-				builder.WriteString(" | ")
-			}
-			if i >= 5 { // Limit display to 6 options
-				builder.WriteString(" ...")
-				break
+			if scrollOffset+maxVisible > total {
+				scrollOffset = total - maxVisible
+				if scrollOffset < 0 {
+					scrollOffset = 0
+				}
 			}
 		}
+
+		builder.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(
+			fmt.Sprintf("Fields (%d total, ↑↓ to navigate):", total)))
 		builder.WriteString("\n")
+
+		// Show scroll indicator if there are items before
+		if scrollOffset > 0 {
+			builder.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(
+				fmt.Sprintf("  ↑ %d more above", scrollOffset)))
+			builder.WriteString("\n")
+		}
+
+		// Show visible window
+		endIdx := scrollOffset + maxVisible
+		if endIdx > total {
+			endIdx = total
+		}
+
+		for i := scrollOffset; i < endIdx; i++ {
+			opt := m.filterFieldDD.filtered[i]
+			if i == selected {
+				builder.WriteString(lipgloss.NewStyle().
+					Background(lipgloss.Color("6")).
+					Foreground(lipgloss.Color("0")).
+					Render(fmt.Sprintf("▶ %s", opt)))
+			} else {
+				builder.WriteString(fmt.Sprintf("  %s", opt))
+			}
+			builder.WriteString("\n")
+		}
+
+		// Show scroll indicator if there are items after
+		if endIdx < total {
+			builder.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(
+				fmt.Sprintf("  ↓ %d more below", total-endIdx)))
+			builder.WriteString("\n")
+		}
 	}
 
 	if m.filterFocusIdx == 1 && m.filterOperatorDD.showOptions && len(m.filterOperatorDD.filtered) > 0 {
@@ -2512,41 +2979,221 @@ func (m logsViewer) renderFilterForm() string {
 		builder.WriteString("\n")
 	}
 
-	// Display active filters with delete buttons
-	if len(m.filters) > 0 {
-		// Show label with highlight when active filters section has focus
-		labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-		if m.filterFocusIdx == 4 {
-			labelStyle = labelStyle.Foreground(lipgloss.Color("14")).Bold(true) // Cyan bold when focused
-		}
-		builder.WriteString(labelStyle.Render("Active filters: "))
-
-		for i, filter := range m.filters {
-			filterBtnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // Yellow
-			if m.filterFocusIdx == 4 && m.selectedFilterIdx == i {
-				// Inverted when selected AND in active filters section
-				filterBtnStyle = filterBtnStyle.Background(lipgloss.Color("11")).Foreground(lipgloss.Color("0"))
+	// Display all filter groups
+	totalFilters := m.getTotalFilterCount()
+	if totalFilters > 0 {
+		builder.WriteString("\n")
+		// Show group combinator if more than one group with filters
+		groupsWithFilters := 0
+		for _, g := range m.filterGroups.Groups {
+			if len(g.Filters) > 0 {
+				groupsWithFilters++
 			}
-			filterText := fmt.Sprintf(" [%s %s %s] ✕ ", filter.Field, filter.Operator, filter.Value)
-			builder.WriteString(filterBtnStyle.Render(filterText))
-			builder.WriteString("  ")
 		}
+
+		for groupIdx, group := range m.filterGroups.Groups {
+			if len(group.Filters) == 0 {
+				continue
+			}
+
+			// Show group separator/combinator for subsequent groups
+			if groupIdx > 0 && groupsWithFilters > 1 {
+				combinatorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true) // Cyan
+				if m.filterFocusIdx == 7 {
+					combinatorStyle = combinatorStyle.Background(lipgloss.Color("6")).Foreground(lipgloss.Color("0"))
+				}
+				builder.WriteString(combinatorStyle.Render(fmt.Sprintf(" ─── %s ─── ", m.filterGroups.GroupCombinator)))
+				builder.WriteString("\n")
+			}
+
+			// Group label with current group indicator
+			groupLabelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+			isCurrentGroup := groupIdx == m.currentGroupIdx
+			if isCurrentGroup {
+				groupLabelStyle = groupLabelStyle.Foreground(lipgloss.Color("14")).Bold(true)
+			}
+
+			// Show group combinator (AND/OR within group)
+			combText := group.Combinator
+			if combText == "" {
+				combText = "AND"
+			}
+			// Show arrow indicator for current group
+			groupIndicator := "  "
+			if isCurrentGroup {
+				groupIndicator = "▶ "
+			}
+			builder.WriteString(groupLabelStyle.Render(fmt.Sprintf("%sGroup %d [%s]: ", groupIndicator, groupIdx+1, combText)))
+
+			// Display filters in this group
+			for i, filter := range group.Filters {
+				filterBtnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // Yellow
+				if isCurrentGroup && m.filterFocusIdx == 4 && m.selectedFilterIdx == i {
+					filterBtnStyle = filterBtnStyle.Background(lipgloss.Color("11")).Foreground(lipgloss.Color("0"))
+				}
+				// Handle IS NULL/IS NOT NULL (no value)
+				var filterText string
+				if filter.Operator == "IS NULL" || filter.Operator == "IS NOT NULL" {
+					filterText = fmt.Sprintf(" [%s %s] ✕ ", filter.Field, filter.Operator)
+				} else {
+					filterText = fmt.Sprintf(" [%s %s %s] ✕ ", filter.Field, filter.Operator, filter.Value)
+				}
+				builder.WriteString(filterBtnStyle.Render(filterText))
+				builder.WriteString("  ")
+			}
+			builder.WriteString("\n")
+		}
+	}
+
+	// Group Logic toggle (AND/OR within current group) - show if current group has filters
+	currentFilters := m.getCurrentGroupFilters()
+	if len(currentFilters) > 0 {
+		builder.WriteString("\n")
+		currentCombinator := "AND"
+		if m.currentGroupIdx >= 0 && m.currentGroupIdx < len(m.filterGroups.Groups) {
+			currentCombinator = m.filterGroups.Groups[m.currentGroupIdx].Combinator
+			if currentCombinator == "" {
+				currentCombinator = "AND"
+			}
+		}
+		groupLogicStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("13")) // Magenta
+		if m.filterFocusIdx == 5 {
+			groupLogicStyle = groupLogicStyle.Background(lipgloss.Color("13")).Foreground(lipgloss.Color("0"))
+		}
+		builder.WriteString(groupLogicStyle.Render(fmt.Sprintf(" [Group %d Logic: %s] ", m.currentGroupIdx+1, currentCombinator)))
+		builder.WriteString("  ")
+	} else {
 		builder.WriteString("\n")
 	}
+
+	// New Group button
+	newGroupStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("12")) // Blue
+	if m.filterFocusIdx == 6 {
+		newGroupStyle = newGroupStyle.Background(lipgloss.Color("12")).Foreground(lipgloss.Color("0"))
+	}
+	builder.WriteString(newGroupStyle.Render(" [+ New Group] "))
+
+	// Between Groups Combinator toggle (only show if there are multiple groups)
+	if len(m.filterGroups.Groups) > 1 {
+		builder.WriteString("  ")
+		combStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+		if m.filterFocusIdx == 7 {
+			combStyle = combStyle.Background(lipgloss.Color("6")).Foreground(lipgloss.Color("0"))
+		}
+		builder.WriteString(combStyle.Render(fmt.Sprintf(" [Between Groups: %s] ", m.filterGroups.GroupCombinator)))
+	}
+
+	// Apply button (show if filters changed)
+	builder.WriteString("  ")
+	applyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10")) // Green
+	if m.filterFocusIdx == 8 {
+		applyStyle = applyStyle.Background(lipgloss.Color("10")).Foreground(lipgloss.Color("0"))
+	}
+	if m.filtersChanged {
+		applyStyle = applyStyle.Bold(true)
+		builder.WriteString(applyStyle.Render(" [Apply*] "))
+	} else {
+		builder.WriteString(applyStyle.Render(" [Apply] "))
+	}
+	builder.WriteString("\n")
 
 	// Help text - context-sensitive
 	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	var helpText string
 	if m.filterFocusIdx == 4 {
-		// When navigating active filters
-		helpText = "←/→: Select filter | Enter/Delete: Remove filter | Tab: Back to form | Esc: Close"
+		helpText = "←/→: Select filter | ↑/↓: Switch group | Enter/Delete: Remove | Tab: Next | Esc: Close"
+	} else if m.filterFocusIdx == 5 {
+		helpText = "Enter: Toggle AND/OR within this group | Tab: Next | Esc: Close"
+	} else if m.filterFocusIdx == 6 {
+		helpText = "Enter: Create new filter group | Tab: Next | Esc: Close"
+	} else if m.filterFocusIdx == 7 {
+		helpText = "Enter: Toggle AND/OR between groups | Tab: Next | Esc: Close"
+	} else if m.filterFocusIdx == 8 {
+		if m.filtersChanged {
+			helpText = "Enter: Apply filter changes | Tab: Next | Esc: Close"
+		} else {
+			helpText = "No changes to apply | Tab: Next | Esc: Close"
+		}
 	} else {
-		helpText = "Tab: Next field | Enter: Add filter | Ctrl+F/Esc: Close"
-		if len(m.filters) > 0 {
-			helpText = "Tab: Next field (incl. active filters) | Enter: Add filter | Ctrl+F/Esc: Close"
+		helpText = "Tab: Next | Enter: Add filter | Ctrl+F/Esc: Close"
+		if totalFilters > 0 {
+			helpText = "Tab: Navigate | Enter: Add/Remove | Ctrl+F/Esc: Close"
 		}
 	}
 	builder.WriteString(helpStyle.Render(helpText))
+
+	return builder.String()
+}
+
+// renderFilterSummary renders a compact one-line summary of active filters
+func (m logsViewer) renderFilterSummary() string {
+	totalFilters := m.getTotalFilterCount()
+	if totalFilters == 0 {
+		return ""
+	}
+
+	var builder strings.Builder
+
+	// Title with filter count
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14")) // Cyan
+	builder.WriteString(titleStyle.Render(fmt.Sprintf("Active Filters (%d)", totalFilters)))
+	builder.WriteString(": ")
+
+	// Build compact filter representation
+	filterStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // Yellow
+	combinatorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true) // Cyan
+
+	groupsWithFilters := 0
+	for _, g := range m.filterGroups.Groups {
+		if len(g.Filters) > 0 {
+			groupsWithFilters++
+		}
+	}
+
+	groupIdx := 0
+	for _, group := range m.filterGroups.Groups {
+		if len(group.Filters) == 0 {
+			continue
+		}
+
+		// Add group combinator between groups
+		if groupIdx > 0 {
+			builder.WriteString(combinatorStyle.Render(fmt.Sprintf(" %s ", m.filterGroups.GroupCombinator)))
+		}
+
+		// If multiple groups, wrap in parentheses
+		if groupsWithFilters > 1 {
+			builder.WriteString("(")
+		}
+
+		// Render filters in this group
+		for i, filter := range group.Filters {
+			if i > 0 {
+				builder.WriteString(combinatorStyle.Render(fmt.Sprintf(" %s ", group.Combinator)))
+			}
+			var filterText string
+			if filter.Operator == "IS NULL" || filter.Operator == "IS NOT NULL" {
+				filterText = fmt.Sprintf("%s %s", filter.Field, filter.Operator)
+			} else {
+				// Truncate long values
+				value := filter.Value
+				if len(value) > 15 {
+					value = value[:12] + "..."
+				}
+				filterText = fmt.Sprintf("%s %s %s", filter.Field, filter.Operator, value)
+			}
+			builder.WriteString(filterStyle.Render(filterText))
+		}
+
+		if groupsWithFilters > 1 {
+			builder.WriteString(")")
+		}
+		groupIdx++
+	}
+
+	// Add hint to expand
+	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	builder.WriteString(hintStyle.Render("  [Ctrl+F to edit]"))
 
 	return builder.String()
 }
@@ -2907,48 +3554,61 @@ func (m logsViewer) generateSparklineChars(values []float64) []rune {
 func (m logsViewer) renderDetails() string {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+	selectedLabelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("11"))
+	selectedValueStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("6"))
 	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+
+	hasLevel := m.selectedEntry.Level != ""
+	currentIdx := 0
 
 	var sb strings.Builder
 	sb.WriteString(titleStyle.Render("Log Entry Details"))
 	sb.WriteString("\n\n")
 
-	sb.WriteString(labelStyle.Render("Time: "))
-	sb.WriteString(m.selectedEntry.Time.Format("2006-01-02 15:04:05.000 MST"))
+	// Time field (index 0)
+	if m.detailsSelectedIdx == currentIdx {
+		sb.WriteString(selectedLabelStyle.Render("▶ Time: "))
+		sb.WriteString(selectedValueStyle.Render(m.selectedEntry.Time.Format("2006-01-02 15:04:05.000 MST")))
+	} else {
+		sb.WriteString(labelStyle.Render("  Time: "))
+		sb.WriteString(m.selectedEntry.Time.Format("2006-01-02 15:04:05.000 MST"))
+	}
 	sb.WriteString("\n\n")
+	currentIdx++
 
-	if m.selectedEntry.Level != "" {
-		sb.WriteString(labelStyle.Render("Level: "))
-		sb.WriteString(m.selectedEntry.Level)
+	// Level field (index 1 if present)
+	if hasLevel {
+		if m.detailsSelectedIdx == currentIdx {
+			sb.WriteString(selectedLabelStyle.Render("▶ Level: "))
+			sb.WriteString(selectedValueStyle.Render(m.selectedEntry.Level))
+		} else {
+			sb.WriteString(labelStyle.Render("  Level: "))
+			sb.WriteString(m.selectedEntry.Level)
+		}
 		sb.WriteString("\n\n")
+		currentIdx++
 	}
 
-	sb.WriteString(labelStyle.Render("Message:"))
-	sb.WriteString("\n")
-	sb.WriteString(m.selectedEntry.Message)
+	// Message field (index 1 or 2)
+	if m.detailsSelectedIdx == currentIdx {
+		sb.WriteString(selectedLabelStyle.Render("▶ Message:"))
+		sb.WriteString("\n")
+		sb.WriteString(selectedValueStyle.Render(m.selectedEntry.Message))
+	} else {
+		sb.WriteString(labelStyle.Render("  Message:"))
+		sb.WriteString("\n")
+		sb.WriteString(m.selectedEntry.Message)
+	}
 	sb.WriteString("\n\n")
+	currentIdx++
 
-	// Show all fields if available (sorted alphabetically)
-	if len(m.selectedEntry.AllFields) > 0 {
+	// Show all fields if available (use cached sorted field names)
+	if len(m.detailsFieldNames) > 0 {
 		sb.WriteString(titleStyle.Render("All Fields"))
 		sb.WriteString("\n\n")
 
-		// Sort field names
-		var fieldNames []string
-		for fieldName := range m.selectedEntry.AllFields {
-			fieldNames = append(fieldNames, fieldName)
-		}
-		// Simple bubble sort
-		for i := 0; i < len(fieldNames)-1; i++ {
-			for j := i + 1; j < len(fieldNames); j++ {
-				if fieldNames[i] > fieldNames[j] {
-					fieldNames[i], fieldNames[j] = fieldNames[j], fieldNames[i]
-				}
-			}
-		}
-
-		// Display sorted fields
-		for _, fieldName := range fieldNames {
+		// Display sorted fields using cached field names
+		for _, fieldName := range m.detailsFieldNames {
 			value := m.selectedEntry.AllFields[fieldName]
 
 			// Format value based on type
@@ -2969,14 +3629,20 @@ func (m logsViewer) renderDetails() string {
 				valueStr = valueStr[:197] + "..."
 			}
 
-			sb.WriteString(labelStyle.Render(fieldName + ": "))
-			sb.WriteString(valueStr)
+			if m.detailsSelectedIdx == currentIdx {
+				sb.WriteString(selectedLabelStyle.Render("▶ " + fieldName + ": "))
+				sb.WriteString(selectedValueStyle.Render(valueStr))
+			} else {
+				sb.WriteString(labelStyle.Render("  " + fieldName + ": "))
+				sb.WriteString(valueStr)
+			}
 			sb.WriteString("\n")
+			currentIdx++
 		}
 		sb.WriteString("\n")
 	}
 
-	sb.WriteString(helpStyle.Render("Press ESC to return | ↑↓: Scroll"))
+	sb.WriteString(helpStyle.Render("↑↓: Navigate | Enter: Add as filter (field = value) | ESC: Close"))
 
 	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -3001,7 +3667,7 @@ func (m logsViewer) renderMainHelpLine() string {
 	}
 
 	// Normal mode: show all available shortcuts
-	return helpStyle.Render("↑↓/PgUp/PgDn: Scroll | /: Filter table | Ctrl+F: Show filters | Tab: Switch focus | Enter: Details | Esc: Back")
+	return helpStyle.Render("↑↓/PgUp/PgDn: Scroll | Ctrl+P/N: Prev/Next window | /: Filter | Ctrl+F: Filters | Tab: Focus | Enter: Details | Esc: Back")
 }
 
 // renderZoomMenu renders the zoom action menu
@@ -3012,9 +3678,13 @@ func (m logsViewer) renderZoomMenu() string {
 
 	// Get bucket time info for display
 	var bucketTimeInfo string
-	if m.selectedBucket >= 0 && m.selectedBucket < len(m.timeLabels) {
-		bucketTimeInfo = m.timeLabels[m.selectedBucket]
-		// TODO: Add end time when bucketInterval is available
+	if m.app != nil && m.selectedBucket >= 0 && m.bucketInterval > 0 {
+		bucketStart := m.app.state.FromTime.Add(time.Duration(m.selectedBucket*m.bucketInterval) * time.Second)
+		bucketEnd := bucketStart.Add(time.Duration(m.bucketInterval) * time.Second)
+		bucketTimeInfo = fmt.Sprintf("From: %s\nTo:   %s\nDuration: %s",
+			bucketStart.Format("2006-01-02 15:04:05"),
+			bucketEnd.Format("2006-01-02 15:04:05"),
+			formatDuration(time.Duration(m.bucketInterval)*time.Second))
 	}
 
 	// Menu options
@@ -3079,7 +3749,54 @@ func (m logsViewer) renderZoomMenu() string {
 	)
 }
 
-// buildWhereClause builds SQL WHERE clause from log filters
+// formatDuration formats a duration in a human-readable format
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		minutes := int(d.Minutes())
+		seconds := int(d.Seconds()) % 60
+		if seconds > 0 {
+			return fmt.Sprintf("%dm %ds", minutes, seconds)
+		}
+		return fmt.Sprintf("%dm", minutes)
+	}
+	hours := int(d.Hours())
+	minutes := int(d.Minutes()) % 60
+	if minutes > 0 {
+		return fmt.Sprintf("%dh %dm", hours, minutes)
+	}
+	return fmt.Sprintf("%dh", hours)
+}
+
+// buildFilterCondition builds a single filter condition
+func buildFilterCondition(filter LogFilter) (string, []interface{}) {
+	// Escape field name by wrapping in backticks
+	field := "`" + strings.ReplaceAll(filter.Field, "`", "``") + "`"
+
+	switch filter.Operator {
+	case "IS NULL", "IS NOT NULL":
+		// No value needed for NULL checks
+		return fmt.Sprintf("%s %s", field, filter.Operator), nil
+	case "LIKE", "NOT LIKE":
+		return fmt.Sprintf("%s %s ?", field, filter.Operator), []interface{}{"%" + filter.Value + "%"}
+	case "IN", "NOT IN":
+		// Value is comma-separated list: "val1,val2,val3" -> IN ('val1','val2','val3')
+		values := strings.Split(filter.Value, ",")
+		placeholders := make([]string, len(values))
+		args := make([]interface{}, len(values))
+		for i, v := range values {
+			placeholders[i] = "?"
+			args[i] = strings.TrimSpace(v)
+		}
+		return fmt.Sprintf("%s %s (%s)", field, filter.Operator, strings.Join(placeholders, ", ")), args
+	default:
+		return fmt.Sprintf("%s %s ?", field, filter.Operator), []interface{}{filter.Value}
+	}
+}
+
+// buildWhereClause builds SQL WHERE clause from log filters (simple AND combination)
 func buildWhereClause(filters []LogFilter) (string, []interface{}) {
 	if len(filters) == 0 {
 		return "", nil
@@ -3089,21 +3806,62 @@ func buildWhereClause(filters []LogFilter) (string, []interface{}) {
 	var args []interface{}
 
 	for _, filter := range filters {
-		// Escape field name by wrapping in backticks
-		field := "`" + strings.ReplaceAll(filter.Field, "`", "``") + "`"
-
-		switch filter.Operator {
-		case "LIKE", "NOT LIKE":
-			conditions = append(conditions, fmt.Sprintf("%s %s ?", field, filter.Operator))
-			args = append(args, "%"+filter.Value+"%")
-		default:
-			conditions = append(conditions, fmt.Sprintf("%s %s ?", field, filter.Operator))
-			args = append(args, filter.Value)
-		}
+		cond, condArgs := buildFilterCondition(filter)
+		conditions = append(conditions, cond)
+		args = append(args, condArgs...)
 	}
 
 	whereClause := strings.Join(conditions, " AND ")
 	return whereClause, args
+}
+
+// buildWhereClauseFromGroups builds SQL WHERE clause from filter groups with AND/OR combinators
+func buildWhereClauseFromGroups(filterGroups LogFilterGroups) (string, []interface{}) {
+	if len(filterGroups.Groups) == 0 {
+		return "", nil
+	}
+
+	var groupClauses []string
+	var allArgs []interface{}
+
+	for _, group := range filterGroups.Groups {
+		if len(group.Filters) == 0 {
+			continue
+		}
+
+		var conditions []string
+		for _, filter := range group.Filters {
+			cond, condArgs := buildFilterCondition(filter)
+			conditions = append(conditions, cond)
+			allArgs = append(allArgs, condArgs...)
+		}
+
+		// Combine filters within group
+		combinator := group.Combinator
+		if combinator == "" {
+			combinator = "AND"
+		}
+		groupClause := strings.Join(conditions, " "+combinator+" ")
+
+		// Wrap in parentheses if more than one filter
+		if len(conditions) > 1 {
+			groupClause = "(" + groupClause + ")"
+		}
+		groupClauses = append(groupClauses, groupClause)
+	}
+
+	if len(groupClauses) == 0 {
+		return "", nil
+	}
+
+	// Combine groups
+	groupCombinator := filterGroups.GroupCombinator
+	if groupCombinator == "" {
+		groupCombinator = "AND"
+	}
+
+	whereClause := strings.Join(groupClauses, " "+groupCombinator+" ")
+	return whereClause, allArgs
 }
 
 // fetchAllTableFields fetches all column names from a table
@@ -3152,13 +3910,14 @@ func (a *App) ShowLogsViewer(config LogConfig) tea.Cmd {
 	// If width is 0, we haven't received WindowSizeMsg yet - data will be fetched
 	// when LogsDataMsg is received after window size is set
 	if a.width > 0 {
-		return a.fetchLogsDataCmd(config, 0, nil, a.width)
+		emptyGroups := LogFilterGroups{Groups: []FilterGroup{{Filters: []LogFilter{}, Combinator: "AND"}}, GroupCombinator: "AND"}
+		return a.fetchLogsDataCmd(config, 0, emptyGroups, a.width)
 	}
 	return nil
 }
 
 // fetchLogsDataCmd fetches log data from ClickHouse
-func (a *App) fetchLogsDataCmd(config LogConfig, offset int, filters []LogFilter, viewerWidth int) tea.Cmd {
+func (a *App) fetchLogsDataCmd(config LogConfig, offset int, filterGroups LogFilterGroups, viewerWidth int) tea.Cmd {
 	return func() tea.Msg {
 		// Build query - select all fields (*)
 		queryBuilder := fmt.Sprintf(
@@ -3167,22 +3926,60 @@ func (a *App) fetchLogsDataCmd(config LogConfig, offset int, filters []LogFilter
 			config.Table,
 		)
 
-		// Build WHERE clause from filters
-		whereClause, whereArgs := buildWhereClause(filters)
+		// Build time range conditions (always required)
+		var timeConditions []string
+		fromTime := a.state.FromTime
+		toTime := a.state.ToTime
+
+		// TimeField condition (required)
+		if config.TimeField != "" {
+			timeConditions = append(timeConditions,
+				fmt.Sprintf("%s >= toDateTime('%s') AND %s <= toDateTime('%s')",
+					config.TimeField, fromTime.Format("2006-01-02 15:04:05"),
+					config.TimeField, toTime.Format("2006-01-02 15:04:05")))
+		}
+
+		// DateField condition (optional, for partition pruning)
+		if config.DateField != "" {
+			timeConditions = append(timeConditions,
+				fmt.Sprintf("%s >= toDate('%s') AND %s <= toDate('%s')",
+					config.DateField, fromTime.Format("2006-01-02"),
+					config.DateField, toTime.Format("2006-01-02")))
+		}
+
+		// TimeMsField condition (optional, for millisecond precision)
+		if config.TimeMsField != "" {
+			timeConditions = append(timeConditions,
+				fmt.Sprintf("%s >= toDateTime64('%s', 3) AND %s <= toDateTime64('%s', 3)",
+					config.TimeMsField, fromTime.Format("2006-01-02 15:04:05.000"),
+					config.TimeMsField, toTime.Format("2006-01-02 15:04:05.999")))
+		}
+
+		// Build WHERE clause from user filter groups
+		whereClause, whereArgs := buildWhereClauseFromGroups(filterGroups)
 		var args []interface{}
 
+		// Combine time conditions with user filters
+		var allConditions []string
+		allConditions = append(allConditions, timeConditions...)
 		if whereClause != "" {
-			queryBuilder += " WHERE " + whereClause
+			allConditions = append(allConditions, whereClause)
 			args = append(args, whereArgs...)
 		}
 
-		// Add ORDER BY and LIMIT
-		queryBuilder += fmt.Sprintf(
-			" ORDER BY %s DESC LIMIT %d OFFSET %d",
-			config.TimeField,
-			config.WindowSize,
-			offset,
-		)
+		if len(allConditions) > 0 {
+			queryBuilder += " WHERE " + strings.Join(allConditions, " AND ")
+		}
+
+		// Add ORDER BY (use TimeMsField for millisecond precision if available, otherwise TimeField)
+		orderByField := config.TimeField
+		if config.TimeMsField != "" {
+			orderByField = config.TimeMsField
+		}
+		queryBuilder += fmt.Sprintf(" ORDER BY %s", orderByField)
+
+		// Add LIMIT and OFFSET
+		queryBuilder += fmt.Sprintf(" LIMIT %d OFFSET %d", config.WindowSize, offset)
 
 		log.Debug().
 			Str("query", queryBuilder).
@@ -3274,48 +4071,179 @@ func (a *App) fetchLogsDataCmd(config LogConfig, offset int, filters []LogFilter
 			return LogsDataMsg{Err: fmt.Errorf("error reading rows: %v", err)}
 		}
 
-		// Reverse entries to show oldest first
-		for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
-			entries[i], entries[j] = entries[j], entries[i]
+		// Overview/sparkline data will be fetched separately via fetchOverviewDataCmd
+		// using LTTB (Largest Triangle Three Buckets) for optimal downsampling
+		return LogsDataMsg{
+			Entries:        entries,
+			FirstEntryTime: firstTime,
+			LastEntryTime:  lastTime,
+			TotalRows:      len(entries),
+			LevelCounts:    levelCounts,
+			// LevelTimeSeries and TimeLabels will be populated by OverviewDataMsg
+		}
+	}
+}
+
+// fetchOverviewDataCmd fetches overview sparkline data using time-based bucketing
+func (a *App) fetchOverviewDataCmd(config LogConfig, startTime, endTime time.Time, sparklineWidth int, filterGroups LogFilterGroups) tea.Cmd {
+	return func() tea.Msg {
+		if startTime.IsZero() || endTime.IsZero() || config.LevelField == "" {
+			return OverviewDataMsg{Err: nil} // No data to display
 		}
 
-		// Query time-bucketed counts for sparkline visualization
-		// Calculate optimal bucket count based on available width inside overview box
-		// The overview box uses contentWidth = viewer_width - 2 (borders)
-		// Inside that box, sparkline width = content_width - label_width
-		// Label format: "  ERROR     : " = 14 chars (2 spaces + 10 char padded name + " : ")
-		// This matches BOTH:
-		//   - sparkline row label width in generateSparklineForLevels
-		//   - bar prefix "Total:12345 | " in renderOverview (fixed 14 chars)
-		contentWidth := viewerWidth - 2
-		sparklineRowLabelWidth := 14 // "  ERROR     : " (consistent with display)
-		sparklineWidth := contentWidth - sparklineRowLabelWidth
-
-		if sparklineWidth < 40 {
-			sparklineWidth = 40 // Minimum width for readability
+		// Ensure sparklineWidth is within bounds
+		buckets := sparklineWidth
+		if buckets < 40 {
+			buckets = 40
 		}
-		if sparklineWidth > 200 {
-			sparklineWidth = 200 // Maximum width to avoid excessive queries
+		if buckets > 200 {
+			buckets = 200
+		}
+
+		// Calculate interval in seconds for time bucketing
+		startUnix := float64(startTime.Unix())
+		endUnix := float64(endTime.Unix())
+		timeRange := endUnix - startUnix
+		if timeRange <= 0 {
+			return OverviewDataMsg{Err: nil}
+		}
+		intervalSeconds := int(timeRange / float64(buckets))
+		if intervalSeconds < 1 {
+			intervalSeconds = 1
+		}
+
+		// Use TimeMsField for better precision if available, otherwise TimeField
+		timeFieldForQuery := config.TimeField
+		if config.TimeMsField != "" {
+			timeFieldForQuery = config.TimeMsField
+		}
+
+		// Build WHERE clause with time range using Unix timestamps to avoid timezone issues
+		startUnixInt := int64(startUnix)
+		endUnixInt := int64(endUnix)
+		whereClause := fmt.Sprintf("toUnixTimestamp(%s) BETWEEN %d AND %d",
+			config.TimeField,
+			startUnixInt,
+			endUnixInt)
+
+		// Create args slice for parameterized query
+		var args []interface{}
+
+		// Add user filter groups if present
+		filterWhere, filterArgs := buildWhereClauseFromGroups(filterGroups)
+		if filterWhere != "" {
+			whereClause = whereClause + " AND (" + filterWhere + ")"
+			args = append(args, filterArgs...)
+		}
+
+		// Time-bucketed query using Unix timestamps to avoid timezone issues
+		// Calculate bucket index directly: (unix_ts - start_unix) / interval_seconds
+		// Level normalization done in SQL using multiIf for consistent mapping
+		// Use toString() to handle Enum types (like in system.text_log)
+		// IMPORTANT: Use __level__ alias for normalized level to avoid conflict with original level field in WHERE clause
+		query := fmt.Sprintf("SELECT "+
+			"multiIf("+
+			"lower(toString(%s)) IN ('information', 'notice'), 'info', "+
+			"lower(toString(%s)) IN ('warn'), 'warning', "+
+			"lower(toString(%s)) IN ('exception', 'critical', 'fatal'), 'error', "+
+			"lower(toString(%s)) IN ('trace'), 'debug', "+
+			"lower(toString(%s))"+
+			") AS __level__, "+
+			"intDiv(toUnixTimestamp(%s) - %d, %d) AS bucket_idx, "+
+			"count() AS cnt "+
+			"FROM `%s`.`%s` "+
+			"WHERE %s "+
+			"GROUP BY __level__, bucket_idx "+
+			"ORDER BY __level__, bucket_idx",
+			config.LevelField, config.LevelField, config.LevelField, config.LevelField, config.LevelField,
+			timeFieldForQuery, startUnixInt, intervalSeconds,
+			config.Database, config.Table,
+			whereClause,
+		)
+
+		log.Debug().
+			Str("query", query).
+			Int("buckets", buckets).
+			Int("intervalSeconds", intervalSeconds).
+			Msg("Fetching overview data with time bucketing")
+
+		rows, err := a.state.ClickHouse.Query(query, args...)
+		if err != nil {
+			log.Error().Err(err).Msg("Error querying overview data")
+			return OverviewDataMsg{Err: fmt.Errorf("error executing overview query: %v", err)}
+		}
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("can't close overview query")
+			}
+		}()
+
+		// Parse results: each row is (__level__, bucket_idx, cnt)
+		// Build map of normalized level -> bucket index -> count
+		levelBuckets := make(map[string]map[int]float64)
+
+		rowCount := 0
+		for rows.Next() {
+			rowCount++
+			var level string
+			var bucketIdx int64
+			var cnt uint64
+
+			if err := rows.Scan(&level, &bucketIdx, &cnt); err != nil {
+				log.Error().Err(err).Msg("Error scanning overview row")
+				continue
+			}
+
+			// Clamp bucket index to valid range
+			idx := int(bucketIdx)
+			if idx < 0 {
+				idx = 0
+			}
+			if idx >= buckets {
+				idx = buckets - 1
+			}
+
+			if levelBuckets[level] == nil {
+				levelBuckets[level] = make(map[int]float64)
+			}
+			levelBuckets[level][idx] += float64(cnt)
 		}
 
 		log.Debug().
-			Int("viewer_width", viewerWidth).
-			Int("content_width", contentWidth).
-			Int("sparkline_row_label_width", sparklineRowLabelWidth).
-			Int("sparkline_width_calculated", contentWidth-sparklineRowLabelWidth).
-			Int("sparkline_width_final", sparklineWidth).
-			Int("bucket_count", sparklineWidth).
-			Msg(">>> Sparkline width calculation")
+			Int("rows_processed", rowCount).
+			Int("levels_found", len(levelBuckets)).
+			Msg("Overview query completed")
 
-		// Generate sparkline data directly from fetched entries (no second query needed!)
-		levelTimeSeries, timeLabels := generateSparklineFromEntries(entries, config.LevelField, firstTime, lastTime, sparklineWidth)
+		if err := rows.Err(); err != nil {
+			log.Error().Err(err).Msg("Error reading overview rows")
+			return OverviewDataMsg{Err: fmt.Errorf("error reading overview rows: %v", err)}
+		}
 
-		return LogsDataMsg{
-			Entries:         entries,
-			FirstEntryTime:  firstTime,
-			LastEntryTime:   lastTime,
-			TotalRows:       len(entries),
-			LevelCounts:     levelCounts,
+		// Convert bucket maps to fixed-size arrays
+		levelTimeSeries := make(map[string][]float64)
+		for level, bucketMap := range levelBuckets {
+			values := make([]float64, buckets)
+			for idx, cnt := range bucketMap {
+				values[idx] = cnt
+			}
+			levelTimeSeries[level] = values
+		}
+
+		// Generate time labels for fixed buckets
+		timeLabels := make([]string, buckets)
+		for i := 0; i < buckets; i++ {
+			ts := startUnix + float64(i)*float64(intervalSeconds)
+			t := time.Unix(int64(ts), 0)
+			timeLabels[i] = t.Format("15:04:05")
+		}
+
+		log.Debug().
+			Int("levels_count", len(levelTimeSeries)).
+			Int("time_labels_count", len(timeLabels)).
+			Int("buckets", buckets).
+			Msg("Overview data ready")
+
+		return OverviewDataMsg{
 			LevelTimeSeries: levelTimeSeries,
 			TimeLabels:      timeLabels,
 		}

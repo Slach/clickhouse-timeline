@@ -349,7 +349,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle logs configuration completion
 		return a, a.ShowLogsViewer(msg.Config)
 
-	case DatabasesLoadedMsg, TablesLoadedMsg, ColumnsLoadedMsg, LogsDataMsg:
+	case DatabasesLoadedMsg, TablesLoadedMsg, ColumnsLoadedMsg, LogsDataMsg, OverviewDataMsg:
 		// Forward logs-related messages to logs handler if active
 		if a.currentPage == pageLogs && a.logsHandler != nil {
 			a.logsHandler, cmd = a.logsHandler.Update(msg)
