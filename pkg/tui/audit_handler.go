@@ -319,7 +319,7 @@ func (a *App) checkSystemCounts() []AuditResult {
 	var results []AuditResult
 
 	// Check replicated tables count
-	row := a.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, count() FROM cluster('%s', system.tables) WHERE engine LIKE 'Replicated%%' GROUP BY h", a.cluster))
+	row := a.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, count() FROM clusterAllReplicas('%s', system.tables) WHERE engine LIKE 'Replicated%%' GROUP BY h", a.cluster))
 	var host string
 	var replicatedCount int64
 	if err := row.Scan(&host, &replicatedCount); err == nil {
@@ -347,7 +347,7 @@ func (a *App) checkSystemCounts() []AuditResult {
 
 	// Check MergeTree tables count
 	mergeTreeCount := 0
-	row = a.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, count() FROM cluster('%s', system.tables) WHERE engine LIKE '%%MergeTree%%' GROUP BY h", a.cluster))
+	row = a.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, count() FROM clusterAllReplicas('%s', system.tables) WHERE engine LIKE '%%MergeTree%%' GROUP BY h", a.cluster))
 	if err := row.Scan(&host, &mergeTreeCount); err == nil {
 		severity := ""
 		if mergeTreeCount > 10000 {
@@ -372,7 +372,7 @@ func (a *App) checkSystemCounts() []AuditResult {
 
 	// Check databases count
 	databasesCount := 0
-	row = a.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, count() FROM cluster('%s', system.databases) GROUP BY h", a.cluster))
+	row = a.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, count() FROM clusterAllReplicas('%s', system.databases) GROUP BY h", a.cluster))
 	if err := row.Scan(&host, &databasesCount); err == nil {
 		severity := ""
 		if databasesCount > 1000 {
@@ -399,8 +399,8 @@ func (a *App) checkSystemCounts() []AuditResult {
 	row = a.clickHouse.QueryRow(fmt.Sprintf(`
 		SELECT 
 			hostName() AS h,
-			(SELECT count() * 4 FROM cluster('%s', system.parts_columns)) as column_files_in_parts_count,
-			(SELECT min(value) FROM cluster('%s', system.asynchronous_metrics) WHERE metric='FilesystemMainPathTotalINodes') as total_inodes,
+			(SELECT count() * 4 FROM clusterAllReplicas('%s', system.parts_columns)) as column_files_in_parts_count,
+			(SELECT min(value) FROM clusterAllReplicas('%s', system.asynchronous_metrics) WHERE metric='FilesystemMainPathTotalINodes') as total_inodes,
 			column_files_in_parts_count / total_inodes as ratio
 		GROUP BY h
 	`, a.cluster, a.cluster))
@@ -433,7 +433,7 @@ func (a *App) checkSystemCounts() []AuditResult {
 
 	// Check total parts count
 	partsCount := 0
-	row = a.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, count() FROM cluster('%s', system.parts) GROUP BY h", a.cluster))
+	row = a.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, count() FROM clusterAllReplicas('%s', system.parts) GROUP BY h", a.cluster))
 	if err := row.Scan(&host, &partsCount); err == nil {
 		severity := ""
 		if partsCount > 120000 {
@@ -457,9 +457,9 @@ func (a *App) checkSystemCounts() []AuditResult {
 
 	// Check obsolete inactive parts
 	row = a.clickHouse.QueryRow(fmt.Sprintf(`
-		WITH (SELECT max(modification_time) FROM cluster('%s', system.parts)) AS max_ts
+		WITH (SELECT max(modification_time) FROM clusterAllReplicas('%s', system.parts)) AS max_ts
 		SELECT hostName() AS h, count()
-		FROM cluster('%s', system.parts)
+		FROM clusterAllReplicas('%s', system.parts)
 		WHERE NOT active
 		AND ((remove_time > 0 AND remove_time < max_ts - INTERVAL 20 MINUTE) 
 		     OR (remove_time = 0 AND modification_time < max_ts - INTERVAL 20 MINUTE))
@@ -501,7 +501,7 @@ func (a *App) checkSystemCounts() []AuditResult {
 			countIf((NOT big_table) AND (NOT small_table) AND (NOT tiny_table)) as medium_tables_count,
 			countIf(big_table) as big_tables_count,
 			count() AS tables_count
-		FROM cluster('%s', system.tables)
+		FROM clusterAllReplicas('%s', system.tables)
 		WHERE engine LIKE 'Replicated%%MergeTree'
 		GROUP BY h
 	`, a.cluster))
@@ -556,7 +556,7 @@ func (a *App) checkDependencies() []AuditResult {
 				format('{}.{}', database, name) AS parent,
 				arrayJoin(arrayMap(x, y -> x || '.' || y, dependencies_database, dependencies_table)) as child,
 				'table' as type
-			FROM cluster('%s', system.tables)
+			FROM clusterAllReplicas('%s', system.tables)
 			WHERE dependencies_table != []
 
 			UNION ALL
@@ -567,7 +567,7 @@ func (a *App) checkDependencies() []AuditResult {
 				format('{}.{}', database, name) AS parent,
 				_create_table_query[6] as child,
 				'MV' as type
-			FROM cluster('%s', system.tables)
+			FROM clusterAllReplicas('%s', system.tables)
 			WHERE engine = 'MaterializedView'
 			AND _create_table_query[5] = 'TO'
 		)
@@ -673,14 +673,14 @@ func (a *App) checkRates() []AuditResult {
 	// Check parts creation rate
 	row := a.clickHouse.QueryRow(fmt.Sprintf(`
 		WITH 
-			(SELECT max(toUInt32(value)) FROM cluster('%s', system.merge_tree_settings) WHERE name='old_parts_lifetime') as old_parts_lifetime_raw,
+			(SELECT max(toUInt32(value)) FROM clusterAllReplicas('%s', system.merge_tree_settings) WHERE name='old_parts_lifetime') as old_parts_lifetime_raw,
 			if(old_parts_lifetime_raw IS NULL OR old_parts_lifetime_raw = 0, 480, old_parts_lifetime_raw) as old_parts_lifetime
 		SELECT 
 			hostName() AS h,
 			count() as parts_created_count,
 			parts_created_count / old_parts_lifetime as parts_created_per_second
-		FROM cluster('%s', system.parts) 
-		WHERE modification_time > (SELECT max(modification_time) FROM cluster('%s', system.parts)) - old_parts_lifetime 
+		FROM clusterAllReplicas('%s', system.parts) 
+		WHERE modification_time > (SELECT max(modification_time) FROM clusterAllReplicas('%s', system.parts)) - old_parts_lifetime 
 		AND level = 0
 		GROUP BY h
 	`, a.cluster, a.cluster, a.cluster))
@@ -710,7 +710,7 @@ func (a *App) checkRates() []AuditResult {
 	// Check parts creation rate per table
 	rows, err := a.clickHouse.Query(fmt.Sprintf(`
 		WITH 
-			(SELECT max(toUInt32(value)) FROM cluster('%s', system.merge_tree_settings) WHERE name='old_parts_lifetime') as old_parts_lifetime_raw,
+			(SELECT max(toUInt32(value)) FROM clusterAllReplicas('%s', system.merge_tree_settings) WHERE name='old_parts_lifetime') as old_parts_lifetime_raw,
 			if(old_parts_lifetime_raw IS NULL OR old_parts_lifetime_raw = 0, 480, old_parts_lifetime_raw) as old_parts_lifetime
 		SELECT 
 			hostName() AS h,
@@ -718,8 +718,8 @@ func (a *App) checkRates() []AuditResult {
 			table,
 			count() as parts_created_count,
 			parts_created_count / old_parts_lifetime as parts_created_per_second
-		FROM cluster('%s', system.parts) 
-		WHERE modification_time > (SELECT max(modification_time) FROM cluster('%s', system.parts)) - old_parts_lifetime 
+		FROM clusterAllReplicas('%s', system.parts) 
+		WHERE modification_time > (SELECT max(modification_time) FROM clusterAllReplicas('%s', system.parts)) - old_parts_lifetime 
 		AND level = 0
 		GROUP BY h, database, table
 		HAVING parts_created_per_second > 5
@@ -766,8 +766,8 @@ func (a *App) checkMarksCache() []AuditResult {
 	row := a.clickHouse.QueryRow(fmt.Sprintf(`
 		SELECT 
 			hostName() AS h,
-			(SELECT value FROM cluster('%s', system.events) WHERE event = 'MarkCacheHits') as hits,
-			(SELECT value FROM cluster('%s', system.events) WHERE event = 'MarkCacheMisses') as misses,
+			(SELECT value FROM clusterAllReplicas('%s', system.events) WHERE event = 'MarkCacheHits') as hits,
+			(SELECT value FROM clusterAllReplicas('%s', system.events) WHERE event = 'MarkCacheMisses') as misses,
 			hits / (hits + misses) as hit_ratio
 		GROUP BY h
 	`, a.cluster, a.cluster))
@@ -898,7 +898,7 @@ func (a *App) checkActiveParts() []AuditResult {
 	var results []AuditResult
 
 	// Check total active parts number (A1.5.01.1)
-	row := a.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, sum(active) AS parts FROM cluster('%s', system.parts) WHERE active GROUP BY h", a.cluster))
+	row := a.clickHouse.QueryRow(fmt.Sprintf("SELECT hostName() AS h, sum(active) AS parts FROM clusterAllReplicas('%s', system.parts) WHERE active GROUP BY h", a.cluster))
 	var host string
 	var parts int64
 	if err := row.Scan(&host, &parts); err == nil {

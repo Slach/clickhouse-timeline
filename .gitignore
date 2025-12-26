@@ -1,13 +1,16 @@
 .aider*
 .coding*
 .idea/
-.vscod/e
+.vscode/
 .gigaide/
 .claude/
 .vtcode/
+.coding-aider-plans
 build/
 AGENTS.md
 CLAUDE.md
 CRUSH.md
 vtcode.toml
 .env
+clickhouse-timeline
+main

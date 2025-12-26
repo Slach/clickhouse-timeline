@@ -123,39 +123,39 @@ func (a *App) fetchMemoryDataCmd() tea.Cmd {
 		cluster := a.state.Cluster
 		query := fmt.Sprintf(strings.TrimSpace(`
 SELECT * FROM (
-SELECT hostName() AS host, 1 AS priority, 'OS' as group, metric as name, toInt64(value) as val FROM cluster('%[1]s','system','asynchronous_metrics') WHERE metric like 'OSMemory%%'
+SELECT hostName() AS host, 1 AS priority, 'OS' as group, metric as name, toInt64(value) as val FROM clusterAllReplicas('%[1]s','system','asynchronous_metrics') WHERE metric like 'OSMemory%%'
 UNION ALL
-SELECT hostName() AS host, 2 AS priority, 'Process' as group, metric as name, toInt64(value) FROM cluster('%[1]s','system','asynchronous_metrics') WHERE metric LIKE 'Memory%%'
+SELECT hostName() AS host, 2 AS priority, 'Process' as group, metric as name, toInt64(value) FROM clusterAllReplicas('%[1]s','system','asynchronous_metrics') WHERE metric LIKE 'Memory%%'
 UNION ALL
-SELECT hostName() AS host, 3 AS priority, 'Caches' as group, metric as name, toInt64(value) FROM cluster('%[1]s','system','asynchronous_metrics') WHERE metric LIKE '%%CacheBytes'
+SELECT hostName() AS host, 3 AS priority, 'Caches' as group, metric as name, toInt64(value) FROM clusterAllReplicas('%[1]s','system','asynchronous_metrics') WHERE metric LIKE '%%CacheBytes'
 UNION ALL
-SELECT hostName() AS host, 4 AS priority, 'MMaps' as group, metric as name, toInt64(value) FROM cluster('%[1]s','system','metrics') WHERE metric LIKE 'MMappedFileBytes'
+SELECT hostName() AS host, 4 AS priority, 'MMaps' as group, metric as name, toInt64(value) FROM clusterAllReplicas('%[1]s','system','metrics') WHERE metric LIKE 'MMappedFileBytes'
 UNION ALL
-SELECT hostName() AS host, 5 AS priority, 'StorageBuffer' as group, metric as name, toInt64(value) FROM cluster('%[1]s','system','metrics') WHERE metric='StorageBufferBytes'
+SELECT hostName() AS host, 5 AS priority, 'StorageBuffer' as group, metric as name, toInt64(value) FROM clusterAllReplicas('%[1]s','system','metrics') WHERE metric='StorageBufferBytes'
 UNION ALL
-SELECT hostName() AS host, 6 AS priority, 'MemoryTables' as group, engine as name, toInt64(sum(total_bytes)) FROM cluster('%[1]s','system','tables') WHERE engine IN ('Join','Memory','Buffer','Set') GROUP BY engine
+SELECT hostName() AS host, 6 AS priority, 'MemoryTables' as group, engine as name, toInt64(sum(total_bytes)) FROM clusterAllReplicas('%[1]s','system','tables') WHERE engine IN ('Join','Memory','Buffer','Set') GROUP BY engine
 UNION ALL
-SELECT hostName() AS host, 7 AS priority, 'Dictionaries' as group, type as name, toInt64(sum(bytes_allocated)) FROM cluster('%[1]s','system','dictionaries') GROUP BY name
+SELECT hostName() AS host, 7 AS priority, 'Dictionaries' as group, type as name, toInt64(sum(bytes_allocated)) FROM clusterAllReplicas('%[1]s','system','dictionaries') GROUP BY name
 UNION ALL
-SELECT hostName() AS host, 8 AS priority, 'PrimaryKeys' as group, 'db:'||database as name, toInt64(sum(primary_key_bytes_in_memory_allocated)) FROM cluster('%[1]s','system','parts') GROUP BY name
+SELECT hostName() AS host, 8 AS priority, 'PrimaryKeys' as group, 'db:'||database as name, toInt64(sum(primary_key_bytes_in_memory_allocated)) FROM clusterAllReplicas('%[1]s','system','parts') GROUP BY name
 UNION ALL
-SELECT hostName() AS host, 9 AS priority, 'Merges' as group, 'db:'||database as name, toInt64(sum(memory_usage)) FROM cluster('%[1]s','system','merges') GROUP BY name
+SELECT hostName() AS host, 9 AS priority, 'Merges' as group, 'db:'||database as name, toInt64(sum(memory_usage)) FROM clusterAllReplicas('%[1]s','system','merges') GROUP BY name
 UNION ALL
-SELECT hostName() AS host, 10 AS priority, 'Queries' as group, left(query,7) as name, toInt64(sum(memory_usage)) FROM cluster('%[1]s','system','processes') GROUP BY name
+SELECT hostName() AS host, 10 AS priority, 'Queries' as group, left(query,7) as name, toInt64(sum(memory_usage)) FROM clusterAllReplicas('%[1]s','system','processes') GROUP BY name
 UNION ALL
-SELECT hostName() AS host, 11 AS priority, 'AsyncInserts' as group, 'db:'||database as name, toInt64(sum(total_bytes)) FROM cluster('%[1]s','system','asynchronous_inserts') GROUP BY name
+SELECT hostName() AS host, 11 AS priority, 'AsyncInserts' as group, 'db:'||database as name, toInt64(sum(total_bytes)) FROM clusterAllReplicas('%[1]s','system','asynchronous_inserts') GROUP BY name
 UNION ALL
-SELECT hostName() AS host, 12 AS priority, 'InMemoryParts' as group, 'db:'||database as name, toInt64(sum(data_uncompressed_bytes)) FROM cluster('%[1]s','system','parts') WHERE part_type = 'InMemory' GROUP BY name
+SELECT hostName() AS host, 12 AS priority, 'InMemoryParts' as group, 'db:'||database as name, toInt64(sum(data_uncompressed_bytes)) FROM clusterAllReplicas('%[1]s','system','parts') WHERE part_type = 'InMemory' GROUP BY name
 UNION ALL
-SELECT hostName() AS host, 13 AS priority, 'UserMemoryTracking' as group, user as name, toInt64(memory_usage) FROM cluster('%[1]s','system','user_processes')
+SELECT hostName() AS host, 13 AS priority, 'UserMemoryTracking' as group, user as name, toInt64(memory_usage) FROM clusterAllReplicas('%[1]s','system','user_processes')
 UNION ALL
-SELECT hostName() AS host, 14 AS priority, 'QueryCacheBytes' as group, '' as name, toInt64(sum(result_size)) FROM cluster('%[1]s','system','query_cache')
+SELECT hostName() AS host, 14 AS priority, 'QueryCacheBytes' as group, '' as name, toInt64(sum(result_size)) FROM clusterAllReplicas('%[1]s','system','query_cache')
 UNION ALL
-SELECT hostName() AS host, 15 AS priority, 'FileBuffersVirtual' as group, metric as name, toInt64(value * 2*1024*1024) FROM cluster('%[1]s','system','metrics') WHERE metric like 'OpenFileFor%%'
+SELECT hostName() AS host, 15 AS priority, 'FileBuffersVirtual' as group, metric as name, toInt64(value * 2*1024*1024) FROM clusterAllReplicas('%[1]s','system','metrics') WHERE metric like 'OpenFileFor%%'
 UNION ALL
-SELECT hostName() AS host, 16 AS priority, 'ThreadStacksVirtual' as group, metric as name, toInt64(value * 8*1024*1024) FROM cluster('%[1]s','system','metrics') WHERE metric = 'GlobalThread'
+SELECT hostName() AS host, 16 AS priority, 'ThreadStacksVirtual' as group, metric as name, toInt64(value * 8*1024*1024) FROM clusterAllReplicas('%[1]s','system','metrics') WHERE metric = 'GlobalThread'
 UNION ALL
-SELECT hostName() AS host, 17 AS priority, 'MemoryTracking' as group, 'total' as name, toInt64(value) FROM cluster('%[1]s','system','metrics') WHERE metric = 'MemoryTracking'
+SELECT hostName() AS host, 17 AS priority, 'MemoryTracking' as group, 'total' as name, toInt64(value) FROM clusterAllReplicas('%[1]s','system','metrics') WHERE metric = 'MemoryTracking'
 ) ORDER BY host, priority, "val" DESC
 SETTINGS skip_unavailable_shards=1
 `), cluster)
