@@ -335,3 +335,398 @@ func TestDropdownNavigation(t *testing.T) {
 		t.Errorf("at end, selected = %d, want %d", dd.selected, len(dd.filtered)-1)
 	}
 }
+
+// ==================== FilterNode Tree Tests ====================
+
+// TestNewFilterGroup tests creating a new filter group
+func TestNewFilterGroup(t *testing.T) {
+	group := NewFilterGroup("AND")
+
+	if !group.IsGroup {
+		t.Errorf("NewFilterGroup() IsGroup = false, want true")
+	}
+	if group.Logic != "AND" {
+		t.Errorf("NewFilterGroup() Logic = %s, want AND", group.Logic)
+	}
+	if len(group.Children) != 0 {
+		t.Errorf("NewFilterGroup() Children length = %d, want 0", len(group.Children))
+	}
+}
+
+// TestNewFilterCondition tests creating a new filter condition
+func TestNewFilterCondition(t *testing.T) {
+	cond := NewFilterCondition("level", "=", "Error")
+
+	if cond.IsGroup {
+		t.Errorf("NewFilterCondition() IsGroup = true, want false")
+	}
+	if cond.Field != "level" {
+		t.Errorf("NewFilterCondition() Field = %s, want level", cond.Field)
+	}
+	if cond.Operator != "=" {
+		t.Errorf("NewFilterCondition() Operator = %s, want =", cond.Operator)
+	}
+	if cond.Value != "Error" {
+		t.Errorf("NewFilterCondition() Value = %s, want Error", cond.Value)
+	}
+}
+
+// TestFilterNodeAddChild tests adding children to a group
+func TestFilterNodeAddChild(t *testing.T) {
+	group := NewFilterGroup("OR")
+	cond1 := NewFilterCondition("level", "=", "Error")
+	cond2 := NewFilterCondition("level", "=", "Warning")
+
+	group.AddChild(cond1)
+	group.AddChild(cond2)
+
+	if len(group.Children) != 2 {
+		t.Errorf("AddChild() Children length = %d, want 2", len(group.Children))
+	}
+	if group.Children[0].Field != "level" {
+		t.Errorf("AddChild() first child Field = %s, want level", group.Children[0].Field)
+	}
+	if group.Children[0].Value != "Error" {
+		t.Errorf("AddChild() first child Value = %s, want Error", group.Children[0].Value)
+	}
+}
+
+// TestPathEqual tests path comparison function
+func TestPathEqual(t *testing.T) {
+	tests := []struct {
+		name     string
+		pathA    []int
+		pathB    []int
+		expected bool
+	}{
+		{
+			name:     "empty paths equal",
+			pathA:    []int{},
+			pathB:    []int{},
+			expected: true,
+		},
+		{
+			name:     "single element equal",
+			pathA:    []int{0},
+			pathB:    []int{0},
+			expected: true,
+		},
+		{
+			name:     "multiple elements equal",
+			pathA:    []int{0, 1, 2},
+			pathB:    []int{0, 1, 2},
+			expected: true,
+		},
+		{
+			name:     "different length",
+			pathA:    []int{0, 1},
+			pathB:    []int{0, 1, 2},
+			expected: false,
+		},
+		{
+			name:     "different values",
+			pathA:    []int{0, 1},
+			pathB:    []int{0, 2},
+			expected: false,
+		},
+		{
+			name:     "nil vs empty",
+			pathA:    nil,
+			pathB:    []int{},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := pathEqual(tt.pathA, tt.pathB)
+			if result != tt.expected {
+				t.Errorf("pathEqual(%v, %v) = %v, want %v", tt.pathA, tt.pathB, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestGetParentPath tests parent path computation
+func TestGetParentPath(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     []int
+		expected []int
+	}{
+		{
+			name:     "empty path",
+			path:     []int{},
+			expected: nil,
+		},
+		{
+			name:     "single element",
+			path:     []int{0},
+			expected: []int{},
+		},
+		{
+			name:     "multiple elements",
+			path:     []int{0, 1, 2},
+			expected: []int{0, 1},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := getParentPath(tt.path)
+			if !pathEqual(result, tt.expected) {
+				t.Errorf("getParentPath(%v) = %v, want %v", tt.path, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestFlattenTree tests tree flattening for navigation
+func TestFlattenTree(t *testing.T) {
+	// Build a tree:
+	// root (AND)
+	//   ├── condition1 (level = Error)
+	//   ├── subgroup (OR)
+	//   │   ├── condition2 (host LIKE prod)
+	//   │   └── condition3 (host LIKE stage)
+	//   └── condition4 (message LIKE SELECT)
+
+	root := NewFilterGroup("AND")
+	cond1 := NewFilterCondition("level", "=", "Error")
+	subgroup := NewFilterGroup("OR")
+	cond2 := NewFilterCondition("host", "LIKE", "prod")
+	cond3 := NewFilterCondition("host", "LIKE", "stage")
+	cond4 := NewFilterCondition("message", "LIKE", "SELECT")
+
+	subgroup.AddChild(cond2)
+	subgroup.AddChild(cond3)
+
+	root.AddChild(cond1)
+	root.AddChild(subgroup)
+	root.AddChild(cond4)
+
+	flat := flattenTree(root, []int{})
+
+	// Expected order (depth-first):
+	// 0: root []
+	// 1: cond1 [0]
+	// 2: subgroup [1]
+	// 3: cond2 [1, 0]
+	// 4: cond3 [1, 1]
+	// 5: cond4 [2]
+
+	if len(flat) != 6 {
+		t.Errorf("flattenTree() returned %d nodes, want 6", len(flat))
+	}
+
+	expectedPaths := [][]int{
+		{},
+		{0},
+		{1},
+		{1, 0},
+		{1, 1},
+		{2},
+	}
+
+	for i, expected := range expectedPaths {
+		if i >= len(flat) {
+			break
+		}
+		if !pathEqual(flat[i].Path, expected) {
+			t.Errorf("flattenTree()[%d].Path = %v, want %v", i, flat[i].Path, expected)
+		}
+	}
+}
+
+// TestBuildWhereFromTree_SimpleAnd tests simple AND group SQL generation
+func TestBuildWhereFromTree_SimpleAnd(t *testing.T) {
+	root := NewFilterGroup("AND")
+	root.AddChild(NewFilterCondition("level", "=", "Error"))
+	root.AddChild(NewFilterCondition("message", "LIKE", "timeout"))
+
+	sql, args := buildWhereFromTree(root)
+
+	expectedSQL := "(`level` = ? AND `message` LIKE ?)"
+	if sql != expectedSQL {
+		t.Errorf("buildWhereFromTree() SQL = %s, want %s", sql, expectedSQL)
+	}
+	if len(args) != 2 {
+		t.Errorf("buildWhereFromTree() args length = %d, want 2", len(args))
+	}
+}
+
+// TestBuildWhereFromTree_SimpleOr tests simple OR group SQL generation
+func TestBuildWhereFromTree_SimpleOr(t *testing.T) {
+	root := NewFilterGroup("OR")
+	root.AddChild(NewFilterCondition("level", "=", "Error"))
+	root.AddChild(NewFilterCondition("level", "=", "Warning"))
+
+	sql, args := buildWhereFromTree(root)
+
+	expectedSQL := "(`level` = ? OR `level` = ?)"
+	if sql != expectedSQL {
+		t.Errorf("buildWhereFromTree() SQL = %s, want %s", sql, expectedSQL)
+	}
+	if len(args) != 2 {
+		t.Errorf("buildWhereFromTree() args length = %d, want 2", len(args))
+	}
+}
+
+// TestBuildWhereFromTree_NotAnd tests NOT AND group SQL generation
+func TestBuildWhereFromTree_NotAnd(t *testing.T) {
+	root := NewFilterGroup("NOT AND")
+	root.AddChild(NewFilterCondition("level", "=", "Debug"))
+	root.AddChild(NewFilterCondition("level", "=", "Trace"))
+
+	sql, args := buildWhereFromTree(root)
+
+	expectedSQL := "(NOT (`level` = ?) AND NOT (`level` = ?))"
+	if sql != expectedSQL {
+		t.Errorf("buildWhereFromTree() SQL = %s, want %s", sql, expectedSQL)
+	}
+	if len(args) != 2 {
+		t.Errorf("buildWhereFromTree() args length = %d, want 2", len(args))
+	}
+}
+
+// TestBuildWhereFromTree_NotOr tests NOT OR group SQL generation
+func TestBuildWhereFromTree_NotOr(t *testing.T) {
+	root := NewFilterGroup("NOT OR")
+	root.AddChild(NewFilterCondition("host", "LIKE", "prod"))
+	root.AddChild(NewFilterCondition("host", "LIKE", "stage"))
+
+	sql, args := buildWhereFromTree(root)
+
+	expectedSQL := "(NOT (`host` LIKE ?) OR NOT (`host` LIKE ?))"
+	if sql != expectedSQL {
+		t.Errorf("buildWhereFromTree() SQL = %s, want %s", sql, expectedSQL)
+	}
+	if len(args) != 2 {
+		t.Errorf("buildWhereFromTree() args length = %d, want 2", len(args))
+	}
+}
+
+// TestBuildWhereFromTree_NestedGroups tests nested group SQL generation
+func TestBuildWhereFromTree_NestedGroups(t *testing.T) {
+	// (level = 'Error' AND (host LIKE 'prod' OR host LIKE 'stage'))
+	root := NewFilterGroup("AND")
+	root.AddChild(NewFilterCondition("level", "=", "Error"))
+
+	subgroup := NewFilterGroup("OR")
+	subgroup.AddChild(NewFilterCondition("host", "LIKE", "prod"))
+	subgroup.AddChild(NewFilterCondition("host", "LIKE", "stage"))
+	root.AddChild(subgroup)
+
+	sql, args := buildWhereFromTree(root)
+
+	expectedSQL := "(`level` = ? AND (`host` LIKE ? OR `host` LIKE ?))"
+	if sql != expectedSQL {
+		t.Errorf("buildWhereFromTree() SQL = %s, want %s", sql, expectedSQL)
+	}
+	if len(args) != 3 {
+		t.Errorf("buildWhereFromTree() args length = %d, want 3", len(args))
+	}
+}
+
+// TestBuildWhereFromTree_EmptyGroup tests empty group returns empty result
+func TestBuildWhereFromTree_EmptyGroup(t *testing.T) {
+	root := NewFilterGroup("AND")
+
+	sql, args := buildWhereFromTree(root)
+
+	if sql != "" {
+		t.Errorf("buildWhereFromTree() SQL = %s, want empty string", sql)
+	}
+	if len(args) != 0 {
+		t.Errorf("buildWhereFromTree() args length = %d, want 0", len(args))
+	}
+}
+
+// TestBuildWhereFromTree_SingleCondition tests single condition in group
+func TestBuildWhereFromTree_SingleCondition(t *testing.T) {
+	root := NewFilterGroup("AND")
+	root.AddChild(NewFilterCondition("level", "=", "Error"))
+
+	sql, args := buildWhereFromTree(root)
+
+	expectedSQL := "`level` = ?"
+	if sql != expectedSQL {
+		t.Errorf("buildWhereFromTree() SQL = %s, want %s", sql, expectedSQL)
+	}
+	if len(args) != 1 {
+		t.Errorf("buildWhereFromTree() args length = %d, want 1", len(args))
+	}
+}
+
+// TestBuildWhereFromTree_NilRoot tests nil root returns empty result
+func TestBuildWhereFromTree_NilRoot(t *testing.T) {
+	sql, args := buildWhereFromTree(nil)
+
+	if sql != "" {
+		t.Errorf("buildWhereFromTree(nil) SQL = %s, want empty string", sql)
+	}
+	if len(args) != 0 {
+		t.Errorf("buildWhereFromTree(nil) args length = %d, want 0", len(args))
+	}
+}
+
+// TestBuildWhereFromTree_IsNullOperator tests IS NULL operator
+func TestBuildWhereFromTree_IsNullOperator(t *testing.T) {
+	root := NewFilterGroup("AND")
+	root.AddChild(NewFilterCondition("error_code", "IS NULL", ""))
+
+	sql, args := buildWhereFromTree(root)
+
+	expectedSQL := "`error_code` IS NULL"
+	if sql != expectedSQL {
+		t.Errorf("buildWhereFromTree() SQL = %s, want %s", sql, expectedSQL)
+	}
+	if len(args) != 0 {
+		t.Errorf("buildWhereFromTree() args length = %d, want 0", len(args))
+	}
+}
+
+// TestBuildWhereFromTree_IsNotNullOperator tests IS NOT NULL operator
+func TestBuildWhereFromTree_IsNotNullOperator(t *testing.T) {
+	root := NewFilterGroup("AND")
+	root.AddChild(NewFilterCondition("error_code", "IS NOT NULL", ""))
+
+	sql, args := buildWhereFromTree(root)
+
+	expectedSQL := "`error_code` IS NOT NULL"
+	if sql != expectedSQL {
+		t.Errorf("buildWhereFromTree() SQL = %s, want %s", sql, expectedSQL)
+	}
+	if len(args) != 0 {
+		t.Errorf("buildWhereFromTree() args length = %d, want 0", len(args))
+	}
+}
+
+// TestFilterNode_CycleLogic tests cycling through logic options
+func TestFilterNode_CycleLogic(t *testing.T) {
+	group := NewFilterGroup("AND")
+
+	// AND -> OR
+	group.CycleLogic()
+	if group.Logic != "OR" {
+		t.Errorf("CycleLogic() from AND = %s, want OR", group.Logic)
+	}
+
+	// OR -> NOT AND
+	group.CycleLogic()
+	if group.Logic != "NOT AND" {
+		t.Errorf("CycleLogic() from OR = %s, want NOT AND", group.Logic)
+	}
+
+	// NOT AND -> NOT OR
+	group.CycleLogic()
+	if group.Logic != "NOT OR" {
+		t.Errorf("CycleLogic() from NOT AND = %s, want NOT OR", group.Logic)
+	}
+
+	// NOT OR -> AND
+	group.CycleLogic()
+	if group.Logic != "AND" {
+		t.Errorf("CycleLogic() from NOT OR = %s, want AND", group.Logic)
+	}
+}

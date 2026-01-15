@@ -24,20 +24,87 @@ type LogEntry struct {
 	AllFields map[string]interface{}
 }
 
-// LogFilter represents a filter condition
+// LogFilter represents a filter condition (kept for buildFilterCondition compatibility)
 type LogFilter struct {
 	Field    string
 	Operator string
 	Value    string // empty for IS NULL / IS NOT NULL
 }
 
-// FilterGroup represents a group of filters combined with AND or OR
+// FilterNode represents either a condition or a group (recursive tree structure)
+// This is the new DevExpress-style filter builder structure
+type FilterNode struct {
+	IsGroup bool // true = group, false = condition
+
+	// For conditions (IsGroup = false):
+	Field    string
+	Operator string
+	Value    string
+
+	// For groups (IsGroup = true):
+	Logic    string        // "AND", "OR", "NOT AND", "NOT OR"
+	Children []*FilterNode // Nested nodes (conditions or groups)
+}
+
+// NewFilterGroup creates a new group node with specified logic
+func NewFilterGroup(logic string) *FilterNode {
+	return &FilterNode{
+		IsGroup:  true,
+		Logic:    logic,
+		Children: []*FilterNode{},
+	}
+}
+
+// NewFilterCondition creates a new condition node
+func NewFilterCondition(field, operator, value string) *FilterNode {
+	return &FilterNode{
+		IsGroup:  false,
+		Field:    field,
+		Operator: operator,
+		Value:    value,
+	}
+}
+
+// AddChild adds a child node to a group
+func (n *FilterNode) AddChild(child *FilterNode) {
+	if n.IsGroup {
+		n.Children = append(n.Children, child)
+	}
+}
+
+// CycleLogic cycles through logic options: AND -> OR -> NOT AND -> NOT OR -> AND
+func (n *FilterNode) CycleLogic() {
+	if !n.IsGroup {
+		return
+	}
+	switch n.Logic {
+	case "AND":
+		n.Logic = "OR"
+	case "OR":
+		n.Logic = "NOT AND"
+	case "NOT AND":
+		n.Logic = "NOT OR"
+	case "NOT OR":
+		n.Logic = "AND"
+	default:
+		n.Logic = "AND"
+	}
+}
+
+// RemoveChild removes a child at the given index
+func (n *FilterNode) RemoveChild(index int) {
+	if n.IsGroup && index >= 0 && index < len(n.Children) {
+		n.Children = append(n.Children[:index], n.Children[index+1:]...)
+	}
+}
+
+// FilterGroup represents a group of filters combined with AND or OR (legacy, to be removed)
 type FilterGroup struct {
 	Filters    []LogFilter
 	Combinator string // "AND" or "OR" - how filters within this group are combined
 }
 
-// LogFilterGroups represents multiple filter groups
+// LogFilterGroups represents multiple filter groups (legacy, to be removed)
 type LogFilterGroups struct {
 	Groups          []FilterGroup
 	GroupCombinator string // "AND" or "OR" - how groups are combined with each other
@@ -1447,19 +1514,21 @@ type logsViewer struct {
 	showZoomMenu bool // Show zoom menu
 	zoomMenuIdx  int  // Selected menu item (0-3)
 
-	// Filter form
-	showFilterForm     bool             // Whether filter form is visible
-	filterGroups       LogFilterGroups  // Filter groups with combinators
-	currentGroupIdx    int              // Index of current group being edited
-	allFields          []string         // All available fields from table
-	filterFieldDD      dropdown         // Filter field dropdown
-	filterOperatorDD   dropdown         // Filter operator dropdown
-	filterValueInput   textinput.Model  // Filter value input
-	filterFocusIdx     int              // 0=field, 1=operator, 2=value, 3=add button, 4=active filters, 5=group logic (AND/OR within group), 6=new group, 7=between groups combinator, 8=apply
-	selectedFilterIdx  int              // Index of selected filter within current group (-1 if none)
-	groupCombinatorDD  dropdown         // Dropdown for group combinator (AND/OR between groups)
-	filterCombinatorDD dropdown         // Dropdown for filter combinator (AND/OR within group)
-	filtersChanged     bool             // True when filters changed and need Apply
+	// Filter form (new tree-based structure)
+	showFilterForm    bool            // Whether filter form is visible
+	rootFilter        *FilterNode     // Root group (always a group with Logic="AND")
+	selectedPath      []int           // Path to selected node [childIdx, childIdx, ...]
+	filterMode        string          // "tree", "edit", "logicDropdown"
+	editFieldFocus    int             // In edit mode: 0=field, 1=operator, 2=value
+	groupFocusPos     int             // Position within group: 0=logic, 1=add condition, 2=add group
+	showLogicDropdown bool            // Show logic selection dropdown (AND/OR/NOT AND/NOT OR)
+	logicDropdownIdx  int             // Selected index in logic dropdown (0-3)
+	filtersChanged    bool            // True when filters changed, need Apply
+	applyFocused      bool            // True when Apply button has focus (separate from tree)
+	allFields         []string        // All available fields from table
+	filterFieldDD     dropdown        // Filter field dropdown (for editing)
+	filterOperatorDD  dropdown        // Filter operator dropdown (for editing)
+	filterValueInput  textinput.Model // Filter value input (for editing)
 }
 
 func newLogsViewer(config LogConfig, width, height int) logsViewer {
@@ -1507,7 +1576,7 @@ func newLogsViewer(config LogConfig, width, height int) logsViewer {
 	// Hide the FilteredTable's built-in help footer since we have our own main help line
 	tableModel.SetShowHelp(false)
 
-	// Initialize filter form components
+	// Initialize filter form components (for editing conditions)
 	filterFieldDD := newDropdown("Field", 20, true)
 	filterOperatorDD := newDropdown("Operator", 15, true)
 	filterOperatorDD.SetOptions([]string{"=", "!=", ">", "<", ">=", "<=", "LIKE", "NOT LIKE", "IN", "NOT IN", "IS NULL", "IS NOT NULL"})
@@ -1517,20 +1586,8 @@ func newLogsViewer(config LogConfig, width, height int) logsViewer {
 	filterValueInput.Placeholder = "Filter value..."
 	filterValueInput.Width = 30
 
-	// Combinator dropdowns
-	groupCombinatorDD := newDropdown("Groups", 8, false)
-	groupCombinatorDD.SetOptions([]string{"AND", "OR"})
-	groupCombinatorDD.SetValue("AND")
-
-	filterCombinatorDD := newDropdown("Filters", 8, false)
-	filterCombinatorDD.SetOptions([]string{"AND", "OR"})
-	filterCombinatorDD.SetValue("AND")
-
-	// Initialize with one empty group
-	initialGroups := LogFilterGroups{
-		Groups:          []FilterGroup{{Filters: []LogFilter{}, Combinator: "AND"}},
-		GroupCombinator: "AND",
-	}
+	// Initialize with one empty root group (AND logic)
+	rootFilter := NewFilterGroup("AND")
 
 	return logsViewer{
 		config:                 config,
@@ -1542,16 +1599,13 @@ func newLogsViewer(config LogConfig, width, height int) logsViewer {
 		measuredWidgetOverhead: 2, // Initial guess, will be measured after first render
 		overviewMode:           true, // Show overview by default
 		showFilterForm:         false,
-		filterGroups:           initialGroups,
-		currentGroupIdx:        0,
+		rootFilter:             rootFilter,
+		selectedPath:           []int{}, // Root is selected by default
+		filterMode:             "tree",
 		allFields:              []string{},
 		filterFieldDD:          filterFieldDD,
 		filterOperatorDD:       filterOperatorDD,
 		filterValueInput:       filterValueInput,
-		filterFocusIdx:         0,
-		selectedFilterIdx:      -1,
-		groupCombinatorDD:      groupCombinatorDD,
-		filterCombinatorDD:     filterCombinatorDD,
 	}
 }
 
@@ -1559,48 +1613,169 @@ func (m logsViewer) Init() tea.Cmd {
 	return nil
 }
 
-// getCurrentGroupFilters returns filters from the current group
-func (m *logsViewer) getCurrentGroupFilters() []LogFilter {
-	if m.currentGroupIdx >= 0 && m.currentGroupIdx < len(m.filterGroups.Groups) {
-		return m.filterGroups.Groups[m.currentGroupIdx].Filters
+// pathEqual compares two paths for equality
+func pathEqual(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
 	}
-	return nil
-}
-
-// addFilterToCurrentGroup adds a filter to the current group
-func (m *logsViewer) addFilterToCurrentGroup(filter LogFilter) {
-	if m.currentGroupIdx >= 0 && m.currentGroupIdx < len(m.filterGroups.Groups) {
-		m.filterGroups.Groups[m.currentGroupIdx].Filters = append(
-			m.filterGroups.Groups[m.currentGroupIdx].Filters, filter)
-	}
-}
-
-// removeFilterFromCurrentGroup removes a filter from the current group by index
-func (m *logsViewer) removeFilterFromCurrentGroup(idx int) {
-	if m.currentGroupIdx >= 0 && m.currentGroupIdx < len(m.filterGroups.Groups) {
-		filters := m.filterGroups.Groups[m.currentGroupIdx].Filters
-		if idx >= 0 && idx < len(filters) {
-			m.filterGroups.Groups[m.currentGroupIdx].Filters = append(filters[:idx], filters[idx+1:]...)
+	for i := range a {
+		if a[i] != b[i] {
+			return false
 		}
 	}
+	return true
 }
 
-// getTotalFilterCount returns total number of filters across all groups
+// getNodeAtPath returns the node at the given path in the filter tree
+func (m *logsViewer) getNodeAtPath(path []int) *FilterNode {
+	if m.rootFilter == nil {
+		return nil
+	}
+	node := m.rootFilter
+	for _, idx := range path {
+		if !node.IsGroup || idx < 0 || idx >= len(node.Children) {
+			return nil
+		}
+		node = node.Children[idx]
+	}
+	return node
+}
+
+// getParentPath returns the parent path (removes last element)
+func getParentPath(path []int) []int {
+	if len(path) == 0 {
+		return nil
+	}
+	return path[:len(path)-1]
+}
+
+// nodeWithPath represents a node and its path in the tree
+type nodeWithPath struct {
+	Node *FilterNode
+	Path []int
+}
+
+// flattenTree returns all nodes in depth-first order with their paths
+func flattenTree(node *FilterNode, path []int) []nodeWithPath {
+	result := []nodeWithPath{{Node: node, Path: path}}
+	if node.IsGroup {
+		for i, child := range node.Children {
+			childPath := make([]int, len(path)+1)
+			copy(childPath, path)
+			childPath[len(path)] = i
+			result = append(result, flattenTree(child, childPath)...)
+		}
+	}
+	return result
+}
+
+// getSelectedNode returns the currently selected node
+func (m *logsViewer) getSelectedNode() *FilterNode {
+	return m.getNodeAtPath(m.selectedPath)
+}
+
+// getParentNode returns the parent of the selected node
+func (m *logsViewer) getParentNode() *FilterNode {
+	if len(m.selectedPath) == 0 {
+		return nil
+	}
+	return m.getNodeAtPath(m.selectedPath[:len(m.selectedPath)-1])
+}
+
+// getTotalFilterCount returns total number of conditions in the tree
 func (m *logsViewer) getTotalFilterCount() int {
+	if m.rootFilter == nil {
+		return 0
+	}
+	return countConditions(m.rootFilter)
+}
+
+// countConditions recursively counts all conditions in a node
+func countConditions(node *FilterNode) int {
+	if !node.IsGroup {
+		return 1
+	}
 	count := 0
-	for _, group := range m.filterGroups.Groups {
-		count += len(group.Filters)
+	for _, child := range node.Children {
+		count += countConditions(child)
 	}
 	return count
 }
 
-// addNewGroup adds a new empty filter group
-func (m *logsViewer) addNewGroup() {
-	m.filterGroups.Groups = append(m.filterGroups.Groups, FilterGroup{
-		Filters:    []LogFilter{},
-		Combinator: "AND",
-	})
-	m.currentGroupIdx = len(m.filterGroups.Groups) - 1
+// addConditionToSelected adds a new condition to the selected group
+func (m *logsViewer) addConditionToSelected(field, operator, value string) {
+	node := m.getSelectedNode()
+	if node == nil {
+		node = m.rootFilter
+	}
+	// If selected is a condition, add to its parent
+	if !node.IsGroup {
+		parentPath := getParentPath(m.selectedPath)
+		node = m.getNodeAtPath(parentPath)
+		if node == nil {
+			node = m.rootFilter
+		}
+	}
+	if node.IsGroup {
+		node.AddChild(NewFilterCondition(field, operator, value))
+		m.filtersChanged = true
+	}
+}
+
+// addGroupToSelected adds a new group to the selected group
+func (m *logsViewer) addGroupToSelected(logic string) {
+	node := m.getSelectedNode()
+	if node == nil {
+		node = m.rootFilter
+	}
+	// If selected is a condition, add to its parent
+	if !node.IsGroup {
+		parentPath := getParentPath(m.selectedPath)
+		node = m.getNodeAtPath(parentPath)
+		if node == nil {
+			node = m.rootFilter
+		}
+	}
+	if node.IsGroup {
+		node.AddChild(NewFilterGroup(logic))
+		m.filtersChanged = true
+	}
+}
+
+// deleteSelectedNode deletes the currently selected node
+func (m *logsViewer) deleteSelectedNode() {
+	if len(m.selectedPath) == 0 {
+		// Can't delete root
+		return
+	}
+	parentPath := m.selectedPath[:len(m.selectedPath)-1]
+	parent := m.getNodeAtPath(parentPath)
+	if parent == nil || !parent.IsGroup {
+		return
+	}
+	childIdx := m.selectedPath[len(m.selectedPath)-1]
+	parent.RemoveChild(childIdx)
+	m.filtersChanged = true
+
+	// Adjust selection to previous sibling or parent
+	if childIdx > 0 {
+		m.selectedPath[len(m.selectedPath)-1] = childIdx - 1
+	} else if len(parent.Children) > 0 {
+		// Stay at index 0
+	} else {
+		// No children left, select parent
+		m.selectedPath = parentPath
+	}
+}
+
+// cycleGroupLogic cycles the logic of the selected group (AND → OR → NOT AND → NOT OR)
+func (m *logsViewer) cycleGroupLogic() {
+	node := m.getSelectedNode()
+	if node == nil || !node.IsGroup {
+		return
+	}
+	node.CycleLogic()
+	m.filtersChanged = true
 }
 
 // recalculateTableHeight recalculates and updates table height based on current overview mode
@@ -1762,7 +1937,7 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// This handles the case where ShowLogsViewer was called before WindowSizeMsg
 		if m.totalRows == 0 && !m.loading && m.app != nil {
 			m.loading = true
-			return m, m.app.fetchLogsDataCmd(m.config, 0, m.filterGroups, m.width)
+			return m, m.app.fetchLogsDataCmd(m.config, 0, m.rootFilter, m.width)
 		}
 
 		return m, nil
@@ -1823,7 +1998,7 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Time("to_time", m.app.state.ToTime).
 				Msg(">>> Triggering overview fetch")
 
-			return m, m.app.fetchOverviewDataCmd(m.config, m.app.state.FromTime, m.app.state.ToTime, sparklineWidth, m.filterGroups)
+			return m, m.app.fetchOverviewDataCmd(m.config, m.app.state.FromTime, m.app.state.ToTime, sparklineWidth, m.rootFilter)
 		}
 		return m, nil
 
@@ -1882,9 +2057,11 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(m.filterFieldDD.options) == 0 && len(m.allFields) > 0 {
 					m.filterFieldDD.SetOptions(m.allFields)
 				}
-				// Focus first field
-				m.filterFocusIdx = 0
-				m.filterFieldDD.Focus()
+				// Initialize tree navigation mode
+				m.filterMode = "tree"
+				m.selectedPath = []int{} // Select root
+				m.groupFocusPos = 0      // Focus on logic
+				m.showLogicDropdown = false
 			}
 			m.recalculateTableHeight()
 			return m, nil
@@ -1968,13 +2145,8 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				if fieldName != "" {
-					// Add filter to current group
-					m.addFilterToCurrentGroup(LogFilter{
-						Field:    fieldName,
-						Operator: "=",
-						Value:    fieldValue,
-					})
-					m.filtersChanged = true
+					// Add filter to root group using tree-based structure
+					m.addConditionToSelected(fieldName, "=", fieldValue)
 					m.showDetails = false
 					m.showFilterForm = true // Show filter form so user can see the added filter
 					m.recalculateTableHeight()
@@ -2021,7 +2193,7 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if sparklineWidth > 200 {
 						sparklineWidth = 200
 					}
-					return m, m.app.fetchOverviewDataCmd(m.config, m.app.state.FromTime, m.app.state.ToTime, sparklineWidth, m.filterGroups)
+					return m, m.app.fetchOverviewDataCmd(m.config, m.app.state.FromTime, m.app.state.ToTime, sparklineWidth, m.rootFilter)
 				}
 				return m, nil
 			}
@@ -2092,7 +2264,7 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				log.Debug().
 					Int("new_offset", newOffset).
 					Msg("Loading next window (Ctrl+N)")
-				return m, m.app.fetchLogsDataCmd(m.config, newOffset, m.filterGroups, m.width)
+				return m, m.app.fetchLogsDataCmd(m.config, newOffset, m.rootFilter, m.width)
 			}
 			return m, nil
 		case "ctrl+p":
@@ -2107,7 +2279,7 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				log.Debug().
 					Int("new_offset", newOffset).
 					Msg("Loading previous window (Ctrl+P)")
-				return m, m.app.fetchLogsDataCmd(m.config, newOffset, m.filterGroups, m.width)
+				return m, m.app.fetchLogsDataCmd(m.config, newOffset, m.rootFilter, m.width)
 			}
 			return m, nil
 		}
@@ -2124,8 +2296,17 @@ func (m logsViewer) handleFilterFormKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	var cmd tea.Cmd
+	// Handle logic dropdown mode
+	if m.showLogicDropdown {
+		return m.handleLogicDropdownKey(keyMsg)
+	}
 
+	// Handle edit mode
+	if m.filterMode == "edit" {
+		return m.handleEditModeKey(keyMsg)
+	}
+
+	// Tree navigation mode
 	switch keyMsg.String() {
 	case "ctrl+f", "esc":
 		// Close filter form
@@ -2133,259 +2314,437 @@ func (m logsViewer) handleFilterFormKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.filterFieldDD.Blur()
 		m.filterOperatorDD.Blur()
 		m.filterValueInput.Blur()
+		m.filterMode = "tree"
+		m.showLogicDropdown = false
+		m.applyFocused = false
 		m.recalculateTableHeight()
 		return m, nil
 
-	case "tab":
-		// Move to next field
-		// Navigation order: Field(0) -> Operator(1) -> Value(2) -> Add(3) -> Active Filters(4) -> Group Logic(5) -> New Group(6) -> Between Groups(7) -> Apply(8) -> Field(0)
-		// Note: Between Groups (7) is only included when there are multiple groups
-		m.blurCurrentFilterField()
-		currentFilters := m.getCurrentGroupFilters()
-		maxIdx := 3
-		if len(currentFilters) > 0 {
-			maxIdx = 5 // Include active filters list and group logic toggle
-		}
-		if len(m.filterGroups.Groups) > 0 {
-			maxIdx = 8 // Include new group, between groups combinator, and apply button
-		}
-		m.filterFocusIdx = (m.filterFocusIdx + 1) % (maxIdx + 1)
-		// Skip group logic (5) if no filters in current group
-		if m.filterFocusIdx == 5 && len(currentFilters) == 0 {
-			m.filterFocusIdx = 6
-		}
-		// Skip between groups combinator (7) if only one group exists
-		if m.filterFocusIdx == 7 && len(m.filterGroups.Groups) <= 1 {
-			m.filterFocusIdx = 8
-		}
-		if m.filterFocusIdx == 4 && len(currentFilters) > 0 {
-			// When entering active filters section, select first filter
-			m.selectedFilterIdx = 0
+	case "up":
+		flat := flattenTree(m.rootFilter, []int{})
+		if m.applyFocused {
+			// From Apply, go to last tree node
+			m.applyFocused = false
+			if len(flat) > 0 {
+				m.selectedPath = flat[len(flat)-1].Path
+				m.groupFocusPos = 0 // Reset to logic position
+			}
 		} else {
-			m.selectedFilterIdx = -1
+			// Move to previous node in depth-first order
+			for i, item := range flat {
+				if pathEqual(item.Path, m.selectedPath) {
+					if i > 0 {
+						m.selectedPath = flat[i-1].Path
+						m.groupFocusPos = 0 // Reset to logic position
+					}
+					// If already at first node (i==0), stay there
+					break
+				}
+			}
 		}
-		m.focusCurrentFilterField()
+		return m, nil
+
+	case "down":
+		flat := flattenTree(m.rootFilter, []int{})
+		if m.applyFocused {
+			// From Apply, wrap to root (first node)
+			m.applyFocused = false
+			if len(flat) > 0 {
+				m.selectedPath = flat[0].Path
+				m.groupFocusPos = 0 // Reset to logic position
+			}
+		} else {
+			// Find current position
+			for i, item := range flat {
+				if pathEqual(item.Path, m.selectedPath) {
+					if i < len(flat)-1 {
+						// Move to next node
+						m.selectedPath = flat[i+1].Path
+						m.groupFocusPos = 0 // Reset to logic position
+					} else {
+						// At last node, go to Apply button
+						m.applyFocused = true
+					}
+					break
+				}
+			}
+		}
+		return m, nil
+
+	case "left":
+		// Navigate within group or go to parent
+		if !m.applyFocused {
+			node := m.getSelectedNode()
+			if node != nil && node.IsGroup && m.groupFocusPos > 0 {
+				// Move left within group elements
+				m.groupFocusPos--
+			} else if len(m.selectedPath) > 0 {
+				// Go to parent group
+				m.selectedPath = getParentPath(m.selectedPath)
+				m.groupFocusPos = 0 // Reset to logic position
+			}
+		}
+		return m, nil
+
+	case "right":
+		// Navigate within group or go to first child
+		if !m.applyFocused {
+			node := m.getSelectedNode()
+			if node != nil && node.IsGroup {
+				if m.groupFocusPos < 2 {
+					// Move right within group elements
+					m.groupFocusPos++
+				} else if len(node.Children) > 0 {
+					// At rightmost element, go to first child
+					m.selectedPath = append(m.selectedPath, 0)
+					m.groupFocusPos = 0 // Reset to logic position for child
+				}
+			}
+		}
+		return m, nil
+
+	case "enter":
+		if m.applyFocused {
+			// Apply filters
+			if m.filtersChanged && m.app != nil {
+				m.loading = true
+				m.offset = 0
+				m.filtersChanged = false
+				// Reset sparklines to force refresh with new filters
+				m.levelTimeSeries = nil
+				m.timeLabels = nil
+				sparklineWidth := m.width - 20
+				if sparklineWidth < 40 {
+					sparklineWidth = 40
+				}
+				return m, tea.Batch(
+					m.app.fetchLogsDataCmd(m.config, 0, m.rootFilter, m.width),
+					m.app.fetchOverviewDataCmd(m.config, m.app.state.FromTime, m.app.state.ToTime, sparklineWidth, m.rootFilter),
+				)
+			}
+			return m, nil
+		}
+		// Handle Enter based on selected element
+		node := m.getSelectedNode()
+		if node == nil {
+			node = m.rootFilter
+		}
+		if node.IsGroup {
+			// Action depends on groupFocusPos
+			switch m.groupFocusPos {
+			case 0: // Logic dropdown
+				m.showLogicDropdown = true
+				m.filterMode = "logicDropdown"
+				// Set current logic as selected
+				logic := node.Logic
+				if logic == "" {
+					logic = "AND"
+				}
+				switch logic {
+				case "AND":
+					m.logicDropdownIdx = 0
+				case "OR":
+					m.logicDropdownIdx = 1
+				case "NOT AND":
+					m.logicDropdownIdx = 2
+				case "NOT OR":
+					m.logicDropdownIdx = 3
+				default:
+					m.logicDropdownIdx = 0
+				}
+			case 1: // Add condition
+				m.filterMode = "edit"
+				m.editFieldFocus = 0
+				m.filterFieldDD.SetValue("")
+				m.filterOperatorDD.SetValue("=")
+				m.filterValueInput.SetValue("")
+				m.filterFieldDD.Focus()
+			case 2: // Add group
+				m.addGroupToSelected("AND")
+			}
+		} else {
+			// Enter edit mode for condition
+			m.filterMode = "edit"
+			m.editFieldFocus = 0
+			m.filterFieldDD.SetValue(node.Field)
+			m.filterOperatorDD.SetValue(node.Operator)
+			m.filterValueInput.SetValue(node.Value)
+			m.filterFieldDD.Focus()
+		}
+		return m, nil
+
+	case "ctrl+a":
+		// Add condition to current group directly
+		node := m.getSelectedNode()
+		if node == nil {
+			node = m.rootFilter
+		}
+		// If selected is a condition, add to its parent
+		if !node.IsGroup {
+			parentPath := getParentPath(m.selectedPath)
+			node = m.getNodeAtPath(parentPath)
+			if node == nil {
+				node = m.rootFilter
+			}
+		}
+		if node.IsGroup {
+			// Enter edit mode for new condition
+			m.filterMode = "edit"
+			m.editFieldFocus = 0
+			m.filterFieldDD.SetValue("")
+			m.filterOperatorDD.SetValue("=")
+			m.filterValueInput.SetValue("")
+			m.filterFieldDD.Focus()
+		}
+		return m, nil
+
+	case "ctrl+g":
+		// Add group inside current group directly
+		m.addGroupToSelected("AND")
+		return m, nil
+
+	case "delete", "d":
+		// Delete selected node
+		if len(m.selectedPath) > 0 { // Can't delete root
+			m.deleteSelectedNode()
+		}
+		return m, nil
+
+	case "e":
+		// Edit selected condition
+		node := m.getSelectedNode()
+		if node != nil && !node.IsGroup {
+			m.filterMode = "edit"
+			m.editFieldFocus = 0
+			m.filterFieldDD.SetValue(node.Field)
+			m.filterOperatorDD.SetValue(node.Operator)
+			m.filterValueInput.SetValue(node.Value)
+			m.filterFieldDD.Focus()
+		}
+		return m, nil
+
+	case "tab":
+		// Move focus to Apply button
+		m.applyFocused = true
+		return m, nil
+
+	case "ctrl+enter":
+		// Apply filters if there are changes
+		if m.filtersChanged && m.app != nil {
+			m.loading = true
+			m.offset = 0 // Reset to first page when filter changes
+			m.filtersChanged = false
+			// Reset sparklines to force refresh with new filters
+			m.levelTimeSeries = nil
+			m.timeLabels = nil
+			// Calculate sparkline width for overview refresh
+			sparklineWidth := m.width - 20 // Approximate width available for sparklines
+			if sparklineWidth < 40 {
+				sparklineWidth = 40
+			}
+			// Fetch both logs data and overview data with filters
+			return m, tea.Batch(
+				m.app.fetchLogsDataCmd(m.config, 0, m.rootFilter, m.width),
+				m.app.fetchOverviewDataCmd(m.config, m.app.state.FromTime, m.app.state.ToTime, sparklineWidth, m.rootFilter),
+			)
+		}
+		return m, nil
+	}
+
+	return m, nil
+}
+
+// handleLogicDropdownKey handles key events when logic dropdown is shown
+func (m logsViewer) handleLogicDropdownKey(keyMsg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	logicOptions := []string{"AND", "OR", "NOT AND", "NOT OR"}
+
+	switch keyMsg.String() {
+	case "up":
+		if m.logicDropdownIdx > 0 {
+			m.logicDropdownIdx--
+		}
+		return m, nil
+	case "down":
+		if m.logicDropdownIdx < len(logicOptions)-1 {
+			m.logicDropdownIdx++
+		}
+		return m, nil
+	case "1":
+		m.logicDropdownIdx = 0
+		return m, nil
+	case "2":
+		m.logicDropdownIdx = 1
+		return m, nil
+	case "3":
+		m.logicDropdownIdx = 2
+		return m, nil
+	case "4":
+		m.logicDropdownIdx = 3
+		return m, nil
+	case "enter":
+		// Apply selected logic to current group
+		node := m.getSelectedNode()
+		if node == nil {
+			node = m.rootFilter
+		}
+		if node.IsGroup {
+			node.Logic = logicOptions[m.logicDropdownIdx]
+			m.filtersChanged = true
+		}
+		m.showLogicDropdown = false
+		m.filterMode = "tree"
+		return m, nil
+	case "esc":
+		m.showLogicDropdown = false
+		m.filterMode = "tree"
+		return m, nil
+	}
+	return m, nil
+}
+
+// handleEditModeKey handles key events when editing a condition
+func (m logsViewer) handleEditModeKey(keyMsg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch keyMsg.String() {
+	case "tab":
+		// Move to next field: Field → Operator → Value → Save
+		m.confirmCurrentFieldAndMoveNext()
 		return m, nil
 
 	case "shift+tab":
-		// If at first field (0), close filter form to allow normal tab navigation
-		if m.filterFocusIdx == 0 {
-			m.showFilterForm = false
-			m.filterFieldDD.Blur()
-			m.filterOperatorDD.Blur()
-			m.filterValueInput.Blur()
-			m.selectedFilterIdx = -1
-			m.recalculateTableHeight()
-			return m, nil
-		}
-		// Otherwise, move to previous field
+		// Move to previous field
 		m.blurCurrentFilterField()
-		currentFilters := m.getCurrentGroupFilters()
-		maxIdx := 3
-		if len(currentFilters) > 0 {
-			maxIdx = 5 // Include active filters list and group logic toggle
-		}
-		if len(m.filterGroups.Groups) > 0 {
-			maxIdx = 8 // Include new group, between groups combinator, and apply button
-		}
-		m.filterFocusIdx = (m.filterFocusIdx - 1 + maxIdx + 1) % (maxIdx + 1)
-		// Skip between groups combinator (7) if only one group exists
-		if m.filterFocusIdx == 7 && len(m.filterGroups.Groups) <= 1 {
-			m.filterFocusIdx = 6
-		}
-		// Skip group logic (5) if no filters in current group
-		if m.filterFocusIdx == 5 && len(currentFilters) == 0 {
-			m.filterFocusIdx = 4
-		}
-		if m.filterFocusIdx == 4 && len(currentFilters) > 0 {
-			// When entering active filters section, select last filter
-			m.selectedFilterIdx = len(currentFilters) - 1
+		if m.editFieldFocus == 0 {
+			m.editFieldFocus = 2 // Wrap to Value
 		} else {
-			m.selectedFilterIdx = -1
+			m.editFieldFocus--
 		}
 		m.focusCurrentFilterField()
 		return m, nil
 
 	case "enter":
-		// Add filter if on Add button, or remove filter if in active filters section
-		if m.filterFocusIdx == 3 {
-			// Add filter
-			field := m.filterFieldDD.value
-			operator := m.filterOperatorDD.value
-			value := m.filterValueInput.Value()
-
-			// IS NULL and IS NOT NULL don't need a value
-			isNullOperator := operator == "IS NULL" || operator == "IS NOT NULL"
-			if field != "" && operator != "" && (value != "" || isNullOperator) {
-				m.addFilterToCurrentGroup(LogFilter{
-					Field:    field,
-					Operator: operator,
-					Value:    value,
-				})
-
-				// Clear value input for next filter
-				m.filterValueInput.SetValue("")
-				m.filtersChanged = true // Mark filters as changed, need Apply
-			}
-		} else if m.filterFocusIdx == 4 {
-			currentFilters := m.getCurrentGroupFilters()
-			if m.selectedFilterIdx >= 0 && m.selectedFilterIdx < len(currentFilters) {
-				// Remove selected filter when in active filters section
-				return m.removeSelectedFilter()
-			}
-		} else if m.filterFocusIdx == 5 {
-			// Toggle group logic (AND/OR within current group)
-			if m.currentGroupIdx >= 0 && m.currentGroupIdx < len(m.filterGroups.Groups) {
-				if m.filterGroups.Groups[m.currentGroupIdx].Combinator == "AND" {
-					m.filterGroups.Groups[m.currentGroupIdx].Combinator = "OR"
-				} else {
-					m.filterGroups.Groups[m.currentGroupIdx].Combinator = "AND"
-				}
-				m.filterCombinatorDD.SetValue(m.filterGroups.Groups[m.currentGroupIdx].Combinator)
-				m.filtersChanged = true // Mark filters as changed, need Apply
-			}
-		} else if m.filterFocusIdx == 6 {
-			// Add new group
-			m.addNewGroup()
-			m.filterFocusIdx = 0 // Go back to field selection
-			m.focusCurrentFilterField()
+		// On dropdowns: select item and move to next field
+		// On value input or save button: save the condition
+		switch m.editFieldFocus {
+		case 0: // Field dropdown - select and move to operator
+			m.confirmDropdownSelection(&m.filterFieldDD)
+			m.filterFieldDD.Blur()
+			m.editFieldFocus = 1
+			m.filterOperatorDD.Focus()
 			return m, nil
-		} else if m.filterFocusIdx == 7 {
-			// Toggle between groups combinator (AND/OR)
-			if m.filterGroups.GroupCombinator == "AND" {
-				m.filterGroups.GroupCombinator = "OR"
-			} else {
-				m.filterGroups.GroupCombinator = "AND"
-			}
-			m.groupCombinatorDD.SetValue(m.filterGroups.GroupCombinator)
-			m.filtersChanged = true // Mark filters as changed, need Apply
-		} else if m.filterFocusIdx == 8 {
-			// Apply filters button
-			if m.filtersChanged && m.app != nil {
-				m.loading = true
-				m.offset = 0 // Reset to first page when filter changes
-				m.filtersChanged = false
-				// Reset sparklines to force refresh with new filters
-				m.levelTimeSeries = nil
-				m.timeLabels = nil
-				// Calculate sparkline width for overview refresh
-				sparklineWidth := m.width - 20 // Approximate width available for sparklines
-				if sparklineWidth < 40 {
-					sparklineWidth = 40
-				}
-				// Fetch both logs data and overview data with filters
-				return m, tea.Batch(
-					m.app.fetchLogsDataCmd(m.config, 0, m.filterGroups, m.width),
-					m.app.fetchOverviewDataCmd(m.config, m.app.state.FromTime, m.app.state.ToTime, sparklineWidth, m.filterGroups),
-				)
-			}
+		case 1: // Operator dropdown - select and move to value
+			m.confirmDropdownSelection(&m.filterOperatorDD)
+			m.filterOperatorDD.Blur()
+			m.editFieldFocus = 2
+			m.filterValueInput.Focus()
+			return m, nil
+		case 2, 3: // Value input or Save button - save condition
+			m.saveEditedCondition()
+			m.filterMode = "tree"
+			m.editFieldFocus = 0
+			return m, nil
 		}
+
+	case "esc":
+		// Cancel and return to tree mode
+		m.filterMode = "tree"
+		m.editFieldFocus = 0
+		m.filterFieldDD.Blur()
+		m.filterOperatorDD.Blur()
+		m.filterValueInput.Blur()
 		return m, nil
-
-	case "delete", "backspace":
-		// Delete selected filter when in active filters section
-		currentFilters := m.getCurrentGroupFilters()
-		if m.filterFocusIdx == 4 && m.selectedFilterIdx >= 0 && m.selectedFilterIdx < len(currentFilters) {
-			return m.removeSelectedFilter()
-		}
-		// If not in active filters section, let backspace work normally for text input
-		if keyMsg.String() == "backspace" {
-			break // Fall through to delegate to active field
-		}
-		return m, nil
-
-	case "left":
-		// Navigate between filter buttons (only when in active filters section)
-		currentFilters := m.getCurrentGroupFilters()
-		if m.filterFocusIdx == 4 && len(currentFilters) > 0 {
-			if m.selectedFilterIdx > 0 {
-				m.selectedFilterIdx--
-			}
-			return m, nil
-		}
-		// Otherwise let the key fall through to text input handling
-
-	case "right":
-		// Navigate between filter buttons (only when in active filters section)
-		currentFilters := m.getCurrentGroupFilters()
-		if m.filterFocusIdx == 4 && len(currentFilters) > 0 {
-			if m.selectedFilterIdx < len(currentFilters)-1 {
-				m.selectedFilterIdx++
-			}
-			return m, nil
-		}
-		// Otherwise let the key fall through to text input handling
-
-	case "up":
-		// Switch to previous group (only when in active filters section)
-		if m.filterFocusIdx == 4 && len(m.filterGroups.Groups) > 1 {
-			// Find previous group with filters
-			for i := m.currentGroupIdx - 1; i >= 0; i-- {
-				if len(m.filterGroups.Groups[i].Filters) > 0 {
-					m.currentGroupIdx = i
-					m.selectedFilterIdx = 0
-					return m, nil
-				}
-			}
-			// Wrap around to last group with filters
-			for i := len(m.filterGroups.Groups) - 1; i > m.currentGroupIdx; i-- {
-				if len(m.filterGroups.Groups[i].Filters) > 0 {
-					m.currentGroupIdx = i
-					m.selectedFilterIdx = 0
-					return m, nil
-				}
-			}
-			return m, nil
-		}
-
-	case "down":
-		// Switch to next group (only when in active filters section)
-		if m.filterFocusIdx == 4 && len(m.filterGroups.Groups) > 1 {
-			// Find next group with filters
-			for i := m.currentGroupIdx + 1; i < len(m.filterGroups.Groups); i++ {
-				if len(m.filterGroups.Groups[i].Filters) > 0 {
-					m.currentGroupIdx = i
-					m.selectedFilterIdx = 0
-					return m, nil
-				}
-			}
-			// Wrap around to first group with filters
-			for i := 0; i < m.currentGroupIdx; i++ {
-				if len(m.filterGroups.Groups[i].Filters) > 0 {
-					m.currentGroupIdx = i
-					m.selectedFilterIdx = 0
-					return m, nil
-				}
-			}
-			return m, nil
-		}
 	}
 
-	// Delegate to active field
-	switch m.filterFocusIdx {
+	// Delegate to active field for other keys (up/down navigation, typing)
+	switch m.editFieldFocus {
 	case 0: // Field dropdown
-		cmd, handled := m.filterFieldDD.Update(msg)
+		cmd, handled := m.filterFieldDD.Update(keyMsg)
 		if handled {
 			return m, cmd
 		}
-
 	case 1: // Operator dropdown
-		cmd, handled := m.filterOperatorDD.Update(msg)
+		cmd, handled := m.filterOperatorDD.Update(keyMsg)
 		if handled {
 			return m, cmd
 		}
-
 	case 2: // Value input
-		m.filterValueInput, cmd = m.filterValueInput.Update(msg)
+		m.filterValueInput, cmd = m.filterValueInput.Update(keyMsg)
 		return m, cmd
 	}
 
 	return m, nil
 }
 
+// confirmDropdownSelection confirms the currently selected dropdown item
+func (m *logsViewer) confirmDropdownSelection(d *dropdown) {
+	if d.showOptions && len(d.filtered) > 0 {
+		d.value = d.filtered[d.selected]
+		d.input.SetValue(d.value)
+	}
+	d.showOptions = false
+}
+
+// confirmCurrentFieldAndMoveNext confirms current field and moves to next
+func (m *logsViewer) confirmCurrentFieldAndMoveNext() {
+	// Confirm current field
+	switch m.editFieldFocus {
+	case 0:
+		m.confirmDropdownSelection(&m.filterFieldDD)
+		m.filterFieldDD.Blur()
+	case 1:
+		m.confirmDropdownSelection(&m.filterOperatorDD)
+		m.filterOperatorDD.Blur()
+	case 2:
+		m.filterValueInput.Blur()
+	}
+
+	// Move to next field
+	m.editFieldFocus++
+	if m.editFieldFocus > 3 {
+		// Done - save and return to tree mode
+		m.saveEditedCondition()
+		m.filterMode = "tree"
+		m.editFieldFocus = 0
+		return
+	}
+
+	// Focus new field
+	m.focusCurrentFilterField()
+}
+
+// saveEditedCondition saves the edited condition to the filter tree
+func (m *logsViewer) saveEditedCondition() {
+	field := m.filterFieldDD.value
+	operator := m.filterOperatorDD.value
+	value := m.filterValueInput.Value()
+
+	// IS NULL and IS NOT NULL don't need a value
+	isNullOperator := operator == "IS NULL" || operator == "IS NOT NULL"
+	if field == "" || operator == "" || (value == "" && !isNullOperator) {
+		return // Invalid condition
+	}
+
+	node := m.getSelectedNode()
+	if node != nil && !node.IsGroup {
+		// Update existing condition
+		node.Field = field
+		node.Operator = operator
+		node.Value = value
+		m.filtersChanged = true
+	} else {
+		// Add new condition to selected group
+		m.addConditionToSelected(field, operator, value)
+	}
+
+	// Clear inputs for next time
+	m.filterFieldDD.SetValue("")
+	m.filterValueInput.SetValue("")
+}
+
 // blurCurrentFilterField removes focus from currently focused filter field
 func (m *logsViewer) blurCurrentFilterField() {
-	switch m.filterFocusIdx {
+	switch m.editFieldFocus {
 	case 0:
 		m.filterFieldDD.Blur()
 	case 1:
@@ -2397,45 +2756,14 @@ func (m *logsViewer) blurCurrentFilterField() {
 
 // focusCurrentFilterField sets focus to currently selected filter field
 func (m *logsViewer) focusCurrentFilterField() {
-	switch m.filterFocusIdx {
+	switch m.editFieldFocus {
 	case 0:
 		m.filterFieldDD.Focus()
 	case 1:
 		m.filterOperatorDD.Focus()
 	case 2:
 		m.filterValueInput.Focus()
-	// case 3: Add button - no focus action needed
-	// case 4: Active filters list - no focus action needed, selectedFilterIdx handles selection
 	}
-}
-
-// removeSelectedFilter removes the currently selected filter and triggers data reload
-func (m logsViewer) removeSelectedFilter() (tea.Model, tea.Cmd) {
-	currentFilters := m.getCurrentGroupFilters()
-	if m.selectedFilterIdx < 0 || m.selectedFilterIdx >= len(currentFilters) {
-		return m, nil
-	}
-
-	// Remove the filter from current group
-	m.removeFilterFromCurrentGroup(m.selectedFilterIdx)
-
-	// Get updated filters count
-	updatedFilters := m.getCurrentGroupFilters()
-
-	// Adjust selection after removal
-	if len(updatedFilters) == 0 {
-		// No more filters in this group, move focus back to Add button
-		m.selectedFilterIdx = -1
-		m.filterFocusIdx = 3
-	} else if m.selectedFilterIdx >= len(updatedFilters) {
-		// Was last filter, select new last
-		m.selectedFilterIdx = len(updatedFilters) - 1
-	}
-	// else: keep same index (now points to next filter)
-
-	// Mark filters as changed, need Apply
-	m.filtersChanged = true
-	return m, nil
 }
 
 // handleOverviewKey handles key events when in overview/sparkline navigation mode
@@ -2618,7 +2946,7 @@ func (m logsViewer) zoomToBucket() (tea.Model, tea.Cmd) {
 	m.loading = true
 
 	// Fetch new data for the zoomed time range
-	return m, m.app.fetchLogsDataCmd(m.config, 0, m.filterGroups, m.width)
+	return m, m.app.fetchLogsDataCmd(m.config, 0, m.rootFilter, m.width)
 }
 
 // zoomOut restores the previous time range from zoom stack
@@ -2650,7 +2978,7 @@ func (m logsViewer) zoomOut() (tea.Model, tea.Cmd) {
 	m.loading = true
 
 	// Fetch new data for the restored time range
-	return m, m.app.fetchLogsDataCmd(m.config, 0, m.filterGroups, m.width)
+	return m, m.app.fetchLogsDataCmd(m.config, 0, m.rootFilter, m.width)
 }
 
 // resetZoom resets to the original time range
@@ -2680,7 +3008,7 @@ func (m logsViewer) resetZoom() (tea.Model, tea.Cmd) {
 	m.loading = true
 
 	// Fetch new data for the original time range
-	return m, m.app.fetchLogsDataCmd(m.config, 0, m.filterGroups, m.width)
+	return m, m.app.fetchLogsDataCmd(m.config, 0, m.rootFilter, m.width)
 }
 
 func (m logsViewer) View() string {
@@ -2747,14 +3075,8 @@ func (m logsViewer) View() string {
 	// Build components list
 	components := []string{renderedTitle}
 
-	// Add filter form if visible, or filter summary if filters are active but form is hidden
-	if m.showFilterForm {
-		filterForm := m.renderFilterForm()
-		filterFormBordered := borderStyle.Render(filterForm)
-		filterFormLines = strings.Count(filterFormBordered, "\n") + 1
-		components = append(components, filterFormBordered)
-	} else if m.getTotalFilterCount() > 0 {
-		// Show compact filter summary when form is hidden but filters are active
+	// Always show compact filter summary when filters are active (filter form is now a modal overlay)
+	if m.getTotalFilterCount() > 0 {
 		filterSummary := m.renderFilterSummary()
 		filterFormLines = 1
 		components = append(components, filterSummary)
@@ -2845,6 +3167,14 @@ func (m logsViewer) View() string {
 		return dimmedContent + "\n" + m.renderZoomMenu()
 	}
 
+	// Show filter form modal when active
+	if m.showFilterForm {
+		// Render base content dimmed in background
+		dimmedContent := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(content)
+		// Overlay filter modal on top
+		return dimmedContent + "\n" + m.renderFilterFormModal()
+	}
+
 	// Debug: log the first 3 lines of content to verify title is included
 	lines := strings.Split(content, "\n")
 	var preview string
@@ -2871,222 +3201,94 @@ func (m logsViewer) renderFilterForm() string {
 	// Title
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14")) // Cyan
 	builder.WriteString(titleStyle.Render("Filters"))
+	builder.WriteString("\n\n")
+
+	// Render the filter tree
+	if m.rootFilter != nil {
+		builder.WriteString(m.renderFilterNode(m.rootFilter, 0, []int{}))
+	}
+
+	// Show edit form when in edit mode
+	if m.filterMode == "edit" {
+		builder.WriteString("\n")
+		builder.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("14")).Bold(true).Render("Edit Condition:"))
+		builder.WriteString("\n")
+
+		// Field labels
+		fieldLabel := lipgloss.NewStyle().Foreground(lipgloss.Color("yellow")).Render("Field: ")
+		operatorLabel := lipgloss.NewStyle().Foreground(lipgloss.Color("yellow")).Render("Operator: ")
+		valueLabel := lipgloss.NewStyle().Foreground(lipgloss.Color("yellow")).Render("Value: ")
+
+		// Field input with focus highlight
+		fieldStyle := lipgloss.NewStyle()
+		if m.editFieldFocus == 0 {
+			fieldStyle = fieldStyle.Background(lipgloss.Color("6")).Foreground(lipgloss.Color("0"))
+		}
+		fieldView := fieldStyle.Render(m.filterFieldDD.input.View())
+
+		// Operator input with focus highlight
+		operatorStyle := lipgloss.NewStyle()
+		if m.editFieldFocus == 1 {
+			operatorStyle = operatorStyle.Background(lipgloss.Color("6")).Foreground(lipgloss.Color("0"))
+		}
+		operatorView := operatorStyle.Render(m.filterOperatorDD.input.View())
+
+		// Value input with focus highlight
+		valueStyle := lipgloss.NewStyle()
+		if m.editFieldFocus == 2 {
+			valueStyle = valueStyle.Background(lipgloss.Color("6")).Foreground(lipgloss.Color("0"))
+		}
+		valueView := valueStyle.Render(m.filterValueInput.View())
+
+		// Save button with focus highlight
+		saveStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10")) // Green
+		if m.editFieldFocus == 3 {
+			saveStyle = saveStyle.Background(lipgloss.Color("10")).Foreground(lipgloss.Color("0")).Bold(true)
+		}
+		saveButton := saveStyle.Render(" [Save] ")
+
+		builder.WriteString(fieldLabel + fieldView + "  " + operatorLabel + operatorView + "  " + valueLabel + valueView + "  " + saveButton)
+		builder.WriteString("\n")
+
+		// Show field dropdown options
+		if m.editFieldFocus == 0 && m.filterFieldDD.showOptions && len(m.filterFieldDD.filtered) > 0 {
+			builder.WriteString(m.renderFieldDropdown())
+		}
+
+		// Show operator dropdown options
+		if m.editFieldFocus == 1 && m.filterOperatorDD.showOptions && len(m.filterOperatorDD.filtered) > 0 {
+			builder.WriteString(m.renderOperatorDropdown())
+		}
+	}
+
+	// Show logic dropdown when in logicDropdown mode
+	if m.showLogicDropdown {
+		builder.WriteString("\n")
+		menuStyle := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("6")).Padding(0, 1)
+
+		var menuContent strings.Builder
+		menuContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14")).Render("Select logic:"))
+		menuContent.WriteString("\n")
+
+		logicOptions := []string{"AND", "OR", "NOT AND", "NOT OR"}
+		for i, opt := range logicOptions {
+			optStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+			if m.logicDropdownIdx == i {
+				optStyle = optStyle.Background(lipgloss.Color("6")).Foreground(lipgloss.Color("0"))
+			}
+			menuContent.WriteString(optStyle.Render(fmt.Sprintf(" %d. %s ", i+1, opt)))
+			menuContent.WriteString("\n")
+		}
+
+		builder.WriteString(menuStyle.Render(menuContent.String()))
+		builder.WriteString("\n")
+	}
+
+	// Apply button
 	builder.WriteString("\n")
-
-	// Filter input form
-	fieldLabel := lipgloss.NewStyle().Foreground(lipgloss.Color("yellow")).Render("Field: ")
-	operatorLabel := lipgloss.NewStyle().Foreground(lipgloss.Color("yellow")).Render("Operator: ")
-	valueLabel := lipgloss.NewStyle().Foreground(lipgloss.Color("yellow")).Render("Value: ")
-
-	// Render dropdowns and input
-	fieldView := m.filterFieldDD.input.View()
-	if m.filterFocusIdx == 0 {
-		fieldView = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true).Render(fieldView)
-	}
-
-	operatorView := m.filterOperatorDD.input.View()
-	if m.filterFocusIdx == 1 {
-		operatorView = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true).Render(operatorView)
-	}
-
-	valueView := m.filterValueInput.View()
-	if m.filterFocusIdx == 2 {
-		valueView = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true).Render(valueView)
-	}
-
-	// Add Filter button
-	addButtonStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10")) // Green
-	if m.filterFocusIdx == 3 {
-		addButtonStyle = addButtonStyle.Background(lipgloss.Color("10")).Foreground(lipgloss.Color("0")) // Inverted when focused
-	}
-	addButton := addButtonStyle.Render(" [Add Filter] ")
-
-	// Build filter input row
-	builder.WriteString(fieldLabel + fieldView + "  " + operatorLabel + operatorView + "  " + valueLabel + valueView + "  " + addButton)
-	builder.WriteString("\n")
-
-	// Show dropdown options if applicable - vertical list with scrolling
-	if m.filterFocusIdx == 0 && m.filterFieldDD.showOptions && len(m.filterFieldDD.filtered) > 0 {
-		maxVisible := 10
-		total := len(m.filterFieldDD.filtered)
-		selected := m.filterFieldDD.selected
-
-		// Calculate scroll offset to keep selected item visible
-		scrollOffset := 0
-		if selected >= maxVisible {
-			scrollOffset = selected - maxVisible/2
-			if scrollOffset < 0 {
-				scrollOffset = 0
-			}
-			if scrollOffset+maxVisible > total {
-				scrollOffset = total - maxVisible
-				if scrollOffset < 0 {
-					scrollOffset = 0
-				}
-			}
-		}
-
-		builder.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(
-			fmt.Sprintf("Fields (%d total, ↑↓ to navigate):", total)))
-		builder.WriteString("\n")
-
-		// Show scroll indicator if there are items before
-		if scrollOffset > 0 {
-			builder.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(
-				fmt.Sprintf("  ↑ %d more above", scrollOffset)))
-			builder.WriteString("\n")
-		}
-
-		// Show visible window
-		endIdx := scrollOffset + maxVisible
-		if endIdx > total {
-			endIdx = total
-		}
-
-		for i := scrollOffset; i < endIdx; i++ {
-			opt := m.filterFieldDD.filtered[i]
-			if i == selected {
-				builder.WriteString(lipgloss.NewStyle().
-					Background(lipgloss.Color("6")).
-					Foreground(lipgloss.Color("0")).
-					Render(fmt.Sprintf("▶ %s", opt)))
-			} else {
-				builder.WriteString(fmt.Sprintf("  %s", opt))
-			}
-			builder.WriteString("\n")
-		}
-
-		// Show scroll indicator if there are items after
-		if endIdx < total {
-			builder.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(
-				fmt.Sprintf("  ↓ %d more below", total-endIdx)))
-			builder.WriteString("\n")
-		}
-	}
-
-	if m.filterFocusIdx == 1 && m.filterOperatorDD.showOptions && len(m.filterOperatorDD.filtered) > 0 {
-		builder.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("Operators: "))
-		for i, opt := range m.filterOperatorDD.filtered {
-			if i == m.filterOperatorDD.selected {
-				builder.WriteString(lipgloss.NewStyle().Background(lipgloss.Color("240")).Foreground(lipgloss.Color("15")).Render(opt))
-			} else {
-				builder.WriteString(opt)
-			}
-			if i < len(m.filterOperatorDD.filtered)-1 {
-				builder.WriteString(" | ")
-			}
-		}
-		builder.WriteString("\n")
-	}
-
-	// Display all filter groups
-	totalFilters := m.getTotalFilterCount()
-	if totalFilters > 0 {
-		builder.WriteString("\n")
-		// Show group combinator if more than one group with filters
-		groupsWithFilters := 0
-		for _, g := range m.filterGroups.Groups {
-			if len(g.Filters) > 0 {
-				groupsWithFilters++
-			}
-		}
-
-		for groupIdx, group := range m.filterGroups.Groups {
-			if len(group.Filters) == 0 {
-				continue
-			}
-
-			// Show group separator/combinator for subsequent groups
-			if groupIdx > 0 && groupsWithFilters > 1 {
-				combinatorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true) // Cyan
-				if m.filterFocusIdx == 7 {
-					combinatorStyle = combinatorStyle.Background(lipgloss.Color("6")).Foreground(lipgloss.Color("0"))
-				}
-				builder.WriteString(combinatorStyle.Render(fmt.Sprintf(" ─── %s ─── ", m.filterGroups.GroupCombinator)))
-				builder.WriteString("\n")
-			}
-
-			// Group label with current group indicator
-			groupLabelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-			isCurrentGroup := groupIdx == m.currentGroupIdx
-			if isCurrentGroup {
-				groupLabelStyle = groupLabelStyle.Foreground(lipgloss.Color("14")).Bold(true)
-			}
-
-			// Show group combinator (AND/OR within group)
-			combText := group.Combinator
-			if combText == "" {
-				combText = "AND"
-			}
-			// Show arrow indicator for current group
-			groupIndicator := "  "
-			if isCurrentGroup {
-				groupIndicator = "▶ "
-			}
-			builder.WriteString(groupLabelStyle.Render(fmt.Sprintf("%sGroup %d [%s]: ", groupIndicator, groupIdx+1, combText)))
-
-			// Display filters in this group
-			for i, filter := range group.Filters {
-				filterBtnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // Yellow
-				if isCurrentGroup && m.filterFocusIdx == 4 && m.selectedFilterIdx == i {
-					filterBtnStyle = filterBtnStyle.Background(lipgloss.Color("11")).Foreground(lipgloss.Color("0"))
-				}
-				// Handle IS NULL/IS NOT NULL (no value)
-				var filterText string
-				if filter.Operator == "IS NULL" || filter.Operator == "IS NOT NULL" {
-					filterText = fmt.Sprintf(" [%s %s] ✕ ", filter.Field, filter.Operator)
-				} else {
-					filterText = fmt.Sprintf(" [%s %s %s] ✕ ", filter.Field, filter.Operator, filter.Value)
-				}
-				builder.WriteString(filterBtnStyle.Render(filterText))
-				builder.WriteString("  ")
-			}
-			builder.WriteString("\n")
-		}
-	}
-
-	// Group Logic toggle (AND/OR within current group) - show if current group has filters
-	currentFilters := m.getCurrentGroupFilters()
-	if len(currentFilters) > 0 {
-		builder.WriteString("\n")
-		currentCombinator := "AND"
-		if m.currentGroupIdx >= 0 && m.currentGroupIdx < len(m.filterGroups.Groups) {
-			currentCombinator = m.filterGroups.Groups[m.currentGroupIdx].Combinator
-			if currentCombinator == "" {
-				currentCombinator = "AND"
-			}
-		}
-		groupLogicStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("13")) // Magenta
-		if m.filterFocusIdx == 5 {
-			groupLogicStyle = groupLogicStyle.Background(lipgloss.Color("13")).Foreground(lipgloss.Color("0"))
-		}
-		builder.WriteString(groupLogicStyle.Render(fmt.Sprintf(" [Group %d Logic: %s] ", m.currentGroupIdx+1, currentCombinator)))
-		builder.WriteString("  ")
-	} else {
-		builder.WriteString("\n")
-	}
-
-	// New Group button
-	newGroupStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("12")) // Blue
-	if m.filterFocusIdx == 6 {
-		newGroupStyle = newGroupStyle.Background(lipgloss.Color("12")).Foreground(lipgloss.Color("0"))
-	}
-	builder.WriteString(newGroupStyle.Render(" [+ New Group] "))
-
-	// Between Groups Combinator toggle (only show if there are multiple groups)
-	if len(m.filterGroups.Groups) > 1 {
-		builder.WriteString("  ")
-		combStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
-		if m.filterFocusIdx == 7 {
-			combStyle = combStyle.Background(lipgloss.Color("6")).Foreground(lipgloss.Color("0"))
-		}
-		builder.WriteString(combStyle.Render(fmt.Sprintf(" [Between Groups: %s] ", m.filterGroups.GroupCombinator)))
-	}
-
-	// Apply button (show if filters changed)
-	builder.WriteString("  ")
 	applyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10")) // Green
-	if m.filterFocusIdx == 8 {
+	if m.filterMode == "tree" && m.applyFocused {
+		// Apply button is focused
 		applyStyle = applyStyle.Background(lipgloss.Color("10")).Foreground(lipgloss.Color("0"))
 	}
 	if m.filtersChanged {
@@ -3100,28 +3302,222 @@ func (m logsViewer) renderFilterForm() string {
 	// Help text - context-sensitive
 	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	var helpText string
-	if m.filterFocusIdx == 4 {
-		helpText = "←/→: Select filter | ↑/↓: Switch group | Enter/Delete: Remove | Tab: Next | Esc: Close"
-	} else if m.filterFocusIdx == 5 {
-		helpText = "Enter: Toggle AND/OR within this group | Tab: Next | Esc: Close"
-	} else if m.filterFocusIdx == 6 {
-		helpText = "Enter: Create new filter group | Tab: Next | Esc: Close"
-	} else if m.filterFocusIdx == 7 {
-		helpText = "Enter: Toggle AND/OR between groups | Tab: Next | Esc: Close"
-	} else if m.filterFocusIdx == 8 {
-		if m.filtersChanged {
-			helpText = "Enter: Apply filter changes | Tab: Next | Esc: Close"
+	switch m.filterMode {
+	case "edit":
+		helpText = "Enter: Next field (on Value/Save: save) | Tab: Next field | ↑/↓: Select option | Esc: Cancel"
+	case "logicDropdown":
+		helpText = "↑/↓ or 1-4: Select logic | Enter: Confirm | Esc: Cancel"
+	default: // tree mode
+		if m.applyFocused {
+			helpText = "↑: Back to filters | Enter: Apply filters | Esc: Close"
 		} else {
-			helpText = "No changes to apply | Tab: Next | Esc: Close"
-		}
-	} else {
-		helpText = "Tab: Next | Enter: Add filter | Ctrl+F/Esc: Close"
-		if totalFilters > 0 {
-			helpText = "Tab: Navigate | Enter: Add/Remove | Ctrl+F/Esc: Close"
+			helpText = "←/→: Switch element | ↑/↓: Navigate | Enter: Action | d: Delete | Ctrl+Enter: Apply | Esc: Close"
 		}
 	}
 	builder.WriteString(helpStyle.Render(helpText))
 
+	return builder.String()
+}
+
+// renderFilterFormModal renders the filter form as a centered modal dialog
+func (m logsViewer) renderFilterFormModal() string {
+	if !m.showFilterForm {
+		return ""
+	}
+
+	// Get the filter form content
+	filterContent := m.renderFilterForm()
+
+	// Calculate modal width - use 80% of screen width, min 60, max 100
+	modalWidth := int(float64(m.width) * 0.8)
+	if modalWidth < 60 {
+		modalWidth = 60
+	}
+	if modalWidth > 100 {
+		modalWidth = 100
+	}
+
+	// Wrap in modal border
+	modalStyle := lipgloss.NewStyle().
+		Border(lipgloss.DoubleBorder()).
+		BorderForeground(lipgloss.Color("6")). // Cyan border
+		Padding(1, 2).
+		Width(modalWidth)
+
+	modalBox := modalStyle.Render(filterContent)
+
+	// Center the modal on screen
+	return lipgloss.Place(
+		m.width,
+		m.height,
+		lipgloss.Center,
+		lipgloss.Center,
+		modalBox,
+	)
+}
+
+// renderFilterNode renders a single node in the filter tree recursively
+func (m logsViewer) renderFilterNode(node *FilterNode, depth int, path []int) string {
+	indent := strings.Repeat("    ", depth)
+	var result strings.Builder
+	isSelected := pathEqual(path, m.selectedPath) && m.filterMode == "tree"
+
+	if node.IsGroup {
+		// Delete button (not for root)
+		if depth > 0 {
+			deleteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("9")) // Red
+			result.WriteString(indent)
+			result.WriteString(deleteStyle.Render("[×]"))
+			result.WriteString(" ")
+		} else {
+			result.WriteString(indent)
+		}
+
+		// Group indicator and logic - focusable element 0
+		logic := node.Logic
+		if logic == "" {
+			logic = "AND"
+		}
+		logicStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true) // Cyan
+		if isSelected && m.groupFocusPos == 0 {
+			logicStyle = logicStyle.Background(lipgloss.Color("6")).Foreground(lipgloss.Color("0"))
+		}
+		result.WriteString(logicStyle.Render(fmt.Sprintf("▼ [%s]", logic)))
+
+		// Separator line
+		result.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(" ── "))
+
+		// Add condition button - focusable element 1
+		addCondStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10")) // Green
+		if isSelected && m.groupFocusPos == 1 {
+			addCondStyle = addCondStyle.Background(lipgloss.Color("10")).Foreground(lipgloss.Color("0"))
+		}
+		result.WriteString(addCondStyle.Render("[Add condition]"))
+		result.WriteString(" ")
+
+		// Add group button - focusable element 2
+		addGroupStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10")) // Green
+		if isSelected && m.groupFocusPos == 2 {
+			addGroupStyle = addGroupStyle.Background(lipgloss.Color("10")).Foreground(lipgloss.Color("0"))
+		}
+		result.WriteString(addGroupStyle.Render("[Add group]"))
+		result.WriteString("\n")
+
+		// Render children recursively
+		for i, child := range node.Children {
+			childPath := make([]int, len(path)+1)
+			copy(childPath, path)
+			childPath[len(path)] = i
+			result.WriteString(m.renderFilterNode(child, depth+1, childPath))
+		}
+
+		// Show empty placeholder if no children
+		if len(node.Children) == 0 {
+			emptyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Italic(true)
+			result.WriteString(indent + "    ")
+			result.WriteString(emptyStyle.Render("(empty - press Enter or Ctrl+A to add condition)"))
+			result.WriteString("\n")
+		}
+	} else {
+		// Condition: delete button + field operator value
+		deleteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+		condStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // Yellow
+		if isSelected {
+			condStyle = condStyle.Background(lipgloss.Color("11")).Foreground(lipgloss.Color("0"))
+		}
+
+		result.WriteString(indent)
+		result.WriteString(deleteStyle.Render("[×]"))
+		result.WriteString(" ")
+
+		// Format condition text
+		var condText string
+		if node.Operator == "IS NULL" || node.Operator == "IS NOT NULL" {
+			condText = fmt.Sprintf("%s %s", node.Field, node.Operator)
+		} else {
+			condText = fmt.Sprintf("%s %s %s", node.Field, node.Operator, node.Value)
+		}
+		result.WriteString(condStyle.Render(condText))
+		result.WriteString("\n")
+	}
+
+	return result.String()
+}
+
+// renderFieldDropdown renders the field dropdown options
+func (m logsViewer) renderFieldDropdown() string {
+	var builder strings.Builder
+	maxVisible := 10
+	total := len(m.filterFieldDD.filtered)
+	selected := m.filterFieldDD.selected
+
+	// Calculate scroll offset
+	scrollOffset := 0
+	if selected >= maxVisible {
+		scrollOffset = selected - maxVisible/2
+		if scrollOffset < 0 {
+			scrollOffset = 0
+		}
+		if scrollOffset+maxVisible > total {
+			scrollOffset = total - maxVisible
+			if scrollOffset < 0 {
+				scrollOffset = 0
+			}
+		}
+	}
+
+	builder.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(
+		fmt.Sprintf("Fields (%d total, ↑↓ to navigate):", total)))
+	builder.WriteString("\n")
+
+	if scrollOffset > 0 {
+		builder.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(
+			fmt.Sprintf("  ↑ %d more above", scrollOffset)))
+		builder.WriteString("\n")
+	}
+
+	endIdx := scrollOffset + maxVisible
+	if endIdx > total {
+		endIdx = total
+	}
+
+	for i := scrollOffset; i < endIdx; i++ {
+		opt := m.filterFieldDD.filtered[i]
+		if i == selected {
+			builder.WriteString(lipgloss.NewStyle().
+				Background(lipgloss.Color("6")).
+				Foreground(lipgloss.Color("0")).
+				Render(fmt.Sprintf("▶ %s", opt)))
+		} else {
+			builder.WriteString(fmt.Sprintf("  %s", opt))
+		}
+		builder.WriteString("\n")
+	}
+
+	if endIdx < total {
+		builder.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(
+			fmt.Sprintf("  ↓ %d more below", total-endIdx)))
+		builder.WriteString("\n")
+	}
+
+	return builder.String()
+}
+
+// renderOperatorDropdown renders the operator dropdown options
+func (m logsViewer) renderOperatorDropdown() string {
+	var builder strings.Builder
+	builder.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("Operators: "))
+	for i, opt := range m.filterOperatorDD.filtered {
+		if i == m.filterOperatorDD.selected {
+			builder.WriteString(lipgloss.NewStyle().Background(lipgloss.Color("240")).Foreground(lipgloss.Color("15")).Render(opt))
+		} else {
+			builder.WriteString(opt)
+		}
+		if i < len(m.filterOperatorDD.filtered)-1 {
+			builder.WriteString(" | ")
+		}
+	}
+	builder.WriteString("\n")
 	return builder.String()
 }
 
@@ -3139,56 +3535,9 @@ func (m logsViewer) renderFilterSummary() string {
 	builder.WriteString(titleStyle.Render(fmt.Sprintf("Active Filters (%d)", totalFilters)))
 	builder.WriteString(": ")
 
-	// Build compact filter representation
-	filterStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // Yellow
-	combinatorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true) // Cyan
-
-	groupsWithFilters := 0
-	for _, g := range m.filterGroups.Groups {
-		if len(g.Filters) > 0 {
-			groupsWithFilters++
-		}
-	}
-
-	groupIdx := 0
-	for _, group := range m.filterGroups.Groups {
-		if len(group.Filters) == 0 {
-			continue
-		}
-
-		// Add group combinator between groups
-		if groupIdx > 0 {
-			builder.WriteString(combinatorStyle.Render(fmt.Sprintf(" %s ", m.filterGroups.GroupCombinator)))
-		}
-
-		// If multiple groups, wrap in parentheses
-		if groupsWithFilters > 1 {
-			builder.WriteString("(")
-		}
-
-		// Render filters in this group
-		for i, filter := range group.Filters {
-			if i > 0 {
-				builder.WriteString(combinatorStyle.Render(fmt.Sprintf(" %s ", group.Combinator)))
-			}
-			var filterText string
-			if filter.Operator == "IS NULL" || filter.Operator == "IS NOT NULL" {
-				filterText = fmt.Sprintf("%s %s", filter.Field, filter.Operator)
-			} else {
-				// Truncate long values
-				value := filter.Value
-				if len(value) > 15 {
-					value = value[:12] + "..."
-				}
-				filterText = fmt.Sprintf("%s %s %s", filter.Field, filter.Operator, value)
-			}
-			builder.WriteString(filterStyle.Render(filterText))
-		}
-
-		if groupsWithFilters > 1 {
-			builder.WriteString(")")
-		}
-		groupIdx++
+	// Build compact filter representation from tree
+	if m.rootFilter != nil {
+		builder.WriteString(m.renderNodeSummary(m.rootFilter))
 	}
 
 	// Add hint to expand
@@ -3196,6 +3545,76 @@ func (m logsViewer) renderFilterSummary() string {
 	builder.WriteString(hintStyle.Render("  [Ctrl+F to edit]"))
 
 	return builder.String()
+}
+
+// renderNodeSummary renders a compact summary of a filter node
+func (m logsViewer) renderNodeSummary(node *FilterNode) string {
+	filterStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11"))    // Yellow
+	combinatorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6")) // Cyan
+
+	if !node.IsGroup {
+		// Render single condition
+		var filterText string
+		if node.Operator == "IS NULL" || node.Operator == "IS NOT NULL" {
+			filterText = fmt.Sprintf("%s %s", node.Field, node.Operator)
+		} else {
+			value := node.Value
+			if len(value) > 15 {
+				value = value[:12] + "..."
+			}
+			filterText = fmt.Sprintf("%s %s %s", node.Field, node.Operator, value)
+		}
+		return filterStyle.Render(filterText)
+	}
+
+	// Render group
+	if len(node.Children) == 0 {
+		return ""
+	}
+
+	var parts []string
+	for _, child := range node.Children {
+		part := m.renderNodeSummary(child)
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+
+	logic := node.Logic
+	if logic == "" {
+		logic = "AND"
+	}
+
+	// Handle NOT logic
+	isNot := strings.HasPrefix(logic, "NOT ")
+	combinator := strings.TrimPrefix(logic, "NOT ")
+
+	var result string
+	if len(parts) == 1 {
+		if isNot {
+			result = "NOT (" + parts[0] + ")"
+		} else {
+			result = parts[0]
+		}
+	} else {
+		joined := strings.Join(parts, combinatorStyle.Render(fmt.Sprintf(" %s ", combinator)))
+		if isNot {
+			// For NOT AND/NOT OR, each part is negated
+			var notParts []string
+			for _, p := range parts {
+				notParts = append(notParts, "NOT "+p)
+			}
+			result = "(" + strings.Join(notParts, combinatorStyle.Render(fmt.Sprintf(" %s ", combinator))) + ")"
+		} else {
+			result = "(" + joined + ")"
+		}
+	}
+
+	return result
 }
 
 func (m logsViewer) renderOverview() string {
@@ -3815,7 +4234,7 @@ func buildWhereClause(filters []LogFilter) (string, []interface{}) {
 	return whereClause, args
 }
 
-// buildWhereClauseFromGroups builds SQL WHERE clause from filter groups with AND/OR combinators
+// buildWhereClauseFromGroups builds SQL WHERE clause from filter groups (legacy, kept for backward compatibility)
 func buildWhereClauseFromGroups(filterGroups LogFilterGroups) (string, []interface{}) {
 	if len(filterGroups.Groups) == 0 {
 		return "", nil
@@ -3864,6 +4283,61 @@ func buildWhereClauseFromGroups(filterGroups LogFilterGroups) (string, []interfa
 	return whereClause, allArgs
 }
 
+// buildWhereFromTree builds SQL WHERE clause from a filter tree (new recursive structure)
+func buildWhereFromTree(node *FilterNode) (string, []interface{}) {
+	if node == nil {
+		return "", nil
+	}
+
+	if !node.IsGroup {
+		// Single condition - use existing buildFilterCondition
+		return buildFilterCondition(LogFilter{
+			Field:    node.Field,
+			Operator: node.Operator,
+			Value:    node.Value,
+		})
+	}
+
+	// Group - recursively build children
+	var parts []string
+	var allArgs []interface{}
+
+	// Parse logic: "AND", "OR", "NOT AND", "NOT OR"
+	logic := node.Logic
+	if logic == "" {
+		logic = "AND"
+	}
+	isNot := strings.HasPrefix(logic, "NOT ")
+	combinator := strings.TrimPrefix(logic, "NOT ")
+	if combinator == "" {
+		combinator = "AND"
+	}
+
+	for _, child := range node.Children {
+		sql, args := buildWhereFromTree(child)
+		if sql == "" {
+			continue // Skip empty conditions
+		}
+		if isNot {
+			// NOT AND: (NOT cond1 AND NOT cond2)
+			// NOT OR:  (NOT cond1 OR NOT cond2)
+			sql = "NOT (" + sql + ")"
+		}
+		parts = append(parts, sql)
+		allArgs = append(allArgs, args...)
+	}
+
+	if len(parts) == 0 {
+		return "", nil // Empty group
+	}
+	if len(parts) == 1 {
+		return parts[0], allArgs // Single child, no extra parentheses
+	}
+
+	// Multiple children: wrap in parentheses
+	return "(" + strings.Join(parts, " "+combinator+" ") + ")", allArgs
+}
+
 // fetchAllTableFields fetches all column names from a table
 func (a *App) fetchAllTableFields(database, table string) []string {
 	query := fmt.Sprintf("DESCRIBE TABLE `%s`.`%s`", database, table)
@@ -3910,14 +4384,14 @@ func (a *App) ShowLogsViewer(config LogConfig) tea.Cmd {
 	// If width is 0, we haven't received WindowSizeMsg yet - data will be fetched
 	// when LogsDataMsg is received after window size is set
 	if a.width > 0 {
-		emptyGroups := LogFilterGroups{Groups: []FilterGroup{{Filters: []LogFilter{}, Combinator: "AND"}}, GroupCombinator: "AND"}
-		return a.fetchLogsDataCmd(config, 0, emptyGroups, a.width)
+		// Use the viewer's root filter (empty by default)
+		return a.fetchLogsDataCmd(config, 0, viewer.rootFilter, a.width)
 	}
 	return nil
 }
 
 // fetchLogsDataCmd fetches log data from ClickHouse
-func (a *App) fetchLogsDataCmd(config LogConfig, offset int, filterGroups LogFilterGroups, viewerWidth int) tea.Cmd {
+func (a *App) fetchLogsDataCmd(config LogConfig, offset int, rootFilter *FilterNode, viewerWidth int) tea.Cmd {
 	return func() tea.Msg {
 		// Build query - select all fields (*)
 		queryBuilder := fmt.Sprintf(
@@ -3955,8 +4429,8 @@ func (a *App) fetchLogsDataCmd(config LogConfig, offset int, filterGroups LogFil
 					config.TimeMsField, toTime.Format("2006-01-02 15:04:05.999")))
 		}
 
-		// Build WHERE clause from user filter groups
-		whereClause, whereArgs := buildWhereClauseFromGroups(filterGroups)
+		// Build WHERE clause from user filter tree
+		whereClause, whereArgs := buildWhereFromTree(rootFilter)
 		var args []interface{}
 
 		// Combine time conditions with user filters
@@ -4085,7 +4559,7 @@ func (a *App) fetchLogsDataCmd(config LogConfig, offset int, filterGroups LogFil
 }
 
 // fetchOverviewDataCmd fetches overview sparkline data using time-based bucketing
-func (a *App) fetchOverviewDataCmd(config LogConfig, startTime, endTime time.Time, sparklineWidth int, filterGroups LogFilterGroups) tea.Cmd {
+func (a *App) fetchOverviewDataCmd(config LogConfig, startTime, endTime time.Time, sparklineWidth int, rootFilter *FilterNode) tea.Cmd {
 	return func() tea.Msg {
 		if startTime.IsZero() || endTime.IsZero() || config.LevelField == "" {
 			return OverviewDataMsg{Err: nil} // No data to display
@@ -4129,8 +4603,8 @@ func (a *App) fetchOverviewDataCmd(config LogConfig, startTime, endTime time.Tim
 		// Create args slice for parameterized query
 		var args []interface{}
 
-		// Add user filter groups if present
-		filterWhere, filterArgs := buildWhereClauseFromGroups(filterGroups)
+		// Add user filter tree if present
+		filterWhere, filterArgs := buildWhereFromTree(rootFilter)
 		if filterWhere != "" {
 			whereClause = whereClause + " AND (" + filterWhere + ")"
 			args = append(args, filterArgs...)
