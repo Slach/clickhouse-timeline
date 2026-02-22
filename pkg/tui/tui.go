@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"slices"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/term"
 )
 
 var logo = `████ ████ ████ ████
@@ -1010,6 +1012,16 @@ func (a *App) executeCommand(commandName string) tea.Cmd {
 
 // Run starts the bubbletea program
 func (a *App) Run() error {
+	// Check if we're running in an interactive terminal
+	// Bubble Tea requires a TTY to function properly
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return fmt.Errorf("this application requires an interactive terminal (TTY) to run\n\n" +
+			"Please run this command in a proper terminal session.\n\n" +
+			"If running in a container or CI environment, ensure a TTY is allocated:\n" +
+			"  docker run -it ...\n" +
+			"  script -q /dev/null go run ...")
+	}
+
 	defer func() {
 		if a.state.ClickHouse != nil {
 			if err := a.state.ClickHouse.Close(); err != nil {
