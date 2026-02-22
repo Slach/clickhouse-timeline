@@ -1530,6 +1530,9 @@ type logsViewer struct {
 	filterFieldDD     dropdown        // Filter field dropdown (for editing)
 	filterOperatorDD  dropdown        // Filter operator dropdown (for editing)
 	filterValueInput  textinput.Model // Filter value input (for editing)
+
+	// Details view viewport
+	detailsViewport viewport.Model // Viewport for scrolling log entry details
 }
 
 func newLogsViewer(config LogConfig, width, height int) logsViewer {
