@@ -10,6 +10,7 @@ import (
 
 	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/evertras/bubble-table/table"
