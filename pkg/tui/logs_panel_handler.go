@@ -2106,7 +2106,7 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "up", "k":
 				// Check if viewport can be scrolled up
 				if m.detailsViewport.YOffset > 0 {
-					m.detailsViewport = m.detailsViewport.LineUp(1)
+					m.detailsViewport.LineUp(1)
 					return m, nil
 				}
 				// If at top of viewport, navigate selection up
@@ -2119,7 +2119,7 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "down", "j":
 				// Check if viewport can be scrolled down
 				if m.detailsViewport.YOffset < m.detailsViewport.TotalLineCount()-m.detailsViewport.Height {
-					m.detailsViewport = m.detailsViewport.LineDown(1)
+					m.detailsViewport.LineDown(1)
 					return m, nil
 				}
 				// If at bottom of viewport, navigate selection down
