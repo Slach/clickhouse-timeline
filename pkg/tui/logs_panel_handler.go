@@ -1593,6 +1593,9 @@ func newLogsViewer(config LogConfig, width, height int) logsViewer {
 	// Initialize with one empty root group (AND logic)
 	rootFilter := NewFilterGroup("AND")
 
+	// Initialize details viewport
+	detailsViewport := viewport.New(width-4, height-8)
+
 	return logsViewer{
 		config:                 config,
 		table:                  tableModel,
@@ -1610,6 +1613,7 @@ func newLogsViewer(config LogConfig, width, height int) logsViewer {
 		filterFieldDD:          filterFieldDD,
 		filterOperatorDD:       filterOperatorDD,
 		filterValueInput:       filterValueInput,
+		detailsViewport:        detailsViewport,
 	}
 }
 
