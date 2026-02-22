@@ -4071,12 +4071,11 @@ func (m logsViewer) renderDetails() string {
 
 	sb.WriteString(helpStyle.Render("↑↓: Navigate | Enter: Add as filter (field = value) | ESC: Close"))
 
-	borderStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("6")).
-		Padding(1, 2)
+	// Set content in viewport
+	m.detailsViewport.SetContent(sb.String())
 
-	return borderStyle.Render(sb.String())
+	// Return viewport view
+	return m.detailsViewport.View()
 }
 
 // IsTableFiltering returns true if the table is currently in filter mode
