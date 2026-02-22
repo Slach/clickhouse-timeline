@@ -2102,16 +2102,49 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "esc", "q":
 				m.showDetails = false
 				return m, nil
+
 			case "up", "k":
+				// Check if viewport can be scrolled up
+				if m.detailsViewport.YOffset > 0 {
+					m.detailsViewport.ScrollUp()
+					return m, nil
+				}
+				// If at top of viewport, navigate selection up
 				if m.detailsSelectedIdx > 0 {
 					m.detailsSelectedIdx--
+					return m, nil
 				}
 				return m, nil
+
 			case "down", "j":
+				// Check if viewport can be scrolled down
+				if m.detailsViewport.YOffset < m.detailsViewport.GetContentHeight()-m.detailsViewport.Height {
+					m.detailsViewport.ScrollDown()
+					return m, nil
+				}
+				// If at bottom of viewport, navigate selection down
 				if m.detailsSelectedIdx < totalFields-1 {
 					m.detailsSelectedIdx++
+					return m, nil
 				}
 				return m, nil
+
+			case "pgup", "b":
+				m.detailsViewport.ScrollUpPage()
+				return m, nil
+
+			case "pgdown", "f":
+				m.detailsViewport.ScrollDownPage()
+				return m, nil
+
+			case "home":
+				m.detailsViewport.SetYOffset(0)
+				return m, nil
+
+			case "end":
+				m.detailsViewport.SetYOffset(m.detailsViewport.GetContentHeight() - m.detailsViewport.Height)
+				return m, nil
+
 			case "enter":
 				// Add selected field as filter (field = value)
 				var fieldName, fieldValue string
@@ -2294,6 +2327,12 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	m.table, cmd = m.table.Update(msg)
+	
+	// Handle viewport scrolling when showDetails is true
+	if m.showDetails {
+		m.detailsViewport, cmd = m.detailsViewport.Update(msg)
+	}
+	
 	return m, cmd
 }
 
