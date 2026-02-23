@@ -1594,7 +1594,7 @@ func newLogsViewer(config LogConfig, width, height int) logsViewer {
 	rootFilter := NewFilterGroup("AND")
 
 	// Initialize details viewport
-	detailsViewport := viewport.New(width-4, height-8)
+	detailsViewport := viewport.New(width, height-3)
 
 	return logsViewer{
 		config:                 config,
@@ -1890,6 +1890,10 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 
+		// Resize details viewport to match new terminal dimensions
+		m.detailsViewport.Width = msg.Width
+		m.detailsViewport.Height = msg.Height - 3
+
 		// Recalculate column widths to maintain 100% screen width
 		timeWidth := 23
 		borderOverhead := 3
@@ -2104,45 +2108,57 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 
 			case "up", "k":
-				// Check if viewport can be scrolled up
-				if m.detailsViewport.YOffset > 0 {
-					m.detailsViewport.LineUp(1)
-					return m, nil
-				}
-				// If at top of viewport, navigate selection up
 				if m.detailsSelectedIdx > 0 {
 					m.detailsSelectedIdx--
-					return m, nil
+					selectedLine, _ := m.detailsContentMetrics()
+					if selectedLine < m.detailsViewport.YOffset {
+						m.detailsViewport.YOffset = selectedLine
+					}
 				}
 				return m, nil
 
 			case "down", "j":
-				// Check if viewport can be scrolled down
-				if m.detailsViewport.YOffset < m.detailsViewport.TotalLineCount()-m.detailsViewport.Height {
-					m.detailsViewport.LineDown(1)
-					return m, nil
-				}
-				// If at bottom of viewport, navigate selection down
 				if m.detailsSelectedIdx < totalFields-1 {
 					m.detailsSelectedIdx++
-					return m, nil
+					selectedLine, _ := m.detailsContentMetrics()
+					if selectedLine >= m.detailsViewport.YOffset+m.detailsViewport.Height {
+						m.detailsViewport.YOffset = selectedLine - m.detailsViewport.Height + 1
+					}
 				}
 				return m, nil
 
 			case "pgup", "b":
-				m.detailsViewport.ViewUp()
+				newOffset := m.detailsViewport.YOffset - m.detailsViewport.Height
+				if newOffset < 0 {
+					newOffset = 0
+				}
+				m.detailsViewport.YOffset = newOffset
 				return m, nil
 
 			case "pgdown", "f":
-				m.detailsViewport.ViewDown()
+				_, totalLines := m.detailsContentMetrics()
+				maxOffset := totalLines - m.detailsViewport.Height
+				if maxOffset < 0 {
+					maxOffset = 0
+				}
+				newOffset := m.detailsViewport.YOffset + m.detailsViewport.Height
+				if newOffset > maxOffset {
+					newOffset = maxOffset
+				}
+				m.detailsViewport.YOffset = newOffset
 				return m, nil
 
 			case "home":
-				m.detailsViewport.SetYOffset(0)
+				m.detailsViewport.YOffset = 0
 				return m, nil
 
 			case "end":
-				m.detailsViewport.SetYOffset(m.detailsViewport.TotalLineCount() - m.detailsViewport.Height)
+				_, totalLines := m.detailsContentMetrics()
+				maxOffset := totalLines - m.detailsViewport.Height
+				if maxOffset < 0 {
+					maxOffset = 0
+				}
+				m.detailsViewport.YOffset = maxOffset
 				return m, nil
 
 			case "enter":
@@ -2278,6 +2294,7 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.showDetails = true
 						// Initialize details navigation
 						m.detailsSelectedIdx = 0 // Start with Time field selected
+						m.detailsViewport.YOffset = 0 // Reset scroll position
 						// Cache sorted field names for navigation
 						m.detailsFieldNames = make([]string, 0, len(entry.AllFields))
 						for fieldName := range entry.AllFields {
@@ -2327,12 +2344,6 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	m.table, cmd = m.table.Update(msg)
-	
-	// Handle viewport scrolling when showDetails is true
-	if m.showDetails {
-		m.detailsViewport, cmd = m.detailsViewport.Update(msg)
-	}
-	
 	return m, cmd
 }
 
@@ -2454,12 +2465,15 @@ func (m logsViewer) handleFilterFormKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.applyFocused {
 			// Apply filters
 			if m.filtersChanged && m.app != nil {
+				m.showFilterForm = false
+				m.applyFocused = false
 				m.loading = true
 				m.offset = 0
 				m.filtersChanged = false
 				// Reset sparklines to force refresh with new filters
 				m.levelTimeSeries = nil
 				m.timeLabels = nil
+				m.recalculateTableHeight()
 				sparklineWidth := m.width - 20
 				if sparklineWidth < 40 {
 					sparklineWidth = 40
@@ -2578,12 +2592,15 @@ func (m logsViewer) handleFilterFormKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "ctrl+enter":
 		// Apply filters if there are changes
 		if m.filtersChanged && m.app != nil {
+			m.showFilterForm = false
+			m.applyFocused = false
 			m.loading = true
 			m.offset = 0 // Reset to first page when filter changes
 			m.filtersChanged = false
 			// Reset sparklines to force refresh with new filters
 			m.levelTimeSeries = nil
 			m.timeLabels = nil
+			m.recalculateTableHeight()
 			// Calculate sparkline width for overview refresh
 			sparklineWidth := m.width - 20 // Approximate width available for sparklines
 			if sparklineWidth < 40 {
@@ -4017,19 +4034,53 @@ func (m logsViewer) generateSparklineChars(values []float64) []rune {
 	return chars
 }
 
+// wrapText wraps text at the given width while preserving existing newlines.
+// Unlike wordWrap() which collapses all whitespace (unsuitable for stack traces),
+// this splits on \n first, then word-wraps each individual line.
+func wrapText(text string, width int) string {
+	if width <= 0 {
+		return text
+	}
+	lines := strings.Split(text, "\n")
+	var result []string
+	for _, line := range lines {
+		if len(line) <= width {
+			result = append(result, line)
+		} else {
+			result = append(result, wordWrap(line, width))
+		}
+	}
+	return strings.Join(result, "\n")
+}
+
+// formatFieldValue converts a field value to its display string representation.
+func formatFieldValue(value interface{}) string {
+	switch v := value.(type) {
+	case []byte:
+		return string(v)
+	case time.Time:
+		return v.Format("2006-01-02 15:04:05.000 MST")
+	case nil:
+		return "NULL"
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
 func (m logsViewer) renderDetails() string {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
 	selectedLabelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("11"))
 	selectedValueStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("6"))
 	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	scrollStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Align(lipgloss.Right)
 
+	viewportWidth := m.detailsViewport.Width
 	hasLevel := m.selectedEntry.Level != ""
 	currentIdx := 0
 
+	// Build viewport content (scrollable area only — title and help are outside)
 	var sb strings.Builder
-	sb.WriteString(titleStyle.Render("Log Entry Details"))
-	sb.WriteString("\n\n")
 
 	// Time field (index 0)
 	if m.detailsSelectedIdx == currentIdx {
@@ -4055,15 +4106,16 @@ func (m logsViewer) renderDetails() string {
 		currentIdx++
 	}
 
-	// Message field (index 1 or 2)
+	// Message field — wrap text to viewport width
+	wrappedMessage := wrapText(m.selectedEntry.Message, viewportWidth)
 	if m.detailsSelectedIdx == currentIdx {
 		sb.WriteString(selectedLabelStyle.Render("▶ Message:"))
 		sb.WriteString("\n")
-		sb.WriteString(selectedValueStyle.Render(m.selectedEntry.Message))
+		sb.WriteString(selectedValueStyle.Render(wrappedMessage))
 	} else {
 		sb.WriteString(labelStyle.Render("  Message:"))
 		sb.WriteString("\n")
-		sb.WriteString(m.selectedEntry.Message)
+		sb.WriteString(wrappedMessage)
 	}
 	sb.WriteString("\n\n")
 	currentIdx++
@@ -4073,27 +4125,9 @@ func (m logsViewer) renderDetails() string {
 		sb.WriteString(titleStyle.Render("All Fields"))
 		sb.WriteString("\n\n")
 
-		// Display sorted fields using cached field names
 		for _, fieldName := range m.detailsFieldNames {
 			value := m.selectedEntry.AllFields[fieldName]
-
-			// Format value based on type
-			var valueStr string
-			switch v := value.(type) {
-			case []byte:
-				valueStr = string(v)
-			case time.Time:
-				valueStr = v.Format("2006-01-02 15:04:05.000 MST")
-			case nil:
-				valueStr = "NULL"
-			default:
-				valueStr = fmt.Sprintf("%v", v)
-			}
-
-			// Truncate very long values
-			if len(valueStr) > 200 {
-				valueStr = valueStr[:197] + "..."
-			}
+			valueStr := wrapText(formatFieldValue(value), viewportWidth)
 
 			if m.detailsSelectedIdx == currentIdx {
 				sb.WriteString(selectedLabelStyle.Render("▶ " + fieldName + ": "))
@@ -4108,13 +4142,104 @@ func (m logsViewer) renderDetails() string {
 		sb.WriteString("\n")
 	}
 
-	sb.WriteString(helpStyle.Render("↑↓: Navigate | Enter: Add as filter (field = value) | ESC: Close"))
-
 	// Set content in viewport
 	m.detailsViewport.SetContent(sb.String())
 
-	// Return viewport view
-	return m.detailsViewport.View()
+	// Build final output: title (pinned) + viewport (scrollable) + scroll indicator + help (pinned)
+	titleBar := titleStyle.Render("Log Entry Details")
+
+	// Scroll position indicator
+	var scrollIndicator string
+	totalContentLines := m.detailsViewport.TotalLineCount()
+	visibleHeight := m.detailsViewport.Height
+	if totalContentLines > visibleHeight {
+		topLine := m.detailsViewport.YOffset + 1
+		bottomLine := m.detailsViewport.YOffset + visibleHeight
+		if bottomLine > totalContentLines {
+			bottomLine = totalContentLines
+		}
+		pct := int(float64(m.detailsViewport.YOffset+visibleHeight) / float64(totalContentLines) * 100)
+		if pct > 100 {
+			pct = 100
+		}
+		scrollIndicator = scrollStyle.Width(viewportWidth).Render(
+			fmt.Sprintf("Lines %d-%d of %d (%d%%)", topLine, bottomLine, totalContentLines, pct),
+		)
+	}
+
+	helpLine := helpStyle.Render("↑↓: Navigate | PgUp/PgDn: Scroll | Enter: Add as filter | ESC: Close")
+
+	// Assemble final view
+	var output strings.Builder
+	output.WriteString(titleBar)
+	output.WriteString("\n")
+	output.WriteString(m.detailsViewport.View())
+	output.WriteString("\n")
+	if scrollIndicator != "" {
+		output.WriteString(scrollIndicator)
+	}
+	output.WriteString(helpLine)
+
+	// Pad to full terminal dimensions to prevent rendering artifacts
+	return lipgloss.NewStyle().Width(m.width).Height(m.height).Render(output.String())
+}
+
+// detailsContentMetrics calculates the line number of the selected field
+// and total content lines in the details view, without building the content string.
+// This is needed because renderDetails() is a value receiver, so SetContent on the
+// viewport only affects a copy - the real model's viewport never knows its content,
+// making TotalLineCount() and SetYOffset clamping unreliable.
+func (m logsViewer) detailsContentMetrics() (selectedLine int, totalLines int) {
+	viewportWidth := m.detailsViewport.Width
+	hasLevel := m.selectedEntry.Level != ""
+	line := 0 // title is outside viewport now; content starts at line 0
+	currentIdx := 0
+	selectedLine = 0
+
+	// Time field (1 line + blank)
+	if m.detailsSelectedIdx == currentIdx {
+		selectedLine = line
+	}
+	line += 2
+	currentIdx++
+
+	// Level field (if present, 1 line + blank)
+	if hasLevel {
+		if m.detailsSelectedIdx == currentIdx {
+			selectedLine = line
+		}
+		line += 2
+		currentIdx++
+	}
+
+	// Message field: "  Message:" label (1 line) + wrapped message text (N lines) + blank
+	if m.detailsSelectedIdx == currentIdx {
+		selectedLine = line
+	}
+	wrappedMsg := wrapText(m.selectedEntry.Message, viewportWidth)
+	messageTextLines := 1 + strings.Count(wrappedMsg, "\n")
+	line += 1 + messageTextLines + 1 // label + text lines + blank
+	currentIdx++
+
+	// "All Fields" section
+	if len(m.detailsFieldNames) > 0 {
+		line += 2 // "All Fields" header + blank
+
+		for _, fieldName := range m.detailsFieldNames {
+			if m.detailsSelectedIdx == currentIdx {
+				selectedLine = line
+			}
+			value := m.selectedEntry.AllFields[fieldName]
+			wrappedVal := wrapText(formatFieldValue(value), viewportWidth)
+			fieldLines := 1 + strings.Count(wrappedVal, "\n")
+			line += fieldLines
+			currentIdx++
+		}
+		line++ // trailing blank
+	}
+
+	totalLines = line
+	return
 }
 
 // IsTableFiltering returns true if the table is currently in filter mode
