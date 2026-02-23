@@ -14,3 +14,4 @@ vtcode.toml
 .env
 clickhouse-timeline
 main
+_bmad/
