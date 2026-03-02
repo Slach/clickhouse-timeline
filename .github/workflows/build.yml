@@ -17,7 +17,7 @@ jobs:
         goarch: [amd64, arm64]
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
 
     - name: Set up Go
       uses: actions/setup-go@v5
@@ -30,7 +30,7 @@ jobs:
         GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o build/clickhouse-timeline-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goos == 'windows' && '.exe' || '' }} cmd/clickhouse-timeline/main.go
 
     - name: Upload artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}
         path: build/clickhouse-timeline-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goos == 'windows' && '.exe' || '' }}
@@ -43,16 +43,16 @@ jobs:
       contents: read
       packages: write
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
 
     - name: Download amd64 artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: binaries-linux-amd64
         path: build
 
     - name: Download arm64 artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: binaries-linux-arm64
         path: build
@@ -106,28 +106,28 @@ jobs:
     permissions:
       contents: write
     steps:
-    - uses: actions/checkout@v5
-    - uses: actions/download-artifact@v4
+    - uses: actions/checkout@v6
+    - uses: actions/download-artifact@v8
       with:
         name: binaries-linux-amd64
         path: build
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: binaries-linux-arm64
         path: build
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: binaries-windows-amd64
         path: build
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: binaries-windows-arm64
         path: build
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: binaries-darwin-amd64
         path: build
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: binaries-darwin-arm64
         path: build
