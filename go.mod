@@ -7,7 +7,7 @@ require (
 	github.com/alecthomas/chroma/v2 v2.23.1
 	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de
 	github.com/charmbracelet/bubbles v1.0.0
-	github.com/charmbracelet/bubbletea v1.3.10
+	github.com/charmbracelet/bubbletea/v2 v2.0.0
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/evertras/bubble-table v0.19.2
 	github.com/pkg/errors v0.9.1
