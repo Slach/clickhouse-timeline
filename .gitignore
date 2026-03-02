@@ -14,4 +14,5 @@ vtcode.toml
 .env
 clickhouse-timeline
 main
+coverage.out
 _bmad/
