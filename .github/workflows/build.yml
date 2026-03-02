@@ -17,7 +17,7 @@ jobs:
         goarch: [amd64, arm64]
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
 
     - name: Set up Go
       uses: actions/setup-go@v5
@@ -43,7 +43,7 @@ jobs:
       contents: read
       packages: write
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
 
     - name: Download amd64 artifacts
       uses: actions/download-artifact@v4
@@ -106,7 +106,7 @@ jobs:
     permissions:
       contents: write
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
     - uses: actions/download-artifact@v4
       with:
         name: binaries-linux-amd64
