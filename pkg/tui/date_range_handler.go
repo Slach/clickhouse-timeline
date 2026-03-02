@@ -9,10 +9,10 @@ import (
 	_ "time/tzdata" // Import tzdata to embed timezone database
 
 	"github.com/Slach/clickhouse-timeline/pkg/timezone"
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"golang.org/x/text/message"
 )
 
@@ -190,7 +190,7 @@ func (m datePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc":
 			// Cancel
@@ -203,9 +203,9 @@ func (m datePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mode = (m.mode + 1) % 4
 			switch m.mode {
 			case modeTimeInput:
-				m.timeInput.Focus()
+				_ = m.timeInput.Focus()
 			case modeTimezoneInput:
-				m.timezoneInput.Focus()
+				_ = m.timezoneInput.Focus()
 			default:
 				m.timeInput.Blur()
 				m.timezoneInput.Blur()
@@ -217,9 +217,9 @@ func (m datePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mode = (m.mode + 3) % 4
 			switch m.mode {
 			case modeTimeInput:
-				m.timeInput.Focus()
+				_ = m.timeInput.Focus()
 			case modeTimezoneInput:
-				m.timezoneInput.Focus()
+				_ = m.timezoneInput.Focus()
 			default:
 				m.timeInput.Blur()
 				m.timezoneInput.Blur()
@@ -231,14 +231,14 @@ func (m datePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case modeCalendar:
 				// Select day and move to time input
 				m.mode = modeTimeInput
-				m.timeInput.Focus()
+				_ = m.timeInput.Focus()
 				return m, nil
 
 			case modeTimeInput:
 				// Move to timezone input
 				m.mode = modeTimezoneInput
 				m.timeInput.Blur()
-				m.timezoneInput.Focus()
+				_ = m.timezoneInput.Focus()
 				return m, nil
 
 			case modeTimezoneInput:
@@ -323,7 +323,7 @@ func (m datePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m datePicker) handleCalendarKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m datePicker) handleCalendarKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "up", "k":
 		m.cursorRow--
@@ -392,7 +392,7 @@ func (m *datePicker) updateTimezoneMatches(search string) {
 	}
 }
 
-func (m datePicker) View() string {
+func (m datePicker) View() tea.View {
 	var sb strings.Builder
 
 	// Title
@@ -471,7 +471,7 @@ func (m datePicker) View() string {
 		BorderForeground(lipgloss.Color("6")).
 		Padding(1, 2)
 
-	return borderStyle.Render(sb.String())
+	return tea.NewView(borderStyle.Render(sb.String()))
 }
 
 func (m datePicker) renderCalendar() string {
@@ -612,7 +612,7 @@ func newRangePicker(currentFrom, currentTo time.Time, width, height int) rangePi
 	customInput := textinput.New()
 	customInput.Placeholder = "e.g., now-1h or now-7d"
 	customInput.CharLimit = 50
-	customInput.Width = 40
+	customInput.SetWidth(40)
 
 	return rangePicker{
 		width:          width,
@@ -642,7 +642,7 @@ func (m rangePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc":
 			return m, func() tea.Msg {
@@ -652,7 +652,7 @@ func (m rangePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "tab":
 			m.mode = (m.mode + 1) % 3
 			if m.mode == 1 {
-				m.customInput.Focus()
+				_ = m.customInput.Focus()
 			} else {
 				m.customInput.Blur()
 			}
@@ -661,7 +661,7 @@ func (m rangePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "shift+tab":
 			m.mode = (m.mode + 2) % 3
 			if m.mode == 1 {
-				m.customInput.Focus()
+				_ = m.customInput.Focus()
 			} else {
 				m.customInput.Blur()
 			}
@@ -739,7 +739,7 @@ func (m rangePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m rangePicker) View() string {
+func (m rangePicker) View() tea.View {
 	var sb strings.Builder
 
 	// Title
@@ -799,7 +799,7 @@ func (m rangePicker) View() string {
 		BorderForeground(lipgloss.Color("6")).
 		Padding(1, 2)
 
-	return borderStyle.Render(sb.String())
+	return tea.NewView(borderStyle.Render(sb.String()))
 }
 
 func (m rangePicker) renderRangeButtons() string {

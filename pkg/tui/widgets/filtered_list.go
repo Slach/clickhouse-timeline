@@ -3,10 +3,10 @@ package widgets
 import (
 	"strings"
 
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // FilteredList is a bubbletea model for a filterable list
@@ -90,7 +90,7 @@ func (m FilteredList) Update(msg tea.Msg) (FilteredList, tea.Cmd) {
 		m.SetSize(msg.Width, msg.Height)
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if m.filtering {
 			switch msg.String() {
 			case "esc":
@@ -121,8 +121,8 @@ func (m FilteredList) Update(msg tea.Msg) (FilteredList, tea.Cmd) {
 			case "/":
 				// Enter filter mode
 				m.filtering = true
-				m.filterInput.Focus()
-				return m, nil
+				cmd = m.filterInput.Focus()
+				return m, cmd
 
 			case "enter":
 				// Select current item

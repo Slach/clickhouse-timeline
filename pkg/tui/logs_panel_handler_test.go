@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/evertras/bubble-table/table"
+	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
 )
 
 // TestLogsPanelEnterKeyHandling tests the Enter key fix for accessing row data
@@ -12,11 +12,11 @@ import (
 func TestLogsPanelEnterKeyHandling(t *testing.T) {
 	// Create a mock row with lowercase keys (matching the fix)
 	timeStr := "2025-11-09 10:30:45.123"
-	rowData := table.RowData{
+	rowData := widgets.RowData{
 		"time":    timeStr,
 		"message": "Test message with color",
 	}
-	row := table.NewRow(rowData)
+	row := widgets.NewRow(rowData)
 
 	// Test 1: Access with lowercase key (should work)
 	t.Run("lowercase_time_key_access", func(t *testing.T) {
@@ -48,7 +48,7 @@ func TestLogsPanelEnterKeyHandling(t *testing.T) {
 
 	// Test 3: Nil safety check
 	t.Run("nil_safety_empty_row", func(t *testing.T) {
-		emptyRow := table.Row{Data: table.RowData{}}
+		emptyRow := widgets.NewRow(widgets.RowData{})
 		timeData, ok := emptyRow.Data["time"]
 		if ok && timeData != nil {
 			t.Error("Empty row should not have time data")
@@ -95,12 +95,12 @@ func TestLogsPanelEnterKeyHandling(t *testing.T) {
 func TestLogsPanelEnterKeyNilChecks(t *testing.T) {
 	testCases := []struct {
 		name     string
-		rowData  table.RowData
+		rowData  widgets.RowData
 		shouldOK bool
 	}{
 		{
 			name: "valid_time_string",
-			rowData: table.RowData{
+			rowData: widgets.RowData{
 				"time":    "2025-11-09 10:30:45.123",
 				"message": "test",
 			},
@@ -108,14 +108,14 @@ func TestLogsPanelEnterKeyNilChecks(t *testing.T) {
 		},
 		{
 			name: "missing_time_key",
-			rowData: table.RowData{
+			rowData: widgets.RowData{
 				"message": "test",
 			},
 			shouldOK: false,
 		},
 		{
 			name: "nil_time_value",
-			rowData: table.RowData{
+			rowData: widgets.RowData{
 				"time":    nil,
 				"message": "test",
 			},
@@ -123,7 +123,7 @@ func TestLogsPanelEnterKeyNilChecks(t *testing.T) {
 		},
 		{
 			name: "wrong_time_type",
-			rowData: table.RowData{
+			rowData: widgets.RowData{
 				"time":    123, // int instead of string
 				"message": "test",
 			},
@@ -133,7 +133,7 @@ func TestLogsPanelEnterKeyNilChecks(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			row := table.NewRow(tc.rowData)
+			row := widgets.NewRow(tc.rowData)
 
 			// Simulate the Enter key handler logic
 			timeData, ok := row.Data["time"]

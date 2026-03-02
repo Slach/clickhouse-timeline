@@ -2,7 +2,7 @@ package tui
 
 import (
 	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // getCategorySQL returns the SQL expression for the given categoryType
@@ -71,7 +71,7 @@ func (m categorySelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "enter":
 			// Get selected category
@@ -95,8 +95,8 @@ func (m categorySelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m categorySelector) View() string {
-	return m.list.View()
+func (m categorySelector) View() tea.View {
+	return tea.NewView(m.list.View())
 }
 
 // showCategorySelector displays a list of available categories

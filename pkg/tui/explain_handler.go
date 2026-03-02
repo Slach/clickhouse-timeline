@@ -7,11 +7,10 @@ import (
 
 	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
 	"github.com/Slach/clickhouse-timeline/pkg/utils"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/evertras/bubble-table/table"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/rs/zerolog/log"
 )
 
@@ -119,11 +118,11 @@ func newExplainViewer(categoryType CategoryType, prefillHash string, fromTime, t
 	hashInput := textinput.New()
 	hashInput.Placeholder = "normalized_query_hash (optional)"
 	hashInput.CharLimit = 100
-	hashInput.Width = width - 20 // Make it responsive to terminal width
+	hashInput.SetWidth(width - 20) // Make it responsive to terminal width
 	if prefillHash != "" {
 		hashInput.SetValue(prefillHash)
 	}
-	hashInput.Focus()
+	_ = hashInput.Focus()
 
 	// Tables list
 	tablesList := widgets.NewFilteredTable("Tables", []string{"Table"}, width/3, height-10)
@@ -149,9 +148,9 @@ func newExplainViewer(categoryType CategoryType, prefillHash string, fromTime, t
 
 	// Result viewports
 	vpHeight := (height - 10) / 3
-	explainPlan := viewport.New(width-4, vpHeight)
-	explainPipe := viewport.New(width-4, vpHeight)
-	explainEst := viewport.New(width-4, vpHeight)
+	explainPlan := viewport.New(viewport.WithWidth(width-4), viewport.WithHeight(vpHeight))
+	explainPipe := viewport.New(viewport.WithWidth(width-4), viewport.WithHeight(vpHeight))
+	explainEst := viewport.New(viewport.WithWidth(width-4), viewport.WithHeight(vpHeight))
 
 	viewer := explainViewer{
 		stage:              stageFilter,
@@ -201,18 +200,18 @@ func (m explainViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.allKinds = msg.Kinds
 
 		// Populate tables list
-		var tableRows []table.Row
+		var tableRows []widgets.Row
 		for _, t := range msg.Tables {
-			tableRows = append(tableRows, table.NewRow(table.RowData{
+			tableRows = append(tableRows, widgets.NewRow(widgets.RowData{
 				"Table": t,
 			}))
 		}
 		m.tablesList.SetRows(tableRows)
 
 		// Populate kinds list
-		var kindRows []table.Row
+		var kindRows []widgets.Row
 		for _, k := range msg.Kinds {
-			kindRows = append(kindRows, table.NewRow(table.RowData{
+			kindRows = append(kindRows, widgets.NewRow(widgets.RowData{
 				"Kind": k,
 			}))
 		}
@@ -231,9 +230,9 @@ func (m explainViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.stage = stageQueryList
 
 		// Populate queries list
-		var queryRows []table.Row
+		var queryRows []widgets.Row
 		for _, q := range msg.Queries {
-			queryRows = append(queryRows, table.NewRow(table.RowData{
+			queryRows = append(queryRows, widgets.NewRow(widgets.RowData{
 				"Hash":  q.Hash,
 				"Query": q.Query, // Show full query without truncation
 			}))
@@ -276,7 +275,7 @@ func (m explainViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch m.stage {
 		case stageFilter:
 			return m.handleFilterKeys(msg)
@@ -320,7 +319,7 @@ func (m explainViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m explainViewer) handleFilterKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m explainViewer) handleFilterKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q":
 		// Clear filter if active, otherwise exit
@@ -335,12 +334,12 @@ func (m explainViewer) handleFilterKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, func() tea.Msg {
-			return tea.KeyMsg{Type: tea.KeyEsc}
+			return tea.KeyPressMsg{Code: tea.KeyEscape}
 		}
 	case "tab":
 		m.focusedItem = (m.focusedItem + 1) % 5 // 0=hash, 1=tables, 2=kinds, 3=show button, 4=cancel button
 		if m.focusedItem == 0 {
-			m.hashInput.Focus()
+			_ = m.hashInput.Focus()
 		} else {
 			m.hashInput.Blur()
 		}
@@ -351,7 +350,7 @@ func (m explainViewer) handleFilterKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.focusedItem = 4
 		}
 		if m.focusedItem == 0 {
-			m.hashInput.Focus()
+			_ = m.hashInput.Focus()
 		} else {
 			m.hashInput.Blur()
 		}
@@ -408,7 +407,7 @@ func (m explainViewer) handleFilterKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else if m.focusedItem == 4 {
 			// Cancel button - exit
 			return m, func() tea.Msg {
-				return tea.KeyMsg{Type: tea.KeyEsc}
+				return tea.KeyPressMsg{Code: tea.KeyEscape}
 			}
 		}
 		return m, nil
@@ -444,7 +443,7 @@ func (m explainViewer) handleFilterKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m explainViewer) handleQueryListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m explainViewer) handleQueryListKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q":
 		// Go back to filter stage
@@ -472,7 +471,7 @@ func (m explainViewer) handleQueryListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 	return m, cmd
 }
 
-func (m explainViewer) handlePercentilesKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m explainViewer) handlePercentilesKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q":
 		// Go back to query list
@@ -510,7 +509,7 @@ func (m explainViewer) handlePercentilesKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd
 	return m, nil
 }
 
-func (m explainViewer) handleResultsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m explainViewer) handleResultsKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q":
 		// Go back to percentiles
@@ -527,35 +526,35 @@ func (m explainViewer) handleResultsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m explainViewer) View() string {
+func (m explainViewer) View() tea.View {
 	if m.loading {
-		return lipgloss.NewStyle().
+		return tea.NewView(lipgloss.NewStyle().
 			Width(m.width).
 			Height(m.height).
 			Align(lipgloss.Center, lipgloss.Center).
-			Render("Loading...")
+			Render("Loading..."))
 	}
 
 	if m.err != nil {
-		return lipgloss.NewStyle().
+		return tea.NewView(lipgloss.NewStyle().
 			Width(m.width).
 			Height(m.height).
 			Foreground(lipgloss.Color("1")).
-			Render(fmt.Sprintf("Error: %v\n\nPress ESC to go back", m.err))
+			Render(fmt.Sprintf("Error: %v\n\nPress ESC to go back", m.err)))
 	}
 
 	switch m.stage {
 	case stageFilter:
-		return m.viewFilter()
+		return tea.NewView(m.viewFilter())
 	case stageQueryList:
-		return m.viewQueryList()
+		return tea.NewView(m.viewQueryList())
 	case stagePercentiles:
-		return m.viewPercentiles()
+		return tea.NewView(m.viewPercentiles())
 	case stageResults:
-		return m.viewResults()
+		return tea.NewView(m.viewResults())
 	}
 
-	return ""
+	return tea.NewView("")
 }
 
 func (m explainViewer) viewFilter() string {

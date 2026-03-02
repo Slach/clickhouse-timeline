@@ -6,9 +6,8 @@ import (
 	"time"
 
 	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/evertras/bubble-table/table"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/rs/zerolog/log"
 )
 
@@ -36,7 +35,7 @@ ORDER BY key
 
 // ProfileEventsDataMsg is sent when profile events data is loaded
 type ProfileEventsDataMsg struct {
-	Rows  []table.Row
+	Rows  []widgets.Row
 	Title string
 	Err   error
 }
@@ -103,11 +102,11 @@ func (m profileEventsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.queryView = widgets.NewQueryView("Query", queryWidth, m.height-4)
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc", "q":
 			return m, func() tea.Msg {
-				return tea.KeyMsg{Type: tea.KeyEsc}
+				return tea.KeyPressMsg{Code: tea.KeyEscape}
 			}
 		case "enter":
 			// TODO: Show event description in a modal
@@ -133,20 +132,20 @@ func (m profileEventsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m profileEventsViewer) View() string {
+func (m profileEventsViewer) View() tea.View {
 	if m.loading {
-		return "Loading profile events, please wait..."
+		return tea.NewView("Loading profile events, please wait...")
 	}
 	if m.err != nil {
-		return fmt.Sprintf("Error loading profile events: %v\n\nPress ESC to return", m.err)
+		return tea.NewView(fmt.Sprintf("Error loading profile events: %v\n\nPress ESC to return", m.err))
 	}
 
 	// Split-pane layout: table on left, query view on right
-	return lipgloss.JoinHorizontal(
+	return tea.NewView(lipgloss.JoinHorizontal(
 		lipgloss.Top,
 		m.table.View(),
 		m.queryView.View(),
-	)
+	))
 }
 
 // ShowProfileEvents displays profile events data
@@ -209,7 +208,7 @@ func (a *App) fetchProfileEventsDataCmd(categoryType CategoryType, categoryValue
 		}()
 
 		// Process rows
-		var tableRows []table.Row
+		var tableRows []widgets.Row
 		for rows.Next() {
 			var (
 				event           string
@@ -229,7 +228,7 @@ func (a *App) fetchProfileEventsDataCmd(categoryType CategoryType, categoryValue
 
 			// Determine color based on percentile differences (stored as metadata for rendering)
 			// For now, we'll just use the formatted strings
-			rowData := table.RowData{
+			rowData := widgets.RowData{
 				"Event": event,
 				"Count": fmt.Sprintf("%d", count),
 				"p50":   p50s,
@@ -237,7 +236,7 @@ func (a *App) fetchProfileEventsDataCmd(categoryType CategoryType, categoryValue
 				"p99":   p99s,
 				"query": normalizedQuery, // Hidden column for query view
 			}
-			tableRows = append(tableRows, table.NewRow(rowData))
+			tableRows = append(tableRows, widgets.NewRow(rowData))
 		}
 
 		if err := rows.Err(); err != nil {

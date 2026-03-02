@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 	"math"
 	"sort"
 	"strconv"
@@ -9,11 +10,10 @@ import (
 	"time"
 
 	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/evertras/bubble-table/table"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/rs/zerolog/log"
 )
 
@@ -131,7 +131,7 @@ type dropdown struct {
 
 func newDropdown(label string, width int, required bool) dropdown {
 	input := textinput.New()
-	input.Width = width
+	input.SetWidth(width)
 	input.Placeholder = "Type to filter..."
 
 	return dropdown{
@@ -175,7 +175,7 @@ func (d *dropdown) SetValue(value string) {
 }
 
 func (d *dropdown) Focus() {
-	d.input.Focus()
+	_ = d.input.Focus()
 	d.showOptions = true
 	// Find current value in filtered options and select it
 	if d.value != "" {
@@ -203,7 +203,7 @@ func (d *dropdown) Update(msg tea.Msg) (tea.Cmd, bool) {
 	handled := false
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if !d.showOptions {
 			return nil, false
 		}
@@ -399,7 +399,7 @@ func newLogsConfigForm(app *App, width, height int, lastConfig *LogConfig) *logs
 	windowInput := textinput.New()
 	windowInput.Placeholder = "1000"
 	windowInput.SetValue("1000")
-	windowInput.Width = 15
+	windowInput.SetWidth(15)
 
 	form := &logsConfigForm{
 		app:            app,
@@ -745,7 +745,7 @@ func (m *logsConfigForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// Check for Esc first, before dropdown processes it
 		if msg.String() == "esc" {
 			// Check if any dropdown has options showing
@@ -811,7 +811,7 @@ func (m *logsConfigForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd, handled = m.dbDropdown.Update(msg)
 		if !handled {
 			// Allow arrow navigation between fields when dropdown is closed
-			if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
 				switch keyMsg.String() {
 				case "down":
 					oldFocusIndex := m.focusIndex
@@ -850,7 +850,7 @@ func (m *logsConfigForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		wasOpen := m.tableDropdown.showOptions
 		cmd, handled = m.tableDropdown.Update(msg)
 		if !handled {
-			if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
 				switch keyMsg.String() {
 				case "down":
 					oldFocusIndex := m.focusIndex
@@ -889,7 +889,7 @@ func (m *logsConfigForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		wasOpen := m.msgDropdown.showOptions
 		cmd, handled = m.msgDropdown.Update(msg)
 		if !handled {
-			if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
 				switch keyMsg.String() {
 				case "down":
 					m.focusIndex = 3
@@ -916,7 +916,7 @@ func (m *logsConfigForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		wasOpen := m.timeDropdown.showOptions
 		cmd, handled = m.timeDropdown.Update(msg)
 		if !handled {
-			if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
 				switch keyMsg.String() {
 				case "down":
 					m.focusIndex = 4
@@ -943,7 +943,7 @@ func (m *logsConfigForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		wasOpen := m.timeMsDropdown.showOptions
 		cmd, handled = m.timeMsDropdown.Update(msg)
 		if !handled {
-			if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
 				switch keyMsg.String() {
 				case "down":
 					m.focusIndex = 5
@@ -970,7 +970,7 @@ func (m *logsConfigForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		wasOpen := m.dateDropdown.showOptions
 		cmd, handled = m.dateDropdown.Update(msg)
 		if !handled {
-			if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
 				switch keyMsg.String() {
 				case "down":
 					m.focusIndex = 6
@@ -997,7 +997,7 @@ func (m *logsConfigForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		wasOpen := m.levelDropdown.showOptions
 		cmd, handled = m.levelDropdown.Update(msg)
 		if !handled {
-			if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
 				switch keyMsg.String() {
 				case "down":
 					m.focusIndex = 7
@@ -1021,7 +1021,7 @@ func (m *logsConfigForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.config.LevelField = m.levelDropdown.value
 	case 7:
-		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
 			switch keyMsg.String() {
 			case "down":
 				m.focusIndex = 8
@@ -1036,7 +1036,7 @@ func (m *logsConfigForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.windowInput, cmd = m.windowInput.Update(msg)
 	case 8:
 		// Show Logs button
-		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
 			switch keyMsg.String() {
 			case "down":
 				m.focusIndex = 9
@@ -1054,7 +1054,7 @@ func (m *logsConfigForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case 9:
 		// Cancel button
-		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
 			switch keyMsg.String() {
 			case "down":
 				m.focusIndex = 0
@@ -1102,7 +1102,7 @@ func (m *logsConfigForm) updateFocus() {
 	case 6:
 		m.levelDropdown.Focus()
 	case 7:
-		m.windowInput.Focus()
+		_ = m.windowInput.Focus()
 	}
 }
 
@@ -1159,11 +1159,11 @@ func (m *logsConfigForm) saveCurrentConfig() {
 		Msg("Saved logs config")
 }
 
-func (m *logsConfigForm) View() string {
+func (m *logsConfigForm) View() tea.View {
 	if m.err != nil {
-		return lipgloss.NewStyle().
+		return tea.NewView(lipgloss.NewStyle().
 			Foreground(lipgloss.Color("9")).
-			Render(fmt.Sprintf("Error: %v\n\nPress ESC to return", m.err))
+			Render(fmt.Sprintf("Error: %v\n\nPress ESC to return", m.err)))
 	}
 
 	// Title with optional loading indicator
@@ -1244,7 +1244,7 @@ func (m *logsConfigForm) View() string {
 		help,
 	)
 
-	return content
+	return tea.NewView(content)
 }
 
 func (m *logsConfigForm) submit() tea.Cmd {
@@ -1588,13 +1588,13 @@ func newLogsViewer(config LogConfig, width, height int) logsViewer {
 
 	filterValueInput := textinput.New()
 	filterValueInput.Placeholder = "Filter value..."
-	filterValueInput.Width = 30
+	filterValueInput.SetWidth(30)
 
 	// Initialize with one empty root group (AND logic)
 	rootFilter := NewFilterGroup("AND")
 
 	// Initialize details viewport
-	detailsViewport := viewport.New(width, height-3)
+	detailsViewport := viewport.New(viewport.WithWidth(width), viewport.WithHeight(height-3))
 
 	return logsViewer{
 		config:                 config,
@@ -1866,7 +1866,7 @@ func (m *logsViewer) recalculateTableHeight() {
 }
 
 // getLogLevelColor returns the appropriate color for a log level
-func getLogLevelColor(level string) lipgloss.Color {
+func getLogLevelColor(level string) color.Color {
 	levelLower := strings.ToLower(level)
 	switch levelLower {
 	case "fatal", "critical", "error", "exception":
@@ -1891,8 +1891,8 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 
 		// Resize details viewport to match new terminal dimensions
-		m.detailsViewport.Width = msg.Width
-		m.detailsViewport.Height = msg.Height - 3
+		m.detailsViewport.SetWidth(msg.Width)
+		m.detailsViewport.SetHeight(msg.Height - 3)
 
 		// Recalculate column widths to maintain 100% screen width
 		timeWidth := 23
@@ -1972,7 +1972,7 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recalculateTableHeight()
 
 		// Convert to table rows
-		var rows []table.Row
+		var rows []widgets.Row
 		for _, entry := range msg.Entries {
 			timeStr := entry.Time.Format("2006-01-02 15:04:05.000")
 
@@ -1980,14 +1980,14 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			messageColor := getLogLevelColor(entry.Level)
 			messageStyled := lipgloss.NewStyle().Foreground(messageColor).Render(entry.Message)
 
-			rowData := table.RowData{
+			rowData := widgets.RowData{
 				"time":         timeStr,
 				"message":      messageStyled,
 				"_plain_msg":   entry.Message, // Store plain message for matching
 				"_level":       entry.Level,   // Store level for matching
 			}
 
-			rows = append(rows, table.NewRow(rowData))
+			rows = append(rows, widgets.NewRow(rowData))
 		}
 		m.table.SetRows(rows)
 
@@ -2050,7 +2050,7 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// Handle zoom menu first (highest priority)
 		if m.showZoomMenu {
 			return m.handleZoomMenuKey(msg)
@@ -2111,8 +2111,8 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.detailsSelectedIdx > 0 {
 					m.detailsSelectedIdx--
 					selectedLine, _ := m.detailsContentMetrics()
-					if selectedLine < m.detailsViewport.YOffset {
-						m.detailsViewport.YOffset = selectedLine
+					if selectedLine < m.detailsViewport.YOffset() {
+						m.detailsViewport.SetYOffset(selectedLine)
 					}
 				}
 				return m, nil
@@ -2121,44 +2121,44 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.detailsSelectedIdx < totalFields-1 {
 					m.detailsSelectedIdx++
 					selectedLine, _ := m.detailsContentMetrics()
-					if selectedLine >= m.detailsViewport.YOffset+m.detailsViewport.Height {
-						m.detailsViewport.YOffset = selectedLine - m.detailsViewport.Height + 1
+					if selectedLine >= m.detailsViewport.YOffset()+m.detailsViewport.Height() {
+						m.detailsViewport.SetYOffset(selectedLine - m.detailsViewport.Height() + 1)
 					}
 				}
 				return m, nil
 
 			case "pgup", "b":
-				newOffset := m.detailsViewport.YOffset - m.detailsViewport.Height
+				newOffset := m.detailsViewport.YOffset() - m.detailsViewport.Height()
 				if newOffset < 0 {
 					newOffset = 0
 				}
-				m.detailsViewport.YOffset = newOffset
+				m.detailsViewport.SetYOffset(newOffset)
 				return m, nil
 
 			case "pgdown", "f":
 				_, totalLines := m.detailsContentMetrics()
-				maxOffset := totalLines - m.detailsViewport.Height
+				maxOffset := totalLines - m.detailsViewport.Height()
 				if maxOffset < 0 {
 					maxOffset = 0
 				}
-				newOffset := m.detailsViewport.YOffset + m.detailsViewport.Height
+				newOffset := m.detailsViewport.YOffset() + m.detailsViewport.Height()
 				if newOffset > maxOffset {
 					newOffset = maxOffset
 				}
-				m.detailsViewport.YOffset = newOffset
+				m.detailsViewport.SetYOffset(newOffset)
 				return m, nil
 
 			case "home":
-				m.detailsViewport.YOffset = 0
+				m.detailsViewport.SetYOffset(0)
 				return m, nil
 
 			case "end":
 				_, totalLines := m.detailsContentMetrics()
-				maxOffset := totalLines - m.detailsViewport.Height
+				maxOffset := totalLines - m.detailsViewport.Height()
 				if maxOffset < 0 {
 					maxOffset = 0
 				}
-				m.detailsViewport.YOffset = maxOffset
+				m.detailsViewport.SetYOffset(maxOffset)
 				return m, nil
 
 			case "enter":
@@ -2227,7 +2227,7 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// If overview is already visible, exit to main menu
 			return m, func() tea.Msg {
-				return tea.KeyMsg{Type: tea.KeyEsc}
+				return tea.KeyPressMsg{Code: tea.KeyEscape}
 			}
 		case "0":
 			// Toggle overview mode (works even without data)
@@ -2294,7 +2294,7 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.showDetails = true
 						// Initialize details navigation
 						m.detailsSelectedIdx = 0 // Start with Time field selected
-						m.detailsViewport.YOffset = 0 // Reset scroll position
+						m.detailsViewport.SetYOffset(0) // Reset scroll position
 						// Cache sorted field names for navigation
 						m.detailsFieldNames = make([]string, 0, len(entry.AllFields))
 						for fieldName := range entry.AllFields {
@@ -2349,7 +2349,7 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // handleFilterFormKey handles key events when filter form is active
 func (m logsViewer) handleFilterFormKey(msg tea.Msg) (tea.Model, tea.Cmd) {
-	keyMsg, ok := msg.(tea.KeyMsg)
+	keyMsg, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return m, nil
 	}
@@ -2619,7 +2619,7 @@ func (m logsViewer) handleFilterFormKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // handleLogicDropdownKey handles key events when logic dropdown is shown
-func (m logsViewer) handleLogicDropdownKey(keyMsg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m logsViewer) handleLogicDropdownKey(keyMsg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	logicOptions := []string{"AND", "OR", "NOT AND", "NOT OR"}
 
 	switch keyMsg.String() {
@@ -2667,7 +2667,7 @@ func (m logsViewer) handleLogicDropdownKey(keyMsg tea.KeyMsg) (tea.Model, tea.Cm
 }
 
 // handleEditModeKey handles key events when editing a condition
-func (m logsViewer) handleEditModeKey(keyMsg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m logsViewer) handleEditModeKey(keyMsg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch keyMsg.String() {
@@ -2701,7 +2701,7 @@ func (m logsViewer) handleEditModeKey(keyMsg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.confirmDropdownSelection(&m.filterOperatorDD)
 			m.filterOperatorDD.Blur()
 			m.editFieldFocus = 2
-			m.filterValueInput.Focus()
+			_ = m.filterValueInput.Focus()
 			return m, nil
 		case 2, 3: // Value input or Save button - save condition
 			m.saveEditedCondition()
@@ -2826,13 +2826,13 @@ func (m *logsViewer) focusCurrentFilterField() {
 	case 1:
 		m.filterOperatorDD.Focus()
 	case 2:
-		m.filterValueInput.Focus()
+		_ = m.filterValueInput.Focus()
 	}
 }
 
 // handleOverviewKey handles key events when in overview/sparkline navigation mode
 func (m logsViewer) handleOverviewKey(msg tea.Msg) (tea.Model, tea.Cmd) {
-	keyMsg, ok := msg.(tea.KeyMsg)
+	keyMsg, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return m, nil
 	}
@@ -2917,7 +2917,7 @@ func (m logsViewer) handleOverviewKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // handleZoomMenuKey handles key events when zoom menu is shown
 func (m logsViewer) handleZoomMenuKey(msg tea.Msg) (tea.Model, tea.Cmd) {
-	keyMsg, ok := msg.(tea.KeyMsg)
+	keyMsg, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return m, nil
 	}
@@ -3075,16 +3075,16 @@ func (m logsViewer) resetZoom() (tea.Model, tea.Cmd) {
 	return m, m.app.fetchLogsDataCmd(m.config, 0, m.rootFilter, m.width)
 }
 
-func (m logsViewer) View() string {
+func (m logsViewer) View() tea.View {
 	if m.loading {
-		return "Loading logs, please wait..."
+		return tea.NewView("Loading logs, please wait...")
 	}
 	if m.err != nil {
-		return fmt.Sprintf("Error loading logs: %v\n\nPress ESC to return", m.err)
+		return tea.NewView(fmt.Sprintf("Error loading logs: %v\n\nPress ESC to return", m.err))
 	}
 
 	if m.showDetails {
-		return m.renderDetails()
+		return tea.NewView(m.renderDetails())
 	}
 
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
@@ -3228,7 +3228,7 @@ func (m logsViewer) View() string {
 		// Render base content dimmed in background
 		dimmedContent := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(content)
 		// Overlay menu on top
-		return dimmedContent + "\n" + m.renderZoomMenu()
+		return tea.NewView(dimmedContent + "\n" + m.renderZoomMenu())
 	}
 
 	// Show filter form modal when active
@@ -3236,7 +3236,7 @@ func (m logsViewer) View() string {
 		// Render base content dimmed in background
 		dimmedContent := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(content)
 		// Overlay filter modal on top
-		return dimmedContent + "\n" + m.renderFilterFormModal()
+		return tea.NewView(dimmedContent + "\n" + m.renderFilterFormModal())
 	}
 
 	// Debug: log the first 3 lines of content to verify title is included
@@ -3252,7 +3252,7 @@ func (m logsViewer) View() string {
 		Int("total_lines", len(lines)).
 		Msg(">>> Logs View() output preview")
 
-	return content
+	return tea.NewView(content)
 }
 
 func (m logsViewer) renderFilterForm() string {
@@ -3706,7 +3706,7 @@ func (m logsViewer) renderOverview() string {
 	}
 
 	// Color mapping for log levels (using background colors like old tview version)
-	levelBgColors := map[string]lipgloss.Color{
+	levelBgColors := map[string]color.Color{
 		"error":       lipgloss.Color("9"),  // Red
 		"exception":   lipgloss.Color("9"),  // Red
 		"fatal":       lipgloss.Color("9"),  // Red
@@ -3761,8 +3761,8 @@ func (m logsViewer) renderOverview() string {
 
 		// Get background color for this level
 		levelLower := strings.ToLower(lc.level)
-		bgColor := levelBgColors[levelLower]
-		if bgColor == "" {
+		bgColor, ok := levelBgColors[levelLower]
+		if !ok {
 			bgColor = lipgloss.Color("6") // Default cyan
 		}
 
@@ -4075,7 +4075,7 @@ func (m logsViewer) renderDetails() string {
 	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	scrollStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Align(lipgloss.Right)
 
-	viewportWidth := m.detailsViewport.Width
+	viewportWidth := m.detailsViewport.Width()
 	hasLevel := m.selectedEntry.Level != ""
 	currentIdx := 0
 
@@ -4151,14 +4151,14 @@ func (m logsViewer) renderDetails() string {
 	// Scroll position indicator
 	var scrollIndicator string
 	totalContentLines := m.detailsViewport.TotalLineCount()
-	visibleHeight := m.detailsViewport.Height
+	visibleHeight := m.detailsViewport.Height()
 	if totalContentLines > visibleHeight {
-		topLine := m.detailsViewport.YOffset + 1
-		bottomLine := m.detailsViewport.YOffset + visibleHeight
+		topLine := m.detailsViewport.YOffset() + 1
+		bottomLine := m.detailsViewport.YOffset() + visibleHeight
 		if bottomLine > totalContentLines {
 			bottomLine = totalContentLines
 		}
-		pct := int(float64(m.detailsViewport.YOffset+visibleHeight) / float64(totalContentLines) * 100)
+		pct := int(float64(m.detailsViewport.YOffset()+visibleHeight) / float64(totalContentLines) * 100)
 		if pct > 100 {
 			pct = 100
 		}
@@ -4190,7 +4190,7 @@ func (m logsViewer) renderDetails() string {
 // viewport only affects a copy - the real model's viewport never knows its content,
 // making TotalLineCount() and SetYOffset clamping unreliable.
 func (m logsViewer) detailsContentMetrics() (selectedLine int, totalLines int) {
-	viewportWidth := m.detailsViewport.Width
+	viewportWidth := m.detailsViewport.Width()
 	hasLevel := m.selectedEntry.Level != ""
 	line := 0 // title is outside viewport now; content starts at line 0
 	currentIdx := 0

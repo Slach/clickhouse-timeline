@@ -5,8 +5,7 @@ import (
 	"strings"
 
 	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/evertras/bubble-table/table"
+	tea "charm.land/bubbletea/v2"
 )
 
 type memoryRow struct {
@@ -18,7 +17,7 @@ type memoryRow struct {
 // MemoryDataMsg is sent when memory data is loaded
 type MemoryDataMsg struct {
 	Headers []string
-	Rows    []table.Row
+	Rows    []widgets.Row
 	Err     error
 }
 
@@ -73,11 +72,11 @@ func (m memoryViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.table.SetRows(msg.Rows)
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc", "q":
 			return m, func() tea.Msg {
-				return tea.KeyMsg{Type: tea.KeyEsc}
+				return tea.KeyPressMsg{Code: tea.KeyEscape}
 			}
 		}
 	}
@@ -87,14 +86,14 @@ func (m memoryViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m memoryViewer) View() string {
+func (m memoryViewer) View() tea.View {
 	if m.loading {
-		return "Loading memory data, please wait..."
+		return tea.NewView("Loading memory data, please wait...")
 	}
 	if m.err != nil {
-		return fmt.Sprintf("Error loading memory data: %v\n\nPress ESC to return", m.err)
+		return tea.NewView(fmt.Sprintf("Error loading memory data: %v\n\nPress ESC to return", m.err))
 	}
-	return m.table.View()
+	return tea.NewView(m.table.View())
 }
 
 // ShowMemory displays memory usage aggregated from various system tables across the selected cluster.
@@ -241,7 +240,7 @@ SETTINGS skip_unavailable_shards=1
 		headers := append([]string{"Group", "Name"}, hosts...)
 
 		// Build rows
-		var tableRows []table.Row
+		var tableRows []widgets.Row
 		processedKeys := make(map[string]bool)
 
 		for _, groupInfo := range groups {
@@ -253,7 +252,7 @@ SETTINGS skip_unavailable_shards=1
 				}
 				processedKeys[key] = true
 
-				rowData := table.RowData{
+				rowData := widgets.RowData{
 					"Group": row.group,
 					"Name":  row.name,
 				}
@@ -269,7 +268,7 @@ SETTINGS skip_unavailable_shards=1
 					rowData[host] = formatReadableSize(val)
 				}
 
-				tableRows = append(tableRows, table.NewRow(rowData))
+				tableRows = append(tableRows, widgets.NewRow(rowData))
 			}
 		}
 

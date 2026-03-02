@@ -7,9 +7,8 @@ import (
 	"time"
 
 	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/evertras/bubble-table/table"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/rs/zerolog/log"
 )
 
@@ -94,21 +93,21 @@ func (m auditViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.progress = fmt.Sprintf("Audit complete. Found %d findings.", len(msg.Results))
 
 		// Convert to table rows
-		var rows []table.Row
+		var rows []widgets.Row
 		for _, result := range msg.Results {
-			rowData := table.RowData{
+			rowData := widgets.RowData{
 				"ID":       result.ID,
 				"Host":     result.Host,
 				"Severity": result.Severity,
 				"Object":   result.Object,
 				"Details":  result.Details,
 			}
-			rows = append(rows, table.NewRow(rowData))
+			rows = append(rows, widgets.NewRow(rowData))
 		}
 		m.table.SetRows(rows)
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if m.showDetails {
 			switch msg.String() {
 			case "esc", "q":
@@ -121,7 +120,7 @@ func (m auditViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "esc", "q":
 			return m, func() tea.Msg {
-				return tea.KeyMsg{Type: tea.KeyEsc}
+				return tea.KeyPressMsg{Code: tea.KeyEscape}
 			}
 		case "enter":
 			if !m.running && len(m.results) > 0 {
@@ -149,9 +148,9 @@ func (m auditViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m auditViewer) View() string {
+func (m auditViewer) View() tea.View {
 	if m.showDetails {
-		return m.renderDetails()
+		return tea.NewView(m.renderDetails())
 	}
 
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
@@ -190,7 +189,7 @@ func (m auditViewer) View() string {
 		helpStyle.Render(help),
 	)
 
-	return content
+	return tea.NewView(content)
 }
 
 func (m auditViewer) renderDetails() string {

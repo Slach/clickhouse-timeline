@@ -6,7 +6,7 @@ import (
 	"github.com/Slach/clickhouse-timeline/pkg/client"
 	"github.com/Slach/clickhouse-timeline/pkg/config"
 	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/rs/zerolog/log"
 )
 
@@ -60,7 +60,7 @@ func (m connectSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Connection result will be handled by parent App
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if m.connecting {
 			// During connection, only allow escape
 			if msg.String() == "esc" {
@@ -90,14 +90,14 @@ func (m connectSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m connectSelector) View() string {
+func (m connectSelector) View() tea.View {
 	if m.connecting {
-		return m.list.View() + "\n\nConnecting to ClickHouse..."
+		return tea.NewView(m.list.View() + "\n\nConnecting to ClickHouse...")
 	}
 	if m.err != nil {
-		return m.list.View() + fmt.Sprintf("\n\nError: %v\nPress ESC to go back", m.err)
+		return tea.NewView(m.list.View() + fmt.Sprintf("\n\nError: %v\nPress ESC to go back", m.err))
 	}
-	return m.list.View()
+	return tea.NewView(m.list.View())
 }
 
 // connectToContextCmd attempts to connect to a ClickHouse context

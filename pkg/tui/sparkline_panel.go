@@ -5,8 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/evertras/bubble-table/table"
+	"charm.land/lipgloss/v2"
+
+	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
 )
 
 // SparklineRowData represents a single sparkline row for display
@@ -195,18 +196,18 @@ func GenerateSparkline(values []float64) string {
 }
 
 // ConvertSparklineDataToTableRows converts sparkline row data to bubble-table rows
-func ConvertSparklineDataToTableRows(data []SparklineRowData) []table.Row {
-	var rows []table.Row
+func ConvertSparklineDataToTableRows(data []SparklineRowData) []widgets.Row {
+	var rows []widgets.Row
 
 	for _, item := range data {
-		rowData := table.RowData{
+		rowData := widgets.RowData{
 			"name":      item.Name,
 			"min":       fmt.Sprintf("%.1f", item.MinValue),
 			"sparkline": item.Sparkline,
 			"max":       fmt.Sprintf("%.1f", item.MaxValue),
 		}
 
-		row := table.NewRow(rowData).
+		row := widgets.NewRow(rowData).
 			WithStyle(lipgloss.NewStyle().Foreground(lipgloss.Color(item.Color)))
 
 		rows = append(rows, row)

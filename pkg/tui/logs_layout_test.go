@@ -188,7 +188,7 @@ func TestLogsViewStructure(t *testing.T) {
 				overviewMode: tc.overviewMode,
 			}
 
-			view := viewer.View()
+			view := viewer.View().Content
 
 			// Check that header is always present
 			if !contains(view, "Log Entries | Page") {
