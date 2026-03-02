@@ -3,8 +3,8 @@ package tui
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // ShowDescriptionMsg is sent when a description modal should be shown
@@ -51,7 +51,7 @@ func (m *metricDescriptionModal) Update(msg tea.Msg) (*metricDescriptionModal, t
 	}
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "enter", "esc", "q":
 			m.Hide()
@@ -68,9 +68,9 @@ func (m *metricDescriptionModal) Update(msg tea.Msg) (*metricDescriptionModal, t
 	return m, nil
 }
 
-func (m *metricDescriptionModal) View() string {
+func (m *metricDescriptionModal) View() tea.View {
 	if !m.visible {
-		return ""
+		return tea.NewView("")
 	}
 
 	titleStyle := lipgloss.NewStyle().
@@ -106,13 +106,13 @@ func (m *metricDescriptionModal) View() string {
 		helpStyle.Render("Press Enter or ESC to close"),
 	)
 
-	return lipgloss.Place(
+	return tea.NewView(lipgloss.Place(
 		m.width,
 		m.height,
 		lipgloss.Center,
 		lipgloss.Center,
 		borderStyle.Render(content),
-	)
+	))
 }
 
 func (m *metricDescriptionModal) SetSize(width, height int) {

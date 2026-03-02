@@ -2,15 +2,16 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 	"math"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/Slach/clickhouse-timeline/pkg/timezone"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/rs/zerolog/log"
 )
 
@@ -92,7 +93,7 @@ type heatmapViewer struct {
 }
 
 func newHeatmapViewer(categoryType CategoryType, fromTime, toTime time.Time, cluster string, scaleType ScaleType, metric HeatmapMetric, width, height int) heatmapViewer {
-	vp := viewport.New(width-4, height-8)
+	vp := viewport.New(viewport.WithWidth(width-4), viewport.WithHeight(height-8))
 	vp.SetContent("Loading heatmap data...")
 
 	return heatmapViewer{
@@ -139,7 +140,7 @@ func (m heatmapViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.SetContent(m.renderHeatmap())
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if m.showActionMenu {
 			return m.handleActionMenuKey(msg)
 		}
@@ -147,15 +148,15 @@ func (m heatmapViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "esc", "q":
 			return m, func() tea.Msg {
-				return tea.KeyMsg{Type: tea.KeyEsc}
+				return tea.KeyPressMsg{Code: tea.KeyEscape}
 			}
 		case "up":
 			if m.selectedRow > 0 {
 				m.selectedRow--
 				m.viewport.SetContent(m.renderHeatmap())
 				// Auto-scroll viewport if cursor moves above visible area
-				if m.selectedRow > 0 && m.selectedRow-1 < m.viewport.YOffset {
-					m.viewport.LineUp(1)
+				if m.selectedRow > 0 && m.selectedRow-1 < m.viewport.YOffset() {
+					m.viewport.ScrollUp(1)
 				}
 			}
 		case "down":
@@ -164,9 +165,9 @@ func (m heatmapViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.viewport.SetContent(m.renderHeatmap())
 				// Auto-scroll viewport if cursor moves below visible area
 				if m.selectedRow > 0 {
-					visibleBottom := m.viewport.YOffset + m.viewport.Height
+					visibleBottom := m.viewport.YOffset() + m.viewport.Height()
 					if m.selectedRow-1 >= visibleBottom {
-						m.viewport.LineDown(1)
+						m.viewport.ScrollDown(1)
 					}
 				}
 			}
@@ -214,9 +215,9 @@ func (m heatmapViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "pgdown", "f", " ":
 			// Page down - scroll viewport and move cursor
-			oldYOffset := m.viewport.YOffset
-			m.viewport.ViewDown()
-			newYOffset := m.viewport.YOffset
+			oldYOffset := m.viewport.YOffset()
+			m.viewport.PageDown()
+			newYOffset := m.viewport.YOffset()
 
 			// Move cursor by the amount scrolled (approximately)
 			scrolledLines := newYOffset - oldYOffset
@@ -230,9 +231,9 @@ func (m heatmapViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "pgup", "b":
 			// Page up - scroll viewport and move cursor
-			oldYOffset := m.viewport.YOffset
-			m.viewport.ViewUp()
-			newYOffset := m.viewport.YOffset
+			oldYOffset := m.viewport.YOffset()
+			m.viewport.PageUp()
+			newYOffset := m.viewport.YOffset()
 
 			// Move cursor by the amount scrolled (approximately)
 			scrolledLines := oldYOffset - newYOffset
@@ -248,9 +249,9 @@ func (m heatmapViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Let viewport handle other scrolling (mouse wheel, etc)
-	oldYOffset := m.viewport.YOffset
+	oldYOffset := m.viewport.YOffset()
 	m.viewport, cmd = m.viewport.Update(msg)
-	newYOffset := m.viewport.YOffset
+	newYOffset := m.viewport.YOffset()
 
 	// If viewport scrolled (e.g., by mouse), adjust cursor to stay visible
 	if oldYOffset != newYOffset {
@@ -263,9 +264,9 @@ func (m heatmapViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		} else if scrollDiff < 0 {
 			// Scrolled up
-			if m.selectedRow-1 >= newYOffset+m.viewport.Height {
+			if m.selectedRow-1 >= newYOffset+m.viewport.Height() {
 				// Cursor is below visible area, move it to bottom of visible area
-				m.selectedRow = newYOffset + m.viewport.Height
+				m.selectedRow = newYOffset + m.viewport.Height()
 			}
 		}
 		m.viewport.SetContent(m.renderHeatmap())
@@ -274,16 +275,16 @@ func (m heatmapViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m heatmapViewer) View() string {
+func (m heatmapViewer) View() tea.View {
 	if m.loading {
-		return "Loading heatmap data, please wait..."
+		return tea.NewView("Loading heatmap data, please wait...")
 	}
 	if m.err != nil {
-		return fmt.Sprintf("Error loading heatmap: %v\n\nPress ESC to return", m.err)
+		return tea.NewView(fmt.Sprintf("Error loading heatmap: %v\n\nPress ESC to return", m.err))
 	}
 
 	if m.showActionMenu {
-		return m.renderActionMenu()
+		return tea.NewView(m.renderActionMenu())
 	}
 
 	// Render title
@@ -359,7 +360,7 @@ func (m heatmapViewer) View() string {
 		helpStyle.Render(help),
 	)
 
-	return content
+	return tea.NewView(content)
 }
 
 // renderHeatmapHeader renders the fixed header row (outside viewport)
@@ -497,7 +498,7 @@ func (m heatmapViewer) renderHeatmap() string {
 			}
 
 			// Calculate color based on value
-			color := m.getColorForValue(value)
+			clr := m.getColorForValue(value)
 
 			if isCellSelected {
 				// The selected cell (intersection) - cursor position
@@ -509,8 +510,8 @@ func (m heatmapViewer) renderHeatmap() string {
 			} else {
 				// Normal cell
 				cellStyle = lipgloss.NewStyle().
-					Background(color).
-					Foreground(color)
+					Background(clr).
+					Foreground(clr)
 				sb.WriteString(cellStyle.Render("█"))
 			}
 		}
@@ -521,7 +522,7 @@ func (m heatmapViewer) renderHeatmap() string {
 }
 
 // getColorForValue returns a lipgloss color based on the value's position in the range
-func (m heatmapViewer) getColorForValue(value float64) lipgloss.Color {
+func (m heatmapViewer) getColorForValue(value float64) color.Color {
 	normalizedValue := m.applyScaling(value)
 
 	// Convert 0-1 range to color gradient: green -> yellow -> red
@@ -581,18 +582,18 @@ func (m heatmapViewer) renderLegend() string {
 		normalized := float64(i) / float64(steps-1)
 
 		// Simple color mapping
-		var color lipgloss.Color
+		var clr color.Color
 		if normalized < 0.5 {
-			color = lipgloss.Color("2") // Green
+			clr = lipgloss.Color("2") // Green
 		} else if normalized < 0.75 {
-			color = lipgloss.Color("3") // Yellow
+			clr = lipgloss.Color("3") // Yellow
 		} else {
-			color = lipgloss.Color("1") // Red
+			clr = lipgloss.Color("1") // Red
 		}
 
 		cellStyle := lipgloss.NewStyle().
-			Background(color).
-			Foreground(color)
+			Background(clr).
+			Foreground(clr)
 		sb.WriteString(cellStyle.Render("█"))
 	}
 
@@ -615,7 +616,7 @@ func (m *heatmapViewer) buildActionMenu() {
 }
 
 // handleActionMenuKey handles keyboard input for the action menu
-func (m heatmapViewer) handleActionMenuKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m heatmapViewer) handleActionMenuKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q", "c":
 		m.showActionMenu = false

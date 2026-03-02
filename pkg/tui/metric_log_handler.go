@@ -7,8 +7,7 @@ import (
 	"time"
 
 	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/evertras/bubble-table/table"
+	tea "charm.land/bubbletea/v2"
 	"github.com/rs/zerolog/log"
 )
 
@@ -23,7 +22,7 @@ WHERE database='system'
 
 // MetricLogDataMsg is sent when metric log data is loaded
 type MetricLogDataMsg struct {
-	Rows  []table.Row
+	Rows  []widgets.Row
 	Title string
 	Err   error
 }
@@ -78,11 +77,11 @@ func (m metricLogViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.table.SetRows(msg.Rows)
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc", "q":
 			return m, func() tea.Msg {
-				return tea.KeyMsg{Type: tea.KeyEsc}
+				return tea.KeyPressMsg{Code: tea.KeyEscape}
 			}
 		case "enter":
 			// Get selected metric and show description
@@ -102,14 +101,14 @@ func (m metricLogViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m metricLogViewer) View() string {
+func (m metricLogViewer) View() tea.View {
 	if m.loading {
-		return "Loading metric_log data, please wait..."
+		return tea.NewView("Loading metric_log data, please wait...")
 	}
 	if m.err != nil {
-		return fmt.Sprintf("Error loading metric log: %v\n\nPress ESC to return", m.err)
+		return tea.NewView(fmt.Sprintf("Error loading metric log: %v\n\nPress ESC to return", m.err))
 	}
-	return m.table.View()
+	return tea.NewView(m.table.View())
 }
 
 // ShowMetricLog displays metric log data
@@ -249,15 +248,15 @@ ORDER BY bucket_time`,
 		}
 
 		// Convert sparkline data to bubble-table rows
-		var tableRows []table.Row
+		var tableRows []widgets.Row
 		for _, item := range allSparklineData {
-			rowData := table.RowData{
+			rowData := widgets.RowData{
 				"Metric":     item.Name,
 				"Min":        fmt.Sprintf("%.1f", item.MinValue),
 				"Spark line": item.Sparkline,
 				"Max":        fmt.Sprintf("%.1f", item.MaxValue),
 			}
-			tableRows = append(tableRows, table.NewRow(rowData))
+			tableRows = append(tableRows, widgets.NewRow(rowData))
 		}
 
 		title := fmt.Sprintf("Metric Log: %s to %s", fromStr, toStr)

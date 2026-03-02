@@ -5,8 +5,7 @@ import (
 	"time"
 
 	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/evertras/bubble-table/table"
+	tea "charm.land/bubbletea/v2"
 	"github.com/rs/zerolog/log"
 )
 
@@ -16,7 +15,7 @@ const (
 
 // AsyncMetricLogDataMsg is sent when async metric log data is loaded
 type AsyncMetricLogDataMsg struct {
-	Rows            []table.Row
+	Rows            []widgets.Row
 	Title           string
 	MetricNameWidth int
 	MinWidth        int
@@ -95,11 +94,11 @@ func (m asyncMetricLogViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.table.SetRows(msg.Rows)
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc", "q":
 			return m, func() tea.Msg {
-				return tea.KeyMsg{Type: tea.KeyEsc}
+				return tea.KeyPressMsg{Code: tea.KeyEscape}
 			}
 		case "enter":
 			// Get selected metric and show description
@@ -119,14 +118,14 @@ func (m asyncMetricLogViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m asyncMetricLogViewer) View() string {
+func (m asyncMetricLogViewer) View() tea.View {
 	if m.loading {
-		return "Loading asynchronous_metric_log data, please wait..."
+		return tea.NewView("Loading asynchronous_metric_log data, please wait...")
 	}
 	if m.err != nil {
-		return fmt.Sprintf("Error loading async metric log: %v\n\nPress ESC to return", m.err)
+		return tea.NewView(fmt.Sprintf("Error loading async metric log: %v\n\nPress ESC to return", m.err))
 	}
-	return m.table.View()
+	return tea.NewView(m.table.View())
 }
 
 // ShowAsynchronousMetricLog displays async metric log data
@@ -216,7 +215,7 @@ GROUP BY metric`,
 		}
 
 		// Convert sparkline data to bubble-table rows and calculate column widths
-		var tableRows []table.Row
+		var tableRows []widgets.Row
 		maxMinWidth := 3 // Start with header "Min" length
 		maxMaxWidth := 3 // Start with header "Max" length
 
@@ -232,13 +231,13 @@ GROUP BY metric`,
 				maxMaxWidth = len(maxStr)
 			}
 
-			rowData := table.RowData{
+			rowData := widgets.RowData{
 				"Metric":     item.Name,
 				"Min":        minStr,
 				"Spark line": item.Sparkline,
 				"Max":        maxStr,
 			}
-			tableRows = append(tableRows, table.NewRow(rowData))
+			tableRows = append(tableRows, widgets.NewRow(rowData))
 		}
 
 		title := fmt.Sprintf("Asynchronous Metric Log: %s to %s", fromStr, toStr)

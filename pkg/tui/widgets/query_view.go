@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/alecthomas/chroma/v2/quick"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // QueryView is a bubbletea model for displaying SQL queries with syntax highlighting
@@ -23,7 +23,7 @@ type QueryView struct {
 
 // NewQueryView creates a new query view
 func NewQueryView(title string, width, height int) QueryView {
-	vp := viewport.New(width, height-3) // Reserve space for title and border
+	vp := viewport.New(viewport.WithWidth(width), viewport.WithHeight(height-3)) // Reserve space for title and border
 	vp.Style = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("62"))
@@ -40,8 +40,8 @@ func NewQueryView(title string, width, height int) QueryView {
 func (m *QueryView) SetSize(width, height int) {
 	m.width = width
 	m.height = height
-	m.viewport.Width = width
-	m.viewport.Height = height - 3
+	m.viewport.SetWidth(width)
+	m.viewport.SetHeight(height - 3)
 }
 
 // SetSQL sets the SQL query to display with syntax highlighting
@@ -79,7 +79,7 @@ func (m QueryView) Update(msg tea.Msg) (QueryView, tea.Cmd) {
 		m.SetSize(msg.Width, msg.Height)
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// Delegate scrolling to viewport
 		m.viewport, cmd = m.viewport.Update(msg)
 		return m, cmd
@@ -189,34 +189,34 @@ func (m *QueryView) applyBasicHighlighting(text string) string {
 }
 
 // map256ToColor maps a 256-color palette index to a lipgloss color
-func map256ToColor(n int) lipgloss.Color {
+func map256ToColor(n int) string {
 	switch {
 	case n >= 196:
-		return lipgloss.Color("196") // red
+		return "196" // red
 	case n >= 160:
-		return lipgloss.Color("160") // darkred
+		return "160" // darkred
 	case n >= 129 && n < 160:
-		return lipgloss.Color("135") // purple
+		return "135" // purple
 	case n >= 93 && n < 129:
-		return lipgloss.Color("99") // purple
+		return "99" // purple
 	case n >= 81 && n < 93:
-		return lipgloss.Color("75") // blue
+		return "75" // blue
 	case n >= 46 && n < 81:
-		return lipgloss.Color("70") // green
+		return "70" // green
 	case n >= 34 && n < 46:
-		return lipgloss.Color("28") // darkgreen
+		return "28" // darkgreen
 	case n >= 226 && n < 231:
-		return lipgloss.Color("226") // yellow
+		return "226" // yellow
 	case n >= 220 && n < 226:
-		return lipgloss.Color("220") // yellow
+		return "220" // yellow
 	case n >= 208 && n < 220:
-		return lipgloss.Color("214") // orange
+		return "214" // orange
 	case n >= 118 && n < 160:
-		return lipgloss.Color("118") // green
+		return "118" // green
 	case n >= 249 && n <= 255:
-		return lipgloss.Color("250") // gray
+		return "250" // gray
 	default:
-		return lipgloss.Color("255") // white
+		return "255" // white
 	}
 }
 
@@ -245,7 +245,7 @@ func parseANSIColor(codesStr string) string {
 	for i := 0; i+2 < len(parts); i++ {
 		if parts[i] == "38" && parts[i+1] == "5" {
 			n, _ := strconv.Atoi(parts[i+2])
-			return string(map256ToColor(n))
+			return map256ToColor(n)
 		}
 	}
 

@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // ClusterSelectedMsg is sent when a cluster is selected
@@ -80,7 +80,7 @@ func (m clusterSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if m.loading || m.err != nil {
 			// During loading or error, only allow escape
 			if msg.String() == "esc" || msg.String() == "q" {
@@ -109,14 +109,14 @@ func (m clusterSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m clusterSelector) View() string {
+func (m clusterSelector) View() tea.View {
 	if m.loading {
-		return m.list.View() + "\n\nFetching clusters from database..."
+		return tea.NewView(m.list.View() + "\n\nFetching clusters from database...")
 	}
 	if m.err != nil {
-		return m.list.View() + "\n\nPress ESC to go back"
+		return tea.NewView(m.list.View() + "\n\nPress ESC to go back")
 	}
-	return m.list.View()
+	return tea.NewView(m.list.View())
 }
 
 // fetchClustersCmd fetches clusters from the database

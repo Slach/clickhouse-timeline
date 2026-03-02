@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // FlamegraphParams structure for storing flamegraph parameters
@@ -61,11 +61,11 @@ var traceOptions = []string{
 func newFlamegraphConfigForm(categoryType CategoryType, categoryValue string, traceType TraceType, fromTime, toTime time.Time, width, height int) flamegraphConfigForm {
 	valueInput := textinput.New()
 	valueInput.Placeholder = "category value"
-	valueInput.Width = 40
+	valueInput.SetWidth(40)
 	if categoryValue != "" {
 		valueInput.SetValue(categoryValue)
 	}
-	valueInput.Focus()
+	_ = valueInput.Focus()
 
 	// Determine category index
 	categoryIdx := 0
@@ -112,11 +112,11 @@ func (m flamegraphConfigForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc", "q":
 			return m, func() tea.Msg {
-				return tea.KeyMsg{Type: tea.KeyEsc}
+				return tea.KeyPressMsg{Code: tea.KeyEscape}
 			}
 		case "tab", "down":
 			m.currentField = (m.currentField + 1) % 4
@@ -156,7 +156,7 @@ func (m flamegraphConfigForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.selectedButton == 1 {
 					// Cancel button
 					return m, func() tea.Msg {
-						return tea.KeyMsg{Type: tea.KeyEsc}
+						return tea.KeyPressMsg{Code: tea.KeyEscape}
 					}
 				}
 				// Show flamegraph button - fall through to validation
@@ -207,13 +207,13 @@ func (m *flamegraphConfigForm) updateTraceType() {
 
 func (m *flamegraphConfigForm) updateFocus() {
 	if m.currentField == 1 {
-		m.categoryValue.Focus()
+		_ = m.categoryValue.Focus()
 	} else {
 		m.categoryValue.Blur()
 	}
 }
 
-func (m flamegraphConfigForm) View() string {
+func (m flamegraphConfigForm) View() tea.View {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
 	selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
@@ -322,7 +322,7 @@ func (m flamegraphConfigForm) View() string {
 		BorderForeground(lipgloss.Color("6")).
 		Padding(1, 2)
 
-	return borderStyle.Render(sb.String())
+	return tea.NewView(borderStyle.Render(sb.String()))
 }
 
 // ShowFlamegraphForm displays the flamegraph configuration form

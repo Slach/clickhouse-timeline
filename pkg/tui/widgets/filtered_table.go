@@ -2,25 +2,53 @@ package widgets
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/evertras/bubble-table/table"
+	"charm.land/bubbles/v2/table"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
+
+// RowData is a map of column key to value, providing backward compatibility
+// with the v1 bubble-table API where rows carried a Data map.
+type RowData map[string]interface{}
+
+// Row represents a table row with associated data.
+// In v2, the underlying table.Row is just []string, so we maintain
+// a parallel RowData map for metadata access by callers.
+type Row struct {
+	Data  RowData
+	Style lipgloss.Style
+}
+
+// NewRow creates a new Row from a RowData map.
+func NewRow(data RowData) Row {
+	return Row{Data: data}
+}
+
+// WithStyle returns a copy of the Row with the given style applied.
+func (r Row) WithStyle(s lipgloss.Style) Row {
+	r.Style = s
+	return r
+}
 
 // FilteredTable is a bubbletea model for a filterable table
 type FilteredTable struct {
-	table        table.Model
-	filterInput  textinput.Model
-	filtering    bool
-	title        string
-	allRows      []table.Row
+	table       table.Model
+	filterInput textinput.Model
+	filtering   bool
+	title       string
+	// allRows stores the full set of rows with their data maps.
+	allRows []Row
+	// filteredRows stores the currently displayed subset (after filtering).
+	// This is needed to map cursor index back to the correct row data.
+	filteredRows []Row
 	headers      []string
 	width        int
 	height       int
-	onSelect     func(selectedRow table.Row)
+	onSelect     func(selectedRow Row)
 	maxCellWidth int
 	pageSize     int
 	showHelp     bool // Whether to show help footer
@@ -31,7 +59,7 @@ func NewFilteredTable(title string, headers []string, width, height int) Filtere
 	// Create columns with equal widths
 	// Account for table borders: 2 for left/right borders + (n-1) for column separators
 	// Also subtract some padding for safety
-	borderOverhead := 2 + (len(headers) - 1) + 4
+	borderOverhead := 2 + (len(headers)-1) + 4
 	availableWidth := width - borderOverhead
 	if availableWidth < len(headers)*10 {
 		availableWidth = len(headers) * 10
@@ -44,8 +72,7 @@ func NewFilteredTable(title string, headers []string, width, height int) Filtere
 	}
 
 	for i, header := range headers {
-		columns[i] = table.NewColumn(header, header, columnWidth).
-			WithStyle(lipgloss.NewStyle().Align(lipgloss.Left))
+		columns[i] = table.Column{Title: header, Width: columnWidth}
 	}
 
 	return createFilteredTableBubble(title, headers, columns, width, height)
@@ -53,25 +80,21 @@ func NewFilteredTable(title string, headers []string, width, height int) Filtere
 
 // NewFilteredTableBubbleWithWidths creates a new filtered table with custom column widths
 func NewFilteredTableBubbleWithWidths(title string, headers []string, widths []int, width, height int) FilteredTable {
-	// Create columns with custom widths
-	// headers are lowercase keys, we'll capitalize them for display
 	columns := make([]table.Column, len(headers))
 	for i, header := range headers {
 		columnWidth := widths[i]
 		if columnWidth < 5 {
 			columnWidth = 5
 		}
-		// Use header as key (lowercase), but capitalize for title display
-		displayTitle := strings.Title(header)
-		columns[i] = table.NewColumn(header, displayTitle, columnWidth).
-			WithStyle(lipgloss.NewStyle().Align(lipgloss.Left))
+		// Use header as key, capitalize for title display
+		displayTitle := strings.Title(header) //nolint:staticcheck
+		columns[i] = table.Column{Title: displayTitle, Width: columnWidth}
 	}
 	return createFilteredTableBubble(title, headers, columns, width, height)
 }
 
 // createFilteredTableBubble is a helper that creates the table with given columns
 func createFilteredTableBubble(title string, headers []string, columns []table.Column, width, height int) FilteredTable {
-
 	// Calculate visible rows for the table viewport
 	// Account for: title (1 if non-empty, 0 if empty), filter input when active (2), help text (1), borders (2)
 	overhead := 6
@@ -83,31 +106,20 @@ func createFilteredTableBubble(title string, headers []string, columns []table.C
 		visibleRows = 5
 	}
 
-	// Create table with proper viewport size for scrolling
-	t := table.New(columns).
-		WithPageSize(visibleRows).
-		WithMaxTotalWidth(width).
-		Focused(true).
-		WithTargetWidth(width).
-		Border(table.Border{
-			Top:    "─",
-			Left:   "│",
-			Right:  "│",
-			Bottom: "─",
+	s := table.Styles{
+		Header:   lipgloss.NewStyle().Bold(true).Padding(0, 1),
+		Cell:     lipgloss.NewStyle().Padding(0, 1),
+		Selected: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")),
+	}
 
-			TopRight:    "╮",
-			TopLeft:     "╭",
-			BottomRight: "╯",
-			BottomLeft:  "╰",
-
-			TopJunction:    "┬",
-			LeftJunction:   "├",
-			RightJunction:  "┤",
-			BottomJunction: "┴",
-			InnerJunction:  "┼",
-
-			InnerDivider: "│",
-		})
+	t := table.New(
+		table.WithColumns(columns),
+		table.WithRows([]table.Row{}),
+		table.WithHeight(visibleRows),
+		table.WithWidth(width),
+		table.WithFocused(true),
+		table.WithStyles(s),
+	)
 
 	// Create filter input
 	ti := textinput.New()
@@ -120,7 +132,8 @@ func createFilteredTableBubble(title string, headers []string, columns []table.C
 		filterInput:  ti,
 		filtering:    false,
 		title:        title,
-		allRows:      []table.Row{},
+		allRows:      []Row{},
+		filteredRows: []Row{},
 		headers:      headers,
 		width:        width,
 		height:       height,
@@ -130,7 +143,7 @@ func createFilteredTableBubble(title string, headers []string, columns []table.C
 }
 
 // SetOnSelect sets the callback when a row is selected
-func (m *FilteredTable) SetOnSelect(callback func(selectedRow table.Row)) {
+func (m *FilteredTable) SetOnSelect(callback func(selectedRow Row)) {
 	m.onSelect = callback
 }
 
@@ -145,49 +158,76 @@ func (m *FilteredTable) SetSize(width, height int) {
 	m.height = height
 
 	// Calculate visible rows for the table viewport
-	// Account for: title (1 if non-empty, 0 if empty), filter input when active (2), help text (1), borders (2)
 	overhead := 6
 	if strings.TrimSpace(m.title) == "" {
-		overhead = 5 // No title line if empty
+		overhead = 5
 	}
 	visibleRows := height - overhead
 	if visibleRows < 5 {
 		visibleRows = 5
 	}
 
-	m.table = m.table.WithTargetWidth(width).WithPageSize(visibleRows)
+	m.table.SetWidth(width)
+	m.table.SetHeight(visibleRows)
 }
 
 // SetBorderColor updates the border color of the table
-func (m *FilteredTable) SetBorderColor(color lipgloss.Color) {
-	// Apply base style with border foreground color
-	baseStyle := lipgloss.NewStyle().BorderForeground(color)
-	m.table = m.table.WithBaseStyle(baseStyle)
+func (m *FilteredTable) SetBorderColor(color color.Color) {
+	s := table.Styles{
+		Header:   lipgloss.NewStyle().Bold(true).Padding(0, 1).BorderForeground(color),
+		Cell:     lipgloss.NewStyle().Padding(0, 1),
+		Selected: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")).BorderForeground(color),
+	}
+	m.table.SetStyles(s)
+}
+
+// rowToTableRow converts a widgets.Row (with Data map) to a v2 table.Row ([]string)
+// by extracting values in header order.
+func (m *FilteredTable) rowToTableRow(row Row) table.Row {
+	cells := make(table.Row, len(m.headers))
+	for i, header := range m.headers {
+		if val, ok := row.Data[header]; ok {
+			cells[i] = fmt.Sprintf("%v", val)
+		}
+	}
+	return cells
+}
+
+// rowsToTableRows converts a slice of widgets.Row to v2 table rows.
+func (m *FilteredTable) rowsToTableRows(rows []Row) []table.Row {
+	tableRows := make([]table.Row, len(rows))
+	for i, row := range rows {
+		tableRows[i] = m.rowToTableRow(row)
+	}
+	return tableRows
 }
 
 // AddRow adds a row to the table
 func (m *FilteredTable) AddRow(rowData map[string]string) {
-	// Optimize cell content
-	optimized := make(table.RowData)
+	// Optimize cell content and build RowData
+	data := make(RowData)
 	for k, v := range rowData {
-		optimized[k] = m.optimizeText(v)
+		data[k] = m.optimizeText(v)
 	}
 
-	row := table.NewRow(optimized)
+	row := NewRow(data)
 	m.allRows = append(m.allRows, row)
-	m.table = m.table.WithRows(m.allRows)
+	m.filteredRows = m.allRows
+	m.table.SetRows(m.rowsToTableRows(m.allRows))
 }
 
 // SetRows sets all rows at once (more efficient than AddRow for bulk operations)
-func (m *FilteredTable) SetRows(rows []table.Row) {
+func (m *FilteredTable) SetRows(rows []Row) {
 	m.allRows = rows
-	m.table = m.table.WithRows(rows)
+	m.filteredRows = rows
+	m.table.SetRows(m.rowsToTableRows(rows))
 }
 
 // ClearRows clears all rows
 func (m *FilteredTable) ClearRows() {
-	m.allRows = []table.Row{}
-	m.table = m.table.WithRows([]table.Row{})
+	m.allRows = []Row{}
+	m.filteredRows = []Row{}
+	m.table.SetRows([]table.Row{})
 }
 
 // Init implements tea.Model
@@ -205,26 +245,25 @@ func (m FilteredTable) Update(msg tea.Msg) (FilteredTable, tea.Cmd) {
 		m.SetSize(msg.Width, msg.Height)
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if m.filtering {
-			// Check for special keys first before passing to textinput
-			switch msg.Type {
-			case tea.KeyEsc:
+			switch msg.String() {
+			case "esc":
 				// Cancel filtering
 				m.filtering = false
 				m.filterInput.SetValue("")
 				m.filterInput.Blur()
 				m.applyFilter("")
 				// Refocus table
-				m.table = m.table.Focused(true)
+				m.table.Focus()
 				return m, nil
 
-			case tea.KeyEnter:
+			case "enter":
 				// Apply filter and exit filter mode
 				m.filtering = false
 				m.filterInput.Blur()
 				// Refocus table so user can navigate
-				m.table = m.table.Focused(true)
+				m.table.Focus()
 				return m, nil
 
 			default:
@@ -241,16 +280,16 @@ func (m FilteredTable) Update(msg tea.Msg) (FilteredTable, tea.Cmd) {
 			case "/":
 				// Enter filter mode (unfocus table first)
 				m.filtering = true
-				m.table = m.table.Focused(false)
+				m.table.Blur()
 				m.filterInput.Focus()
 				return m, nil
 
 			case "enter":
 				// Select current row
 				if m.onSelect != nil {
-					selectedRow := m.table.HighlightedRow()
-					if selectedRow.Data != nil {
-						m.onSelect(selectedRow)
+					highlighted := m.highlightedRow()
+					if highlighted.Data != nil {
+						m.onSelect(highlighted)
 					}
 				}
 				return m, nil
@@ -297,27 +336,7 @@ func (m FilteredTable) View() string {
 	if m.showHelp {
 		helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
-		// Get current page info from table
-		visibleRows := len(m.allRows)
-		if m.filterInput.Value() != "" {
-			// Count filtered rows
-			filterLower := strings.ToLower(m.filterInput.Value())
-			visibleRows = 0
-			for _, row := range m.allRows {
-				match := false
-				for _, header := range m.headers {
-					if cellValue, ok := row.Data[header].(string); ok {
-						if strings.Contains(strings.ToLower(cellValue), filterLower) {
-							match = true
-							break
-						}
-					}
-				}
-				if match {
-					visibleRows++
-				}
-			}
-		}
+		visibleRows := len(m.filteredRows)
 
 		helpText := helpStyle.Render("↑↓: Scroll | PgUp/PgDn: Fast scroll | /: Filter | Enter: Select | ESC: Back")
 
@@ -327,14 +346,12 @@ func (m FilteredTable) View() string {
 
 		footer := helpText + rowInfo
 
-		// Only include title if it's not empty (avoids blank line when title is "")
 		if strings.TrimSpace(m.title) == "" {
 			result = lipgloss.JoinVertical(lipgloss.Left, m.table.View(), footer)
 		} else {
 			result = lipgloss.JoinVertical(lipgloss.Left, title, m.table.View(), footer)
 		}
 	} else {
-		// No help footer - just show table with optional title
 		if strings.TrimSpace(m.title) == "" {
 			result = m.table.View()
 		} else {
@@ -345,8 +362,7 @@ func (m FilteredTable) View() string {
 	// Debug: count actual lines rendered
 	actualLines := strings.Count(result, "\n") + 1
 	if actualLines != m.height {
-		// Log only if there's a mismatch
-		_ = actualLines // Suppress unused variable warning in production
+		_ = actualLines
 	}
 
 	return result
@@ -356,31 +372,33 @@ func (m FilteredTable) View() string {
 func (m *FilteredTable) applyFilter(filter string) {
 	if filter == "" {
 		// Reset to all rows
-		m.table = m.table.WithRows(m.allRows)
+		m.filteredRows = m.allRows
+		m.table.SetRows(m.rowsToTableRows(m.allRows))
 		return
 	}
 
 	// Filter rows
 	filterLower := strings.ToLower(filter)
-	var filtered []table.Row
+	var filtered []Row
 	for _, row := range m.allRows {
-		// Check if any cell contains the filter text
 		match := false
 		for _, header := range m.headers {
-			if cellValue, ok := row.Data[header].(string); ok {
-				if strings.Contains(strings.ToLower(cellValue), filterLower) {
-					match = true
-					break
+			if cellValue, ok := row.Data[header]; ok {
+				if str, ok := cellValue.(string); ok {
+					if strings.Contains(strings.ToLower(str), filterLower) {
+						match = true
+						break
+					}
 				}
 			}
 		}
-
 		if match {
 			filtered = append(filtered, row)
 		}
 	}
 
-	m.table = m.table.WithRows(filtered)
+	m.filteredRows = filtered
+	m.table.SetRows(m.rowsToTableRows(filtered))
 }
 
 // optimizeText truncates text to prevent excessive processing
@@ -391,20 +409,34 @@ func (m *FilteredTable) optimizeText(text string) string {
 	return text
 }
 
-// HighlightedRow returns the currently highlighted row
-func (m FilteredTable) HighlightedRow() table.Row {
-	return m.table.HighlightedRow()
+// highlightedRow returns the currently highlighted row as a widgets.Row with Data map.
+func (m FilteredTable) highlightedRow() Row {
+	idx := m.table.Cursor()
+	if idx >= 0 && idx < len(m.filteredRows) {
+		return m.filteredRows[idx]
+	}
+	return Row{}
 }
 
-// SelectedRows returns all selected rows (if multi-select is enabled)
-func (m FilteredTable) SelectedRows() []table.Row {
-	return m.table.SelectedRows()
+// HighlightedRow returns the currently highlighted row
+func (m FilteredTable) HighlightedRow() Row {
+	return m.highlightedRow()
+}
+
+// SelectedRows returns all selected rows (if multi-select is enabled).
+// In v2, table does not have built-in multi-select, so this returns
+// a single-element slice with the highlighted row if one exists.
+func (m FilteredTable) SelectedRows() []Row {
+	row := m.highlightedRow()
+	if row.Data != nil {
+		return []Row{row}
+	}
+	return nil
 }
 
 // GetRowCount returns the number of visible rows (after filtering)
 func (m FilteredTable) GetRowCount() int {
-	// This is approximate - bubble-table doesn't expose this directly
-	return len(m.allRows)
+	return len(m.filteredRows)
 }
 
 // IsFiltering returns true if the table is currently in filter mode

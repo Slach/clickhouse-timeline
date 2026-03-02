@@ -2,7 +2,7 @@ package tui
 
 import (
 	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // getMetricSQL returns the SQL expression for the given metric
@@ -112,7 +112,7 @@ func (m metricSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "enter":
 			// Get selected metric
@@ -136,8 +136,8 @@ func (m metricSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m metricSelector) View() string {
-	return m.list.View()
+func (m metricSelector) View() tea.View {
+	return tea.NewView(m.list.View())
 }
 
 // showMetricSelector displays a list of available metrics

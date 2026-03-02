@@ -6,8 +6,8 @@ import (
 	"math"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // Frame represents a node in the flamegraph tree
@@ -109,7 +109,7 @@ func (m flamegraphViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if m.ShowingDetails {
 			// In details view, handle scrolling and exit
 			switch msg.String() {
@@ -187,20 +187,20 @@ func (m flamegraphViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m flamegraphViewer) View() string {
+func (m flamegraphViewer) View() tea.View {
 	if m.loading {
-		return "Loading flamegraph data..."
+		return tea.NewView("Loading flamegraph data...")
 	}
 	if m.err != nil {
-		return fmt.Sprintf("Error loading flamegraph: %v\n\nPress ESC to return", m.err)
+		return tea.NewView(fmt.Sprintf("Error loading flamegraph: %v\n\nPress ESC to return", m.err))
 	}
 	if m.root == nil || m.maxDepth == 0 || m.root.Count == 0 {
-		return "No data available for selected parameters\n\nPress ESC to return"
+		return tea.NewView("No data available for selected parameters\n\nPress ESC to return")
 	}
 
 	// Show stack trace details if requested
 	if m.ShowingDetails {
-		return m.renderStackTraceDetails()
+		return tea.NewView(m.renderStackTraceDetails())
 	}
 
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
@@ -231,7 +231,7 @@ func (m flamegraphViewer) View() string {
 		helpStyle.Render(help),
 	)
 
-	return content
+	return tea.NewView(content)
 }
 
 // renderFlamegraph renders the flamegraph as colored text blocks

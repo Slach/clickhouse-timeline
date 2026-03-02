@@ -13,9 +13,9 @@ import (
 	"github.com/Slach/clickhouse-timeline/pkg/models"
 	"github.com/Slach/clickhouse-timeline/pkg/types"
 	"github.com/araddon/dateparse"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/term"
 )
@@ -456,7 +456,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// Handle command mode
 		if a.commandMode {
 			switch msg.String() {
@@ -552,7 +552,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Enter command mode
 			a.commandMode = true
-			a.bubbleCommandInput.Focus()
+			_ = a.bubbleCommandInput.Focus()
 			a.updateCommandSuggestions()
 			return a, nil
 
@@ -679,9 +679,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View renders the current view
-func (a *App) View() string {
+func (a *App) View() tea.View {
 	if a.width == 0 {
-		return "Loading..."
+		v := tea.NewView("Loading...")
+		v.AltScreen = true
+		v.MouseMode = tea.MouseModeCellMotion
+		return v
 	}
 
 	var content string
@@ -692,97 +695,97 @@ func (a *App) View() string {
 		content = a.renderMainPage()
 	case pageConnect:
 		if a.connectHandler != nil {
-			content = a.connectHandler.View()
+			content = a.connectHandler.View().Content
 		} else {
 			content = "Connect page not yet implemented"
 		}
 	case pageCluster:
 		if a.clusterHandler != nil {
-			content = a.clusterHandler.View()
+			content = a.clusterHandler.View().Content
 		} else {
 			content = "Cluster selector not yet implemented"
 		}
 	case pageScale:
 		if a.scaleHandler != nil {
-			content = a.scaleHandler.View()
+			content = a.scaleHandler.View().Content
 		} else {
 			content = "Scale selector not yet implemented"
 		}
 	case pageCategory:
 		if a.categoryHandler != nil {
-			content = a.categoryHandler.View()
+			content = a.categoryHandler.View().Content
 		} else {
 			content = "Category selector not yet implemented"
 		}
 	case pageMetric:
 		if a.metricHandler != nil {
-			content = a.metricHandler.View()
+			content = a.metricHandler.View().Content
 		} else {
 			content = "Metric selector not yet implemented"
 		}
 	case pageDatePicker:
 		if a.datePickerHandler != nil {
-			content = a.datePickerHandler.View()
+			content = a.datePickerHandler.View().Content
 		} else {
 			content = "Date picker not yet implemented"
 		}
 	case pageRangePicker:
 		if a.rangePickerHandler != nil {
-			content = a.rangePickerHandler.View()
+			content = a.rangePickerHandler.View().Content
 		} else {
 			content = "Range picker not yet implemented"
 		}
 	case pageMemory:
 		if a.memoryHandler != nil {
-			content = a.memoryHandler.View()
+			content = a.memoryHandler.View().Content
 		} else {
 			content = "Memory viewer not yet implemented"
 		}
 	case pageAsyncMetricLog:
 		if a.asyncMetricHandler != nil {
-			content = a.asyncMetricHandler.View()
+			content = a.asyncMetricHandler.View().Content
 		} else {
 			content = "Async metric log viewer not yet implemented"
 		}
 	case pageMetricLog:
 		if a.metricLogHandler != nil {
-			content = a.metricLogHandler.View()
+			content = a.metricLogHandler.View().Content
 		} else {
 			content = "Metric log viewer not yet implemented"
 		}
 	case pageProfileEvents:
 		if a.profileHandler != nil {
-			content = a.profileHandler.View()
+			content = a.profileHandler.View().Content
 		} else {
 			content = "Profile events viewer not yet implemented"
 		}
 	case pageExplain:
 		if a.explainHandler != nil {
-			content = a.explainHandler.View()
+			content = a.explainHandler.View().Content
 		} else {
 			content = "Explain viewer not yet implemented"
 		}
 	case pageHeatmap:
 		if a.heatmapHandler != nil {
-			content = a.heatmapHandler.View()
+			content = a.heatmapHandler.View().Content
 		} else {
 			content = "Heatmap not yet implemented"
 		}
 	case pageLogs:
 		if a.logsHandler != nil {
-			content = a.logsHandler.View()
+			content = a.logsHandler.View().Content
 		} else {
 			content = "Logs viewer not yet implemented"
 		}
 	case pageAudit:
 		if a.auditHandler != nil {
-			content = a.auditHandler.View()
+			content = a.auditHandler.View().Content
 		} else {
 			content = "Audit viewer not yet implemented"
 		}
 	case pageFlamegraph:
 		if a.flamegraphHandler != nil {
-			content = a.flamegraphHandler.View()
+			content = a.flamegraphHandler.View().Content
 		} else {
 			content = "Flamegraph configuration not yet implemented"
 		}
@@ -857,7 +860,10 @@ func (a *App) View() string {
 		}
 	}
 
-	return content
+	v := tea.NewView(content)
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	return v
 }
 
 // updateCommandSuggestions filters available commands based on current input
@@ -1046,11 +1052,8 @@ func (a *App) Run() error {
 		Bool("cli_disable_mouse", a.state.CLI != nil && a.state.CLI.DisableMouse).
 		Msg("Mouse support configuration")
 
-	// Build program options
-	opts := []tea.ProgramOption{tea.WithAltScreen()}
-	if usingMouse {
-		opts = append(opts, tea.WithMouseCellMotion())
-	}
+	// Build program options (AltScreen and mouse are now set via View())
+	var opts []tea.ProgramOption
 
 	p := tea.NewProgram(a, opts...)
 	_, err := p.Run()

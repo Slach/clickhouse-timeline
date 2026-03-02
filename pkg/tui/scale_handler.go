@@ -6,8 +6,8 @@ import (
 
 	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
 	"github.com/Slach/clickhouse-timeline/pkg/utils"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // ScaleType represents the type of scaling to apply to heatmap values
@@ -54,7 +54,7 @@ func (m scaleSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "enter":
 			// Get selected scale
@@ -75,8 +75,8 @@ func (m scaleSelector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m scaleSelector) View() string {
-	return m.list.View()
+func (m scaleSelector) View() tea.View {
+	return tea.NewView(m.list.View())
 }
 
 // showScaleSelector displays a list of available scaling options
