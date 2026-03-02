@@ -5,6 +5,7 @@ go 1.26
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.43.0
 	github.com/alecthomas/chroma v0.10.0
+	github.com/alecthomas/chroma/v2 v2.23.1
 	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
