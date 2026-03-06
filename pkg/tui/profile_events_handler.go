@@ -126,9 +126,9 @@ func (m profileEventsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	var cmd tea.Cmd
-	m.queryView, cmd = m.queryView.Update(msg)
-	cmds = append(cmds, cmd)
+	var updateCmd tea.Cmd
+	m.queryView, updateCmd = m.queryView.Update(msg)
+	cmds = append(cmds, updateCmd)
 
 	return m, tea.Batch(cmds...)
 }
