@@ -13,11 +13,12 @@ import (
 	"github.com/Slach/clickhouse-timeline/pkg/models"
 	"github.com/Slach/clickhouse-timeline/pkg/types"
 	"github.com/araddon/dateparse"
+	"github.com/rs/zerolog/log"
+	"golang.org/x/term"
+
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/rs/zerolog/log"
-	"golang.org/x/term"
 )
 
 var logo = `████ ████ ████ ████
