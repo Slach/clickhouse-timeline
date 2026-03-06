@@ -133,7 +133,7 @@ func NewRootCommand(cli *types.CLI, version string) *cobra.Command {
 	return rootCmd
 }
 
-func RunRootCommand(cliInstance *types.CLI, version string, cmd *cobra.Command, args []string) error {
+func RunRootCommand(cliInstance *types.CLI, version string, cmd *cobra.Command, _ []string) error {
 	// Get CLI instance from command context
 	if cliInstance == nil {
 		if cliValue := cmd.Context().Value("cli"); cliValue != nil {
