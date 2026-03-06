@@ -175,16 +175,14 @@ func (m *QueryView) applyBasicHighlighting(text string) string {
 	stringPattern := regexp.MustCompile(`'[^']*'|"[^"]*"`)
 	result = stringPattern.ReplaceAllStringFunc(result, func(match string) string {
 		return stringStyle.Render(match)
+	})
 
->>>>>>> Stashed changes
-
->>>>>>> Stashed changes
 	// Highlight comments
 	commentPattern := regexp.MustCompile(`--[^\n]*`)
 	result = commentPattern.ReplaceAllStringFunc(result, func(match string) string {
 		return commentStyle.Render(match)
 	})
-
+}
 
 =======
 
