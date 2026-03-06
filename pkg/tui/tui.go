@@ -1193,3 +1193,7 @@ func (a *App) ApplyPredefinedRange(rangeOption string) {
 }
 
 // Handler methods are implemented in their respective handler files
+>>>>>>> Stashed changes
+)
+
+var logo = `████ ████ ████ ████

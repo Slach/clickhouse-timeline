@@ -183,8 +183,6 @@ func (m *QueryView) applyBasicHighlighting(text string) string {
 		return commentStyle.Render(match)
 	})
 
-	return result
-}
 
 =======
 
