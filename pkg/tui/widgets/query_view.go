@@ -22,13 +22,13 @@ type QueryView struct {
 }
 
 // NewQueryView creates a new query view
-func NewQueryView(title string, width, height int) QueryView {
+func NewQueryView(title string, width, height int) *QueryView {
 	vp := viewport.New(viewport.WithWidth(width), viewport.WithHeight(height-3)) // Reserve space for title and border
 	vp.Style = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("62"))
 
-	return QueryView{
+	return &QueryView{
 		viewport: vp,
 		title:    title,
 		width:    width,
@@ -66,12 +66,12 @@ func (m *QueryView) SetSQL(sql string) {
 }
 
 // Init implements tea.Model
-func (m QueryView) Init() tea.Cmd {
+func (m *QueryView) Init() tea.Cmd {
 	return nil
 }
 
 // Update implements tea.Model
-func (m QueryView) Update(msg tea.Msg) (QueryView, tea.Cmd) {
+func (m *QueryView) Update(msg tea.Msg) (*QueryView, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
@@ -89,7 +89,7 @@ func (m QueryView) Update(msg tea.Msg) (QueryView, tea.Cmd) {
 }
 
 // View implements tea.Model
-func (m QueryView) View() string {
+func (m *QueryView) View() string {
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("white")).
