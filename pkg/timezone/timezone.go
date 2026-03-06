@@ -5,6 +5,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+<<<<<<< Updated upstream
+=======
+	"regexp/syntax"
+>>>>>>> Stashed changes
 	"runtime"
 	"slices"
 	"sort"
@@ -14,7 +18,10 @@ import (
 	"unicode/utf8"
 
 	"github.com/rs/zerolog/log"
+<<<<<<< Updated upstream
 	"regexp/syntax"
+=======
+>>>>>>> Stashed changes
 )
 
 var zoneDirs = map[string]string{
