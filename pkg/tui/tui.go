@@ -1197,3 +1197,7 @@ func (a *App) ApplyPredefinedRange(rangeOption string) {
 )
 
 var logo = `████ ████ ████ ████
+>>>>>>> Stashed changes
+)
+
+var logo = `████ ████ ████ ████

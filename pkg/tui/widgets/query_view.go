@@ -187,3 +187,5 @@ func (m *QueryView) applyBasicHighlighting(text string) string {
 =======
 
 >>>>>>> Stashed changes
+
+>>>>>>> Stashed changes
