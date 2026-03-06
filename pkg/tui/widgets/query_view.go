@@ -182,11 +182,6 @@ func (m *QueryView) applyBasicHighlighting(text string) string {
 	result = commentPattern.ReplaceAllStringFunc(result, func(match string) string {
 		return commentStyle.Render(match)
 	})
-}
 
-=======
-
->>>>>>> Stashed changes
-
->>>>>>> Stashed changes
+	return result
 }

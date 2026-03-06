@@ -1,5 +1,10 @@
-	"regexp/syntax"
->>>>>>> Stashed changes
+package timezone
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"sort"
@@ -8,25 +13,9 @@
 	_ "time/tzdata"
 	"unicode/utf8"
 
-	"github.com/rs/zerolog/log"
-<<<<<<< Updated upstream
 	"regexp/syntax"
-=======
-	"regexp/syntax"
->>>>>>> Stashed changes
-	"runtime"
-	"slices"
-	"sort"
-	"strings"
-	"time"
-	_ "time/tzdata"
-	"unicode/utf8"
 
 	"github.com/rs/zerolog/log"
-<<<<<<< Updated upstream
-	"regexp/syntax"
-=======
->>>>>>> Stashed changes
 )
 
 var zoneDirs = map[string]string{
