@@ -83,7 +83,11 @@ func Stop(pprofPath string) {
 		log.Error().Err(err).Str("path", memFile).Msg("Could not create memory profile file")
 		return
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			log.Error().Err(closeErr).Str("path", memFile).Msg("Could not close memory profile file")
+		}
+	}()
 
 	runtime.GC() // Get up-to-date statistics
 	if err := pprof.WriteHeapProfile(f); err != nil {
@@ -109,7 +113,11 @@ func startMemoryProfiling(pprofPath string) error {
 
 	// Start goroutine for continuous memory profiling
 	go func() {
-		defer memProfileFile.Close()
+		defer func() {
+			if closeErr := memProfileFile.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("Failed to close memory profile file")
+			}
+		}()
 
 		for {
 			select {
@@ -120,7 +128,9 @@ func startMemoryProfiling(pprofPath string) error {
 					log.Error().Err(err).Msg("Failed to write memory profile sample")
 				}
 				// Add separator for multiple samples in same file
-				memProfileFile.WriteString("\n--- Memory Sample ---\n")
+				if _, writeErr := memProfileFile.WriteString("\n--- Memory Sample ---\n"); writeErr != nil {
+					log.Error().Err(writeErr).Msg("Failed to write memory profile separator")
+				}
 
 			case <-memProfileDone:
 				return
@@ -141,7 +151,9 @@ func stopMemoryProfiling() {
 		close(memProfileDone)
 	}
 	if memProfileFile != nil {
-		memProfileFile.Close()
+		if closeErr := memProfileFile.Close(); closeErr != nil {
+			log.Error().Err(closeErr).Msg("Failed to close memory profile file")
+		}
 	}
 	log.Info().Msg("Continuous memory profiling stopped")
 }
