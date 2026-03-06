@@ -6,10 +6,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/alecthomas/chroma/v2/quick"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/alecthomas/chroma/v2/quick"
 )
 
 // QueryView is a bubbletea model for displaying SQL queries with syntax highlighting
@@ -191,29 +191,29 @@ func (m *QueryView) applyBasicHighlighting(text string) string {
 // map256ToColor maps a 256-color palette index to a lipgloss color
 func map256ToColor(n int) string {
 	switch {
-	case n >= 196:
-		return "196" // red
-	case n >= 160:
-		return "160" // darkred
-	case n >= 129 && n < 160:
-		return "135" // purple
-	case n >= 93 && n < 129:
-		return "99" // purple
-	case n >= 81 && n < 93:
-		return "75" // blue
-	case n >= 46 && n < 81:
-		return "70" // green
 	case n >= 34 && n < 46:
 		return "28" // darkgreen
-	case n >= 226 && n < 231:
-		return "226" // yellow
-	case n >= 220 && n < 226:
-		return "220" // yellow
+	case n >= 46 && n < 81:
+		return "70" // green
+	case n >= 81 && n < 93:
+		return "75" // blue
+	case n >= 93 && n < 118:
+		return "99" // purple
+	case n >= 118 && n < 129:
+		return "118" // green
+	case n >= 129 && n < 160:
+		return "135" // purple
+	case n >= 160 && n < 196:
+		return "160" // darkred
+	case n >= 196 && n < 208:
+		return "196" // red
 	case n >= 208 && n < 220:
 		return "214" // orange
-	case n >= 118 && n < 160:
-		return "118" // green
-	case n >= 249 && n <= 255:
+	case n >= 220 && n < 226:
+		return "220" // yellow
+	case n >= 226 && n < 249:
+		return "226" // yellow
+	case n >= 249 && n < 255:
 		return "250" // gray
 	default:
 		return "255" // white
