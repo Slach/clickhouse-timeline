@@ -43,7 +43,7 @@ type ProfileEventsDataMsg struct {
 // profileEventsViewer is a bubbletea model for profile events display
 type profileEventsViewer struct {
 	table     widgets.FilteredTable
-	queryView widgets.QueryView
+	queryView *widgets.QueryView
 	loading   bool
 	err       error
 	width     int
@@ -126,6 +126,7 @@ func (m profileEventsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	var cmd tea.Cmd
 	m.queryView, cmd = m.queryView.Update(msg)
 	cmds = append(cmds, cmd)
 
