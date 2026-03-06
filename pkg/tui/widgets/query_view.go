@@ -1,9 +1,7 @@
 package widgets
 
 import (
-	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/viewport"
