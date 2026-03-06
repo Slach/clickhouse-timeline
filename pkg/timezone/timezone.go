@@ -2,11 +2,9 @@ package timezone
 
 import (
 	"fmt"
-	"github.com/rs/zerolog/log"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp/syntax"
 	"runtime"
 	"slices"
 	"sort"
@@ -14,6 +12,9 @@ import (
 	"time"
 	_ "time/tzdata"
 	"unicode/utf8"
+
+	"github.com/rs/zerolog/log"
+	"regexp/syntax"
 )
 
 var zoneDirs = map[string]string{
