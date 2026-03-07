@@ -3886,9 +3886,8 @@ func (m logsViewer) generateSparklineForLevels() string {
 				Int("len", func() int {
 					if values != nil {
 						return len(values)
-					} else {
-						return -1
 					}
+					return -1
 				}()).
 				Msg(">>> Skipping level - no data")
 			continue
