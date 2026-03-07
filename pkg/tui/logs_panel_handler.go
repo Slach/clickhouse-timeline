@@ -1300,7 +1300,11 @@ func (m *logsConfigForm) loadDatabases() tea.Cmd {
 		if err != nil {
 			return DatabasesLoadedMsg{Err: err}
 		}
-		defer rows.Close()
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("error closing rows")
+			}
+		}()
 
 		var databases []string
 		for rows.Next() {
@@ -1327,7 +1331,11 @@ func (m *logsConfigForm) loadTables() tea.Cmd {
 		if err != nil {
 			return TablesLoadedMsg{Err: err}
 		}
-		defer rows.Close()
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("error closing rows")
+			}
+		}()
 
 		var tables []string
 		for rows.Next() {
@@ -1357,7 +1365,11 @@ func (m *logsConfigForm) loadColumns() tea.Cmd {
 		if err != nil {
 			return ColumnsLoadedMsg{Err: err}
 		}
-		defer rows.Close()
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Error().Err(closeErr).Msg("error closing rows")
+			}
+		}()
 
 		var allFields, timeFields, timeMsFields, dateFields, textFields []string
 		fieldTypes := make(map[string]string)
