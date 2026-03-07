@@ -527,10 +527,10 @@ func (m *logsConfigForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.loading = true
 				m.loadingWhat = "tables"
 				return m, m.loadTables()
-			} else {
-				// User explicitly selected - auto-load tables
-				return m, m.loadTables()
 			}
+
+			// User explicitly selected - autoload tables
+			return m, m.loadTables()
 		}
 		return m, nil
 
@@ -558,10 +558,10 @@ func (m *logsConfigForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.loading = true
 				m.loadingWhat = "columns"
 				return m, m.loadColumns()
-			} else {
-				// User explicitly selected - auto-load columns
-				return m, m.loadColumns()
 			}
+
+			// User explicitly selected - autoload columns
+			return m, m.loadColumns()
 		}
 		return m, nil
 
@@ -1400,7 +1400,7 @@ func (m *logsConfigForm) loadColumns() tea.Cmd {
 	}
 }
 
-// Message types for async operations
+// DatabasesLoadedMsg Message types for async operations
 type DatabasesLoadedMsg struct {
 	Databases []string
 	Err       error
