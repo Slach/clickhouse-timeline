@@ -2839,7 +2839,7 @@ func (m logsViewer) handleOverviewKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Get available levels for navigation
 	priorityLevels := []string{"error", "warning", "info", "debug"}
-	availableLevels := []string{}
+	var availableLevels []string
 	for _, level := range priorityLevels {
 		if values, exists := m.levelTimeSeries[level]; exists && len(values) > 0 {
 			availableLevels = append(availableLevels, level)
@@ -3805,7 +3805,7 @@ func (m logsViewer) renderOverview() string {
 		if m.focusOverview && m.selectedBucket >= 0 && m.selectedBucket < len(m.timeLabels) {
 			// Get available levels
 			priorityLevels := []string{"error", "warning", "info", "debug"}
-			availableLevels := []string{}
+			var availableLevels []string
 			for _, level := range priorityLevels {
 				if values, exists := m.levelTimeSeries[level]; exists && len(values) > 0 {
 					availableLevels = append(availableLevels, level)
