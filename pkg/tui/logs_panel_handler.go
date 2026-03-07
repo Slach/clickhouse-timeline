@@ -3791,7 +3791,7 @@ func (m logsViewer) renderOverview() string {
 	}
 
 	// Add sparkline visualization below the bar
-	sparklineData := m.generateSparklineForLevels(sortedLevels)
+	sparklineData := m.generateSparklineForLevels()
 	if sparklineData != "" {
 		builder.WriteString("\n")
 		builder.WriteString("Timeline:\n")
@@ -3841,7 +3841,7 @@ func (m logsViewer) renderOverview() string {
 }
 
 // generateSparklineForLevels creates a multi-row sparkline showing level distribution over time
-func (m logsViewer) generateSparklineForLevels(sortedLevels []logLevelCount) string {
+func (m logsViewer) generateSparklineForLevels() string {
 	if len(m.levelTimeSeries) == 0 {
 		return ""
 	}
