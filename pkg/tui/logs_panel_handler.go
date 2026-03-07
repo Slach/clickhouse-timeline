@@ -1617,7 +1617,7 @@ func newLogsViewer(config LogConfig, width, height int) logsViewer {
 	}
 }
 
-func (m logsViewer) Init() tea.Cmd {
+func (m *logsViewer) Init() tea.Cmd {
 	return nil
 }
 
@@ -1882,7 +1882,7 @@ func getLogLevelColor(level string) color.Color {
 	}
 }
 
-func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
@@ -3075,7 +3075,7 @@ func (m logsViewer) resetZoom() (tea.Model, tea.Cmd) {
 	return m, m.app.fetchLogsDataCmd(m.config, 0, m.rootFilter)
 }
 
-func (m logsViewer) View() tea.View {
+func (m *logsViewer) View() tea.View {
 	if m.loading {
 		return tea.NewView("Loading logs, please wait...")
 	}
@@ -3255,7 +3255,7 @@ func (m logsViewer) View() tea.View {
 	return tea.NewView(content)
 }
 
-func (m logsViewer) renderFilterForm() string {
+func (m *logsViewer) renderFilterForm() string {
 	if !m.showFilterForm {
 		return ""
 	}
@@ -3384,7 +3384,7 @@ func (m logsViewer) renderFilterForm() string {
 }
 
 // renderFilterFormModal renders the filter form as a centered modal dialog
-func (m logsViewer) renderFilterFormModal() string {
+func (m *logsViewer) renderFilterFormModal() string {
 	if !m.showFilterForm {
 		return ""
 	}
@@ -3421,7 +3421,7 @@ func (m logsViewer) renderFilterFormModal() string {
 }
 
 // renderFilterNode renders a single node in the filter tree recursively
-func (m logsViewer) renderFilterNode(node *FilterNode, depth int, path []int) string {
+func (m *logsViewer) renderFilterNode(node *FilterNode, depth int, path []int) string {
 	indent := strings.Repeat("    ", depth)
 	var result strings.Builder
 	isSelected := pathEqual(path, m.selectedPath) && m.filterMode == "tree"
@@ -3509,7 +3509,7 @@ func (m logsViewer) renderFilterNode(node *FilterNode, depth int, path []int) st
 }
 
 // renderFieldDropdown renders the field dropdown options
-func (m logsViewer) renderFieldDropdown() string {
+func (m *logsViewer) renderFieldDropdown() string {
 	var builder strings.Builder
 	maxVisible := 10
 	total := len(m.filterFieldDD.filtered)
@@ -3568,7 +3568,7 @@ func (m logsViewer) renderFieldDropdown() string {
 }
 
 // renderOperatorDropdown renders the operator dropdown options
-func (m logsViewer) renderOperatorDropdown() string {
+func (m *logsViewer) renderOperatorDropdown() string {
 	var builder strings.Builder
 	builder.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("Operators: "))
 	for i, opt := range m.filterOperatorDD.filtered {
@@ -3586,7 +3586,7 @@ func (m logsViewer) renderOperatorDropdown() string {
 }
 
 // renderFilterSummary renders a compact one-line summary of active filters
-func (m logsViewer) renderFilterSummary() string {
+func (m *logsViewer) renderFilterSummary() string {
 	totalFilters := m.getTotalFilterCount()
 	if totalFilters == 0 {
 		return ""
@@ -3612,7 +3612,7 @@ func (m logsViewer) renderFilterSummary() string {
 }
 
 // renderNodeSummary renders a compact summary of a filter node
-func (m logsViewer) renderNodeSummary(node *FilterNode) string {
+func (m *logsViewer) renderNodeSummary(node *FilterNode) string {
 	filterStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11"))    // Yellow
 	combinatorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6")) // Cyan
 
@@ -3681,7 +3681,7 @@ func (m logsViewer) renderNodeSummary(node *FilterNode) string {
 	return result
 }
 
-func (m logsViewer) renderOverview() string {
+func (m *logsViewer) renderOverview() string {
 	if m.totalRows == 0 {
 		return "No log entries to display"
 	}
@@ -3841,7 +3841,7 @@ func (m logsViewer) renderOverview() string {
 }
 
 // generateSparklineForLevels creates a multi-row sparkline showing level distribution over time
-func (m logsViewer) generateSparklineForLevels() string {
+func (m *logsViewer) generateSparklineForLevels() string {
 	if len(m.levelTimeSeries) == 0 {
 		return ""
 	}
@@ -3976,7 +3976,7 @@ func (m logsViewer) generateSparklineForLevels() string {
 
 // generateSparklineChars converts values to sparkline characters
 // Zero values are rendered as spaces to show sparse data gaps
-func (m logsViewer) generateSparklineChars(values []float64) []rune {
+func (m *logsViewer) generateSparklineChars(values []float64) []rune {
 	if len(values) == 0 {
 		return []rune{}
 	}
@@ -4072,7 +4072,7 @@ func formatFieldValue(value interface{}) string {
 	}
 }
 
-func (m logsViewer) renderDetails() string {
+func (m *logsViewer) renderDetails() string {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
 	selectedLabelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("11"))
@@ -4191,10 +4191,7 @@ func (m logsViewer) renderDetails() string {
 
 // detailsContentMetrics calculates the line number of the selected field
 // and total content lines in the details view, without building the content string.
-// This is needed because renderDetails() is a value receiver, so SetContent on the
-// viewport only affects a copy - the real model's viewport never knows its content,
-// making TotalLineCount() and SetYOffset clamping unreliable.
-func (m logsViewer) detailsContentMetrics() (selectedLine int, totalLines int) {
+func (m *logsViewer) detailsContentMetrics() (selectedLine int, totalLines int) {
 	viewportWidth := m.detailsViewport.Width()
 	hasLevel := m.selectedEntry.Level != ""
 	line := 0 // title is outside viewport now; content starts at line 0
@@ -4248,12 +4245,12 @@ func (m logsViewer) detailsContentMetrics() (selectedLine int, totalLines int) {
 }
 
 // IsTableFiltering returns true if the table is currently in filter mode
-func (m logsViewer) IsTableFiltering() bool {
+func (m *logsViewer) IsTableFiltering() bool {
 	return m.table.IsFiltering()
 }
 
 // renderMainHelpLine renders the bottom help line with context-aware shortcuts
-func (m logsViewer) renderMainHelpLine() string {
+func (m *logsViewer) renderMainHelpLine() string {
 	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // Gray
 
 	if m.showFilterForm {
@@ -4266,7 +4263,7 @@ func (m logsViewer) renderMainHelpLine() string {
 }
 
 // renderZoomMenu renders the zoom action menu
-func (m logsViewer) renderZoomMenu() string {
+func (m *logsViewer) renderZoomMenu() string {
 	if !m.showZoomMenu {
 		return ""
 	}
