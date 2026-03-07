@@ -2348,7 +2348,7 @@ func (m *logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // handleFilterFormKey handles key events when filter form is active
-func (m logsViewer) handleFilterFormKey(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *logsViewer) handleFilterFormKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 	keyMsg, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return m, nil
@@ -2619,7 +2619,7 @@ func (m logsViewer) handleFilterFormKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // handleLogicDropdownKey handles key events when logic dropdown is shown
-func (m logsViewer) handleLogicDropdownKey(keyMsg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m *logsViewer) handleLogicDropdownKey(keyMsg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	logicOptions := []string{"AND", "OR", "NOT AND", "NOT OR"}
 
 	switch keyMsg.String() {
@@ -2667,7 +2667,7 @@ func (m logsViewer) handleLogicDropdownKey(keyMsg tea.KeyPressMsg) (tea.Model, t
 }
 
 // handleEditModeKey handles key events when editing a condition
-func (m logsViewer) handleEditModeKey(keyMsg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m *logsViewer) handleEditModeKey(keyMsg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch keyMsg.String() {
@@ -2831,7 +2831,7 @@ func (m *logsViewer) focusCurrentFilterField() {
 }
 
 // handleOverviewKey handles key events when in overview/sparkline navigation mode
-func (m logsViewer) handleOverviewKey(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *logsViewer) handleOverviewKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 	keyMsg, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return m, nil
@@ -2916,7 +2916,7 @@ func (m logsViewer) handleOverviewKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // handleZoomMenuKey handles key events when zoom menu is shown
-func (m logsViewer) handleZoomMenuKey(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *logsViewer) handleZoomMenuKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 	keyMsg, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return m, nil
@@ -2951,7 +2951,7 @@ func (m logsViewer) handleZoomMenuKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // executeZoomAction performs the selected zoom menu action
-func (m logsViewer) executeZoomAction() (tea.Model, tea.Cmd) {
+func (m *logsViewer) executeZoomAction() (tea.Model, tea.Cmd) {
 	m.showZoomMenu = false
 
 	switch m.zoomMenuIdx {
@@ -2969,7 +2969,7 @@ func (m logsViewer) executeZoomAction() (tea.Model, tea.Cmd) {
 }
 
 // zoomToBucket zooms into the selected time bucket
-func (m logsViewer) zoomToBucket() (tea.Model, tea.Cmd) {
+func (m *logsViewer) zoomToBucket() (tea.Model, tea.Cmd) {
 	if m.app == nil || m.bucketInterval == 0 || m.selectedBucket < 0 {
 		return m, nil
 	}
@@ -3014,7 +3014,7 @@ func (m logsViewer) zoomToBucket() (tea.Model, tea.Cmd) {
 }
 
 // zoomOut restores the previous time range from zoom stack
-func (m logsViewer) zoomOut() (tea.Model, tea.Cmd) {
+func (m *logsViewer) zoomOut() (tea.Model, tea.Cmd) {
 	if m.app == nil || len(m.zoomStack) == 0 {
 		return m, nil
 	}
@@ -3046,7 +3046,7 @@ func (m logsViewer) zoomOut() (tea.Model, tea.Cmd) {
 }
 
 // resetZoom resets to the original time range
-func (m logsViewer) resetZoom() (tea.Model, tea.Cmd) {
+func (m *logsViewer) resetZoom() (tea.Model, tea.Cmd) {
 	if m.app == nil || m.originalRange.from.IsZero() {
 		return m, nil
 	}
@@ -4501,7 +4501,7 @@ func (a *App) ShowLogsViewer(config LogConfig) tea.Cmd {
 		viewer.filterFieldDD.SetOptions(viewer.allFields)
 	}
 
-	a.logsHandler = viewer
+	a.logsHandler = &viewer
 	a.currentPage = pageLogs
 
 	// Start async data fetch only if we have valid dimensions
