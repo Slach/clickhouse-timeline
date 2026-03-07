@@ -4593,7 +4593,7 @@ func (a *App) fetchLogsDataCmd(config LogConfig, offset int, rootFilter *FilterN
 		}
 		defer func() {
 			if closeErr := rows.Close(); closeErr != nil {
-				log.Error().Err(closeErr).Msg("can't close logs query")
+				log.Error().Err(closeErr).Msg("error closing rows")
 			}
 		}()
 
@@ -4775,7 +4775,7 @@ func (a *App) fetchOverviewDataCmd(config LogConfig, startTime, endTime time.Tim
 		}
 		defer func() {
 			if closeErr := rows.Close(); closeErr != nil {
-				log.Error().Err(closeErr).Msg("can't close overview query")
+				log.Error().Err(closeErr).Msg("error closing rows")
 			}
 		}()
 
@@ -4927,7 +4927,7 @@ func (a *App) fetchTimeSeriesData(config LogConfig, startTime, endTime time.Time
 	}
 	defer func() {
 		if closeErr := rows.Close(); closeErr != nil {
-			log.Error().Err(closeErr).Msg("can't close time-series query")
+			log.Error().Err(closeErr).Msg("error closing rows")
 		}
 	}()
 
