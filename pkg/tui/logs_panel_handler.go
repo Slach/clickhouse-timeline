@@ -3931,7 +3931,7 @@ func (m *logsViewer) generateSparklineForLevels() string {
 			Msg(">>> Generated sparkline for level")
 
 		// Apply color based on level
-		color := getLogLevelColor(level)
+		levelColor := getLogLevelColor(level)
 
 		// Build sparkline with individual character styling for cursor
 		var styledSparkline strings.Builder
@@ -3945,12 +3945,12 @@ func (m *logsViewer) generateSparklineForLevels() string {
 				// Swap foreground and background for clean inline cursor
 				highlightStyle := lipgloss.NewStyle().
 					Foreground(lipgloss.Color("0")). // Black foreground
-					Background(color).               // Use level color as background
+					Background(levelColor).               // Use level color as background
 					Bold(true)
 				styledSparkline.WriteString(highlightStyle.Render(string(char)))
 			} else {
 				// Normal style
-				normalStyle := lipgloss.NewStyle().Foreground(color)
+				normalStyle := lipgloss.NewStyle().Foreground(levelColor)
 				styledSparkline.WriteString(normalStyle.Render(string(char)))
 			}
 		}
