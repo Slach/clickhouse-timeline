@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/Slach/clickhouse-timeline/pkg/tui/widgets"
 	"github.com/rs/zerolog/log"
 )
 
@@ -1480,28 +1480,28 @@ type timeRange struct {
 
 // logsViewer is the main log viewer
 type logsViewer struct {
-	config          LogConfig
-	table           widgets.FilteredTable
-	entries         []LogEntry
-	firstEntryTime  time.Time
-	lastEntryTime   time.Time
-	totalRows       int
-	levelCounts     map[string]int
-	levelTimeSeries map[string][]float64 // Time-bucketed counts per level for sparkline
-	timeLabels      []string             // Time labels for buckets
-	bucketInterval  int                  // Seconds per bucket
-	loading         bool
-	err             error
-	width                   int
-	height                  int
-	tableHeight             int // Current table height
-	measuredWidgetOverhead  int // Measured overhead: actual rendered lines - allocated height
-	showDetails             bool
-	selectedEntry           LogEntry
-	detailsSelectedIdx      int      // Selected field index in details view (-1 = none, 0-2 = fixed fields, 3+ = AllFields)
-	detailsFieldNames       []string // Cached sorted field names for details view
-	offset                  int  // Current offset for pagination
-	app                     *App // Reference to app for triggering data loads
+	config                 LogConfig
+	table                  widgets.FilteredTable
+	entries                []LogEntry
+	firstEntryTime         time.Time
+	lastEntryTime          time.Time
+	totalRows              int
+	levelCounts            map[string]int
+	levelTimeSeries        map[string][]float64 // Time-bucketed counts per level for sparkline
+	timeLabels             []string             // Time labels for buckets
+	bucketInterval         int                  // Seconds per bucket
+	loading                bool
+	err                    error
+	width                  int
+	height                 int
+	tableHeight            int // Current table height
+	measuredWidgetOverhead int // Measured overhead: actual rendered lines - allocated height
+	showDetails            bool
+	selectedEntry          LogEntry
+	detailsSelectedIdx     int      // Selected field index in details view (-1 = none, 0-2 = fixed fields, 3+ = AllFields)
+	detailsFieldNames      []string // Cached sorted field names for details view
+	offset                 int      // Current offset for pagination
+	app                    *App     // Reference to app for triggering data loads
 
 	// Interactive sparkline navigation
 	overviewMode   bool        // true = overview visible, false = hidden
@@ -1603,7 +1603,7 @@ func newLogsViewer(config LogConfig, width, height int) logsViewer {
 		width:                  width,
 		height:                 height,
 		tableHeight:            initialTableHeight,
-		measuredWidgetOverhead: 2, // Initial guess, will be measured after first render
+		measuredWidgetOverhead: 2,    // Initial guess, will be measured after first render
 		overviewMode:           true, // Show overview by default
 		showFilterForm:         false,
 		rootFilter:             rootFilter,
@@ -1949,7 +1949,7 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// This handles the case where ShowLogsViewer was called before WindowSizeMsg
 		if m.totalRows == 0 && !m.loading && m.app != nil {
 			m.loading = true
-			return m, m.app.fetchLogsDataCmd(m.config, 0, m.rootFilter, m.width)
+			return m, m.app.fetchLogsDataCmd(m.config, 0, m.rootFilter)
 		}
 
 		return m, nil
@@ -1981,10 +1981,10 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			messageStyled := lipgloss.NewStyle().Foreground(messageColor).Render(entry.Message)
 
 			rowData := widgets.RowData{
-				"time":         timeStr,
-				"message":      messageStyled,
-				"_plain_msg":   entry.Message, // Store plain message for matching
-				"_level":       entry.Level,   // Store level for matching
+				"time":       timeStr,
+				"message":    messageStyled,
+				"_plain_msg": entry.Message, // Store plain message for matching
+				"_level":     entry.Level,   // Store level for matching
 			}
 
 			rows = append(rows, widgets.NewRow(rowData))
@@ -2293,7 +2293,7 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.selectedEntry = entry
 						m.showDetails = true
 						// Initialize details navigation
-						m.detailsSelectedIdx = 0 // Start with Time field selected
+						m.detailsSelectedIdx = 0        // Start with Time field selected
 						m.detailsViewport.SetYOffset(0) // Reset scroll position
 						// Cache sorted field names for navigation
 						m.detailsFieldNames = make([]string, 0, len(entry.AllFields))
@@ -2322,7 +2322,7 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				log.Debug().
 					Int("new_offset", newOffset).
 					Msg("Loading next window (Ctrl+N)")
-				return m, m.app.fetchLogsDataCmd(m.config, newOffset, m.rootFilter, m.width)
+				return m, m.app.fetchLogsDataCmd(m.config, newOffset, m.rootFilter)
 			}
 			return m, nil
 		case "ctrl+p":
@@ -2337,7 +2337,7 @@ func (m logsViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				log.Debug().
 					Int("new_offset", newOffset).
 					Msg("Loading previous window (Ctrl+P)")
-				return m, m.app.fetchLogsDataCmd(m.config, newOffset, m.rootFilter, m.width)
+				return m, m.app.fetchLogsDataCmd(m.config, newOffset, m.rootFilter)
 			}
 			return m, nil
 		}
@@ -2479,7 +2479,7 @@ func (m logsViewer) handleFilterFormKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 					sparklineWidth = 40
 				}
 				return m, tea.Batch(
-					m.app.fetchLogsDataCmd(m.config, 0, m.rootFilter, m.width),
+					m.app.fetchLogsDataCmd(m.config, 0, m.rootFilter),
 					m.app.fetchOverviewDataCmd(m.config, m.app.state.FromTime, m.app.state.ToTime, sparklineWidth, m.rootFilter),
 				)
 			}
@@ -2608,7 +2608,7 @@ func (m logsViewer) handleFilterFormKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Fetch both logs data and overview data with filters
 			return m, tea.Batch(
-				m.app.fetchLogsDataCmd(m.config, 0, m.rootFilter, m.width),
+				m.app.fetchLogsDataCmd(m.config, 0, m.rootFilter),
 				m.app.fetchOverviewDataCmd(m.config, m.app.state.FromTime, m.app.state.ToTime, sparklineWidth, m.rootFilter),
 			)
 		}
@@ -3010,7 +3010,7 @@ func (m logsViewer) zoomToBucket() (tea.Model, tea.Cmd) {
 	m.loading = true
 
 	// Fetch new data for the zoomed time range
-	return m, m.app.fetchLogsDataCmd(m.config, 0, m.rootFilter, m.width)
+	return m, m.app.fetchLogsDataCmd(m.config, 0, m.rootFilter)
 }
 
 // zoomOut restores the previous time range from zoom stack
@@ -3042,7 +3042,7 @@ func (m logsViewer) zoomOut() (tea.Model, tea.Cmd) {
 	m.loading = true
 
 	// Fetch new data for the restored time range
-	return m, m.app.fetchLogsDataCmd(m.config, 0, m.rootFilter, m.width)
+	return m, m.app.fetchLogsDataCmd(m.config, 0, m.rootFilter)
 }
 
 // resetZoom resets to the original time range
@@ -3072,7 +3072,7 @@ func (m logsViewer) resetZoom() (tea.Model, tea.Cmd) {
 	m.loading = true
 
 	// Fetch new data for the original time range
-	return m, m.app.fetchLogsDataCmd(m.config, 0, m.rootFilter, m.width)
+	return m, m.app.fetchLogsDataCmd(m.config, 0, m.rootFilter)
 }
 
 func (m logsViewer) View() tea.View {
@@ -3883,7 +3883,13 @@ func (m logsViewer) generateSparklineForLevels() string {
 			log.Debug().
 				Str("level", level).
 				Bool("exists", exists).
-				Int("len", func() int { if values != nil { return len(values) } else { return -1 } }()).
+				Int("len", func() int {
+					if values != nil {
+						return len(values)
+					} else {
+						return -1
+					}
+				}()).
 				Msg(">>> Skipping level - no data")
 			continue
 		}
@@ -3939,8 +3945,8 @@ func (m logsViewer) generateSparklineForLevels() string {
 				// Highlight selected bucket with inverted colors
 				// Swap foreground and background for clean inline cursor
 				highlightStyle := lipgloss.NewStyle().
-					Foreground(lipgloss.Color("0")).      // Black foreground
-					Background(color).                     // Use level color as background
+					Foreground(lipgloss.Color("0")). // Black foreground
+					Background(color).               // Use level color as background
 					Bold(true)
 				styledSparkline.WriteString(highlightStyle.Render(string(char)))
 			} else {
@@ -4507,13 +4513,13 @@ func (a *App) ShowLogsViewer(config LogConfig) tea.Cmd {
 	// when LogsDataMsg is received after window size is set
 	if a.width > 0 {
 		// Use the viewer's root filter (empty by default)
-		return a.fetchLogsDataCmd(config, 0, viewer.rootFilter, a.width)
+		return a.fetchLogsDataCmd(config, 0, viewer.rootFilter)
 	}
 	return nil
 }
 
 // fetchLogsDataCmd fetches log data from ClickHouse
-func (a *App) fetchLogsDataCmd(config LogConfig, offset int, rootFilter *FilterNode, viewerWidth int) tea.Cmd {
+func (a *App) fetchLogsDataCmd(config LogConfig, offset int, rootFilter *FilterNode) tea.Cmd {
 	return func() tea.Msg {
 		// Build query - select all fields (*)
 		queryBuilder := fmt.Sprintf(
@@ -4969,7 +4975,7 @@ func (a *App) fetchTimeSeriesData(config LogConfig, startTime, endTime time.Time
 			levelBucketCounts[levelLower] = make(map[int64]float64)
 		}
 		levelBucketCounts[levelLower][bucketTs] = count
-		allBucketTimestamps[bucketTs] = true  // Track all unique timestamps
+		allBucketTimestamps[bucketTs] = true // Track all unique timestamps
 	}
 
 	// Convert unique timestamps to sorted slice - these are the ACTUAL buckets from the query
