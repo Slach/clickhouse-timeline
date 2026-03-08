@@ -543,7 +543,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case ":":
 			// Don't intercept ':' if logs table is in filter mode
 			if a.currentPage == pageLogs && a.logsHandler != nil {
-				if lv, ok := a.logsHandler.(logsViewer); ok {
+				if lv, ok := a.logsHandler.(*logsViewer); ok {
 					if lv.IsTableFiltering() {
 						// Pass through to logs handler - user is typing filter text
 						break
