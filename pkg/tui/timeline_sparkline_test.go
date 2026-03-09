@@ -55,7 +55,7 @@ func TestTimelineSparklineGeneration(t *testing.T) {
 				width:           160,
 			}
 
-			result := viewer.generateSparklineForLevels(nil)
+			result := viewer.generateSparklineForLevels()
 
 			if tc.expectedRows == 0 {
 				if result != "" {
@@ -98,7 +98,7 @@ func TestTimelineSparklineColorCoding(t *testing.T) {
 		width: 160,
 	}
 
-	result := viewer.generateSparklineForLevels(nil)
+	result := viewer.generateSparklineForLevels()
 
 	// Check that all expected level labels are present
 	expectedLabels := []string{"ERROR", "WARNING", "INFO", "DEBUG"}
@@ -137,7 +137,7 @@ func TestTimelineSparklineMaxRows(t *testing.T) {
 		width: 160,
 	}
 
-	result := viewer.generateSparklineForLevels(nil)
+	result := viewer.generateSparklineForLevels()
 
 	// Count rows
 	rows := 1
