@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	charm.land/bubbles/v2 v2.0.0
-	charm.land/bubbletea/v2 v2.0.1
+	charm.land/bubbletea/v2 v2.0.2
 	charm.land/lipgloss/v2 v2.0.0
 	github.com/ClickHouse/clickhouse-go/v2 v2.43.0
 	github.com/alecthomas/chroma/v2 v2.23.1
