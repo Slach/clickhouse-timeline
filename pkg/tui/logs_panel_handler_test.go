@@ -488,3 +488,510 @@ func TestLogsPanelEnterKeyNilChecks(t *testing.T) {
 		})
 	}
 }
+
+// TestDropdown tests the dropdown component functionality
+func TestDropdown(t *testing.T) {
+	t.Run("newDropdown creates dropdown with correct initial state", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			label    string
+			width    int
+			required bool
+		}{
+			{"required dropdown", "Field Name", 30, true},
+			{"optional dropdown", "Optional Field", 25, false},
+			{"empty label", "", 20, false},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				d := newDropdown(tt.label, tt.width, tt.required)
+
+				assert.Equal(t, tt.label, d.label, "Label should match input")
+				assert.Equal(t, tt.required, d.required, "Required flag should match input")
+				assert.False(t, d.showOptions, "showOptions should be false initially")
+				assert.Equal(t, 0, d.selected, "selected should be 0 initially")
+				assert.Empty(t, d.value, "value should be empty initially")
+				assert.Empty(t, d.options, "options should be empty initially")
+				assert.Empty(t, d.filtered, "filtered should be empty initially")
+				assert.Equal(t, "Type to filter...", d.input.Placeholder)
+			})
+		}
+	})
+
+	t.Run("SetOptions sets options and updates filtered list", func(t *testing.T) {
+		tests := []struct {
+			name          string
+			options       []string
+			initialValue  string
+			expectedValue string
+		}{
+			{
+				name:          "non-empty options with empty value",
+				options:       []string{"option1", "option2", "option3"},
+				initialValue:  "",
+				expectedValue: "option1",
+			},
+			{
+				name:          "single option",
+				options:       []string{"only_option"},
+				initialValue:  "",
+				expectedValue: "option1", // First option is selected
+			},
+			{
+				name:          "empty options",
+				options:       []string{},
+				initialValue:  "",
+				expectedValue: "",
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				d := newDropdown("Test", 20, false)
+				if tt.initialValue != "" {
+					d.value = tt.initialValue
+				}
+
+				d.SetOptions(tt.options)
+
+				assert.Equal(t, tt.options, d.options, "options should match input")
+				assert.Equal(t, tt.options, d.filtered, "filtered should match options initially")
+
+				if len(tt.options) > 0 && tt.initialValue == "" {
+					assert.Equal(t, tt.expectedValue, d.value, "value should be set to first option when empty")
+					assert.Equal(t, 0, d.selected, "selected should be 0 for first option")
+				} else if len(tt.options) == 0 {
+					assert.Empty(t, d.value, "value should remain empty for empty options")
+				}
+			})
+		}
+
+		t.Run("SetOptions preserves existing value and updates selected index", func(t *testing.T) {
+			d := newDropdown("Test", 20, false)
+			d.value = "option2"
+
+			options := []string{"option1", "option2", "option3"}
+			d.SetOptions(options)
+
+			assert.Equal(t, "option2", d.value, "value should be preserved")
+			assert.Equal(t, 1, d.selected, "selected should point to 'option2' at index 1")
+		})
+
+		t.Run("SetOptions handles value not in filtered list", func(t *testing.T) {
+			d := newDropdown("Test", 20, false)
+			d.value = "nonexistent"
+
+			options := []string{"option1", "option2"}
+			d.SetOptions(options)
+
+			assert.Equal(t, "nonexistent", d.value, "value should be preserved even if not in options")
+			assert.Equal(t, 0, d.selected, "selected should be 0 when value not found")
+		})
+	})
+
+	t.Run("SetValue sets value and updates selected index", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			options  []string
+			value    string
+			expected int // expected selected index, -1 if not found
+		}{
+			{"value at index 0", []string{"a", "b", "c"}, "a", 0},
+			{"value at index 1", []string{"a", "b", "c"}, "b", 1},
+			{"value at last index", []string{"a", "b", "c"}, "c", 2},
+			{"value not in options", []string{"a", "b", "c"}, "x", -1},
+			{"empty value", []string{"a", "b", "c"}, "", -1},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				d := newDropdown("Test", 20, false)
+				d.SetOptions(tt.options)
+
+				d.SetValue(tt.value)
+
+				assert.Equal(t, tt.value, d.value, "value should match input")
+				if tt.expected >= 0 {
+					assert.Equal(t, tt.expected, d.selected, "selected should match expected index")
+				} else {
+					assert.Equal(t, 0, d.selected, "selected should be 0 when value not found")
+				}
+			})
+		}
+
+		t.Run("SetValue updates input value", func(t *testing.T) {
+			d := newDropdown("Test", 20, false)
+			d.SetOptions([]string{"option1", "option2"})
+
+			d.SetValue("option2")
+
+			// Input value should match the set value
+			assert.Equal(t, "option2", d.value)
+		})
+	})
+
+	t.Run("Focus focuses input and shows options", func(t *testing.T) {
+		tests := []struct {
+			name  string
+			value string
+		}{
+			{"with existing value", "option2"},
+			{"without existing value", ""},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				d := newDropdown("Test", 20, false)
+				d.SetOptions([]string{"option1", "option2", "option3"})
+				if tt.value != "" {
+					d.SetValue(tt.value)
+				}
+
+				d.Focus()
+
+				assert.True(t, d.showOptions, "showOptions should be true after Focus")
+			})
+		}
+
+		t.Run("Focus finds current value in filtered options", func(t *testing.T) {
+			d := newDropdown("Test", 20, false)
+			d.SetOptions([]string{"option1", "option2", "option3"})
+			d.SetValue("option2")
+
+			// Simulate filtering that keeps only option1 and option2
+			d.filtered = []string{"option1", "option2"}
+
+			d.Focus()
+
+			assert.Equal(t, 1, d.selected, "selected should be updated to point to current value in filtered list")
+		})
+
+		t.Run("Focus with no matching value defaults to index 0", func(t *testing.T) {
+			d := newDropdown("Test", 20, false)
+			d.SetOptions([]string{"option1", "option2"})
+			d.SetValue("nonexistent")
+
+			// Filter out the value so it's not in filtered list
+			d.filtered = []string{"option1"}
+
+			d.Focus()
+
+			assert.Equal(t, 0, d.selected, "selected should be 0 when value not in filtered list")
+		})
+	})
+
+	t.Run("Blur blurs input and confirms selection", func(t *testing.T) {
+		tests := []struct {
+			name           string
+			showOptions    bool
+			filtered       []string
+			selected       int
+			initialValue   string
+			expectedValue  string
+		}{
+			{
+				name:           "dropdown open with selection",
+				showOptions:    true,
+				filtered:       []string{"option1", "option2"},
+				selected:       1,
+				initialValue:   "old_value",
+				expectedValue:  "option2",
+			},
+			{
+				name:           "dropdown closed doesn't change value",
+				showOptions:    false,
+				filtered:       []string{"option1", "option2"},
+				selected:       1,
+				initialValue:   "existing_value",
+				expectedValue:  "existing_value",
+			},
+			{
+				name:           "empty filtered list",
+				showOptions:    true,
+				filtered:       []string{},
+				selected:       0,
+				initialValue:   "existing_value",
+				expectedValue:  "existing_value",
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				d := newDropdown("Test", 20, false)
+				d.showOptions = tt.showOptions
+				d.filtered = tt.filtered
+				d.selected = tt.selected
+				d.value = tt.initialValue
+
+				d.Blur()
+
+				assert.False(t, d.showOptions, "showOptions should be false after Blur")
+				if tt.showOptions && len(tt.filtered) > 0 {
+					assert.Equal(t, tt.expectedValue, d.value, "value should be updated to selected item")
+				} else {
+					assert.Equal(t, tt.expectedValue, d.value, "value should remain unchanged")
+				}
+			})
+		}
+	})
+
+	t.Run("Update handles key events", func(t *testing.T) {
+		t.Run("enter key selects current item and closes dropdown", func(t *testing.T) {
+			d := newDropdown("Test", 20, false)
+			d.SetOptions([]string{"option1", "option2", "option3"})
+			d.showOptions = true
+			d.selected = 1
+
+			msg := tea.KeyPressMsg{String: "enter"}
+			_, handled := d.Update(msg)
+
+			assert.Equal(t, "option2", d.value, "value should be set to selected item")
+			assert.False(t, d.showOptions, "showOptions should be false after enter")
+			assert.True(t, handled, "event should be handled")
+		})
+
+		t.Run("up arrow moves selection up", func(t *testing.T) {
+			d := newDropdown("Test", 20, false)
+			d.SetOptions([]string{"option1", "option2", "option3"})
+			d.showOptions = true
+			d.selected = 2
+
+			msg := tea.KeyPressMsg{String: "up"}
+			_, handled := d.Update(msg)
+
+			assert.Equal(t, 1, d.selected, "selected should move up")
+			assert.True(t, handled, "event should be handled")
+		})
+
+		t.Run("up arrow at top stays at top", func(t *testing.T) {
+			d := newDropdown("Test", 20, false)
+			d.SetOptions([]string{"option1", "option2"})
+			d.showOptions = true
+			d.selected = 0
+
+			msg := tea.KeyPressMsg{String: "up"}
+			_, handled := d.Update(msg)
+
+			assert.Equal(t, 0, d.selected, "selected should stay at 0")
+			assert.True(t, handled, "event should be handled")
+		})
+
+		t.Run("down arrow moves selection down", func(t *testing.T) {
+			d := newDropdown("Test", 20, false)
+			d.SetOptions([]string{"option1", "option2", "option3"})
+			d.showOptions = true
+			d.selected = 0
+
+			msg := tea.KeyPressMsg{String: "down"}
+			_, handled := d.Update(msg)
+
+			assert.Equal(t, 1, d.selected, "selected should move down")
+			assert.True(t, handled, "event should be handled")
+		})
+
+		t.Run("down arrow at bottom stays at bottom", func(t *testing.T) {
+			d := newDropdown("Test", 20, false)
+			d.SetOptions([]string{"option1", "option2"})
+			d.showOptions = true
+			d.selected = 1
+
+			msg := tea.KeyPressMsg{String: "down"}
+			_, handled := d.Update(msg)
+
+			assert.Equal(t, 1, d.selected, "selected should stay at last index")
+			assert.True(t, handled, "event should be handled")
+		})
+
+		t.Run("esc key closes dropdown and restores value", func(t *testing.T) {
+			d := newDropdown("Test", 20, false)
+			d.SetOptions([]string{"option1", "option2"})
+			d.value = "original_value"
+			d.showOptions = true
+			d.selected = 1
+
+			msg := tea.KeyPressMsg{String: "esc"}
+			_, handled := d.Update(msg)
+
+			assert.Equal(t, "original_value", d.value, "value should be restored to original")
+			assert.Equal(t, "original_value", d.input.Value(), "input value should be restored")
+			assert.False(t, d.showOptions, "showOptions should be false after esc")
+			assert.True(t, handled, "event should be handled")
+		})
+
+		t.Run("key events not handled when dropdown closed", func(t *testing.T) {
+			d := newDropdown("Test", 20, false)
+			d.SetOptions([]string{"option1", "option2"})
+			d.showOptions = false
+
+			msg := tea.KeyPressMsg{String: "up"}
+			_, handled := d.Update(msg)
+
+			assert.False(t, handled, "event should not be handled when dropdown is closed")
+		})
+
+		t.Run("enter with empty filtered does nothing", func(t *testing.T) {
+			d := newDropdown("Test", 20, false)
+			d.showOptions = true
+			d.filtered = []string{}
+
+			msg := tea.KeyPressMsg{String: "enter"}
+			_, handled := d.Update(msg)
+
+			assert.False(t, d.showOptions, "showOptions should be false")
+			assert.True(t, handled, "event should be handled")
+		})
+	})
+
+	t.Run("Update handles text filtering", func(t *testing.T) {
+		d := newDropdown("Test", 20, false)
+		d.SetOptions([]string{"Apple", "Banana", "Cherry", "Date"})
+		d.showOptions = true
+
+		// Type 'a' to filter
+		msg := tea.KeyPressMsg{String: "a"}
+		d.Update(msg)
+
+		assert.Equal(t, "a", d.input.Value(), "input should contain typed character")
+		assert.Len(t, d.filtered, 2, "filtered should contain 2 items (Apple, Banana)")
+		assert.Contains(t, d.filtered, "Apple")
+		assert.Contains(t, d.filtered, "Banana")
+	})
+
+	t.Run("Update resets selection when filtering", func(t *testing.T) {
+		d := newDropdown("Test", 20, false)
+		d.SetOptions([]string{"Apple", "Banana", "Cherry"})
+		d.showOptions = true
+		d.selected = 2 // Cherry selected
+
+		// Type 'a' to filter (will only show Apple)
+		msg := tea.KeyPressMsg{String: "a"}
+		d.Update(msg)
+
+		assert.Equal(t, 0, d.selected, "selection should reset to 0 after filtering")
+	})
+
+	t.Run("Update doesn't filter when dropdown closed", func(t *testing.T) {
+		d := newDropdown("Test", 20, false)
+		d.SetOptions([]string{"Apple", "Banana", "Cherry"})
+		d.showOptions = false
+
+		msg := tea.KeyPressMsg{String: "a"}
+		d.Update(msg)
+
+		assert.Len(t, d.filtered, 3, "filtered should not change when dropdown is closed")
+	})
+	})
+
+	t.Run("filterOptions filters options based on text", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			options  []string
+			filter   string
+			expected []string
+		}{
+			{
+				name:     "empty filter returns all options",
+				options:  []string{"a", "b", "c"},
+				filter:   "",
+				expected: []string{"a", "b", "c"},
+			},
+			{
+				name:     "case-insensitive match",
+				options:  []string{"Apple", "Banana", "Cherry"},
+				filter:   "a",
+				expected: []string{"Apple", "Banana"},
+			},
+			{
+				name:     "substring match",
+				options:  []string{"Apple", "Banana", "Cherry"},
+				filter:   "an",
+				expected: []string{"Banana"},
+			},
+			{
+				name:     "no matches returns empty",
+				options:  []string{"Apple", "Banana"},
+				filter:   "xyz",
+				expected: []string{},
+			},
+			{
+				name:     "exact match",
+				options:  []string{"Apple", "Banana"},
+				filter:   "apple",
+				expected: []string{"Apple"},
+			},
+			{
+				name:     "empty options",
+				options:  []string{},
+				filter:   "test",
+				expected: []string{},
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				d := newDropdown("Test", 20, false)
+				d.SetOptions(tt.options)
+
+				d.filterOptions(tt.filter)
+
+				assert.Equal(t, tt.expected, d.filtered, "filtered should match expected")
+			})
+		}
+
+		t.Run("filterOptions preserves original options", func(t *testing.T) {
+			d := newDropdown("Test", 20, false)
+			originalOptions := []string{"Apple", "Banana", "Cherry"}
+			d.SetOptions(originalOptions)
+
+			d.filterOptions("a")
+
+			assert.Equal(t, originalOptions, d.options, "original options should be preserved")
+		})
+	})
+
+	t.Run("Edge cases", func(t *testing.T) {
+		t.Run("SetOptions with nil slice", func(t *testing.T) {
+			d := newDropdown("Test", 20, false)
+
+			// Should not panic
+			d.SetOptions(nil)
+
+			assert.Empty(t, d.options)
+			assert.Empty(t, d.filtered)
+		})
+
+		t.Run("SetValue with empty string", func(t *testing.T) {
+			d := newDropdown("Test", 20, false)
+			d.SetOptions([]string{"option1"})
+
+			d.SetValue("")
+
+			assert.Empty(t, d.value)
+			assert.Equal(t, 0, d.selected)
+		})
+
+		t.Run("Blur with empty filtered", func(t *testing.T) {
+			d := newDropdown("Test", 20, false)
+			d.showOptions = true
+			d.filtered = []string{}
+
+			// Should not panic
+			d.Blur()
+
+			assert.False(t, d.showOptions)
+		})
+
+		t.Run("Update with non-keypress message", func(t *testing.T) {
+			d := newDropdown("Test", 20, false)
+			d.SetOptions([]string{"option1"})
+
+			// Pass a non-keypress message
+			msg := tea.WindowSizeMsg{Width: 80, Height: 24}
+			cmd, handled := d.Update(msg)
+
+			assert.Nil(t, cmd)
+			assert.False(t, handled)
+		})
+	})
+}
