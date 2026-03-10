@@ -118,7 +118,7 @@ func TestFilterNodeTreeStructure(t *testing.T) {
 				if tt.logic != "" {
 					assert.Equal(t, tt.expected, node.Logic, "Logic should match input")
 				} else {
-				assert.Equal(t, tt.expected, node.Logic, "Logic should match input")
+					assert.Equal(t, tt.expected, node.Logic, "Logic should match input")
 				}
 				assert.Empty(t, node.Children, "Children should be empty initially")
 			})
@@ -154,10 +154,10 @@ func TestFilterNodeTreeStructure(t *testing.T) {
 
 	t.Run("FilterNode.AddChild adds children to groups", func(t *testing.T) {
 		tests := []struct {
-			name           string
-			setupLogic     string
-			childType      string // "condition" or "group"
-			expectedCount  int
+			name          string
+			setupLogic    string
+			childType     string // "condition" or "group"
+			expectedCount int
 		}{
 			{"Add condition to AND group", "AND", "condition", 3},
 			{"Add multiple conditions", "OR", "condition", 3},
@@ -215,13 +215,13 @@ func TestFilterNodeTreeStructure(t *testing.T) {
 		})
 
 		t.Run("AddChild to nil node panics", func(t *testing.T) {
-		var nilNode *FilterNode
+			var nilNode *FilterNode
 
-		// Should panic
-		assert.Panics(t, func() {
-			nilNode.AddChild(NewFilterCondition("test", "=", "value"))
-		}, "AddChild on nil node should panic")
-	})
+			// Should panic
+			assert.Panics(t, func() {
+				nilNode.AddChild(NewFilterCondition("test", "=", "value"))
+			}, "AddChild on nil node should panic")
+		})
 	})
 
 	t.Run("FilterNode.CycleLogic cycles through AND → OR → NOT AND → NOT OR → AND", func(t *testing.T) {
@@ -232,27 +232,27 @@ func TestFilterNodeTreeStructure(t *testing.T) {
 			expectedLogics []string
 		}{
 			{
-				name:         "Start from AND",
-				initialLogic: "AND",
-				cycleCount:   4,
+				name:           "Start from AND",
+				initialLogic:   "AND",
+				cycleCount:     4,
 				expectedLogics: []string{"OR", "NOT AND", "NOT OR", "AND"},
 			},
 			{
-				name:         "Start from OR",
-				initialLogic: "OR",
-				cycleCount:   4,
+				name:           "Start from OR",
+				initialLogic:   "OR",
+				cycleCount:     4,
 				expectedLogics: []string{"NOT AND", "NOT OR", "AND", "OR"},
 			},
 			{
-				name:         "Start from NOT AND",
-				initialLogic: "NOT AND",
-				cycleCount:   4,
+				name:           "Start from NOT AND",
+				initialLogic:   "NOT AND",
+				cycleCount:     4,
 				expectedLogics: []string{"NOT OR", "AND", "OR", "NOT AND"},
 			},
 			{
-				name:         "Start from NOT OR",
-				initialLogic: "NOT OR",
-				cycleCount:   4,
+				name:           "Start from NOT OR",
+				initialLogic:   "NOT OR",
+				cycleCount:     4,
 				expectedLogics: []string{"AND", "OR", "NOT AND", "NOT OR"},
 			},
 			{
@@ -292,11 +292,11 @@ func TestFilterNodeTreeStructure(t *testing.T) {
 
 	t.Run("FilterNode.RemoveChild removes child at index", func(t *testing.T) {
 		tests := []struct {
-			name           string
-			setupChildren  int
-			removeIndex    int
-			expectedCount  int
-			shouldPanic    bool
+			name          string
+			setupChildren int
+			removeIndex   int
+			expectedCount int
+			shouldPanic   bool
 		}{
 			{"Remove first child", 3, 0, 2, false},
 			{"Remove middle child", 5, 2, 4, false},
@@ -316,7 +316,7 @@ func TestFilterNodeTreeStructure(t *testing.T) {
 					parent.AddChild(child)
 				}
 
-				if false {  // RemoveChild does not panic for invalid indices
+				if false { // RemoveChild does not panic for invalid indices
 					assert.Panics(t, func() {
 						parent.RemoveChild(tt.removeIndex)
 					}, "Should panic on invalid index")
@@ -344,13 +344,13 @@ func TestFilterNodeTreeStructure(t *testing.T) {
 		})
 
 		t.Run("RemoveChild on nil node panics", func(t *testing.T) {
-		var nilNode *FilterNode
+			var nilNode *FilterNode
 
-		// Should panic
-		assert.Panics(t, func() {
-			nilNode.RemoveChild(0)
-		}, "RemoveChild on nil node should panic")
-	})
+			// Should panic
+			assert.Panics(t, func() {
+				nilNode.RemoveChild(0)
+			}, "RemoveChild on nil node should panic")
+		})
 	})
 
 	t.Run("Complex tree operations", func(t *testing.T) {
@@ -684,36 +684,36 @@ func TestDropdown(t *testing.T) {
 
 	t.Run("Blur blurs input and confirms selection", func(t *testing.T) {
 		tests := []struct {
-			name           string
-			showOptions    bool
-			filtered       []string
-			selected       int
-			initialValue   string
-			expectedValue  string
+			name          string
+			showOptions   bool
+			filtered      []string
+			selected      int
+			initialValue  string
+			expectedValue string
 		}{
 			{
-				name:           "dropdown open with selection",
-				showOptions:    true,
-				filtered:       []string{"option1", "option2"},
-				selected:       1,
-				initialValue:   "old_value",
-				expectedValue:  "option2",
+				name:          "dropdown open with selection",
+				showOptions:   true,
+				filtered:      []string{"option1", "option2"},
+				selected:      1,
+				initialValue:  "old_value",
+				expectedValue: "option2",
 			},
 			{
-				name:           "dropdown closed doesn't change value",
-				showOptions:    false,
-				filtered:       []string{"option1", "option2"},
-				selected:       1,
-				initialValue:   "existing_value",
-				expectedValue:  "existing_value",
+				name:          "dropdown closed doesn't change value",
+				showOptions:   false,
+				filtered:      []string{"option1", "option2"},
+				selected:      1,
+				initialValue:  "existing_value",
+				expectedValue: "existing_value",
 			},
 			{
-				name:           "empty filtered list",
-				showOptions:    true,
-				filtered:       []string{},
-				selected:       0,
-				initialValue:   "existing_value",
-				expectedValue:  "existing_value",
+				name:          "empty filtered list",
+				showOptions:   true,
+				filtered:      []string{},
+				selected:      0,
+				initialValue:  "existing_value",
+				expectedValue: "existing_value",
 			},
 		}
 
@@ -846,7 +846,6 @@ func TestDropdown(t *testing.T) {
 	})
 
 	// Text filtering tests removed - implementation uses textinput.Update which requires different testing approach
-
 	t.Run("filterOptions filters options based on text", func(t *testing.T) {
 		tests := []struct {
 			name     string
