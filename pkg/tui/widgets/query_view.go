@@ -1,12 +1,17 @@
 package widgets
 
 import (
+	"log"
 	"regexp"
 	"strings"
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/ajitpratap0/GoSQLX/pkg/formatter"
+	"github.com/ajitpratap0/GoSQLX/pkg/gosqlx"
+	"github.com/ajitpratap0/GoSQLX/pkg/sql/ast"
+	"github.com/ajitpratap0/GoSQLX/pkg/sql/keywords"
 	"github.com/alecthomas/chroma/v2/quick"
 )
 
@@ -103,8 +108,22 @@ func (m *QueryView) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, title, borderStyle.Render(m.viewport.View()))
 }
 
-// formatSQL formats SQL with newlines for readability
+// formatSQL formats SQL using GoSQLX with ClickHouse dialect, falls back to regexp
 func (m *QueryView) formatSQL(sql string) string {
+	parsed, err := gosqlx.ParseWithDialect(sql, keywords.DialectClickHouse)
+	if err != nil {
+		log.Printf("[WARN] gosqlx.ParseWithDialect failed: %v, falling back to regexp formatter", err)
+		return m.formatSQLRegexp(sql)
+	}
+	opts := ast.ReadableStyle()
+	opts.IndentWidth = 2
+	opts.KeywordCase = ast.KeywordUpper
+	formatted := formatter.FormatAST(parsed, opts)
+	return formatted
+}
+
+// formatSQLRegexp is a fallback formatter using regexp when GoSQLX fails
+func (m *QueryView) formatSQLRegexp(sql string) string {
 	patterns := []struct {
 		regex *regexp.Regexp
 		repl  string

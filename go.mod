@@ -1,12 +1,13 @@
 module github.com/Slach/clickhouse-timeline
 
-go 1.26
+go 1.26.1
 
 require (
 	charm.land/bubbles/v2 v2.0.0
 	charm.land/bubbletea/v2 v2.0.2
 	charm.land/lipgloss/v2 v2.0.2
 	github.com/ClickHouse/clickhouse-go/v2 v2.43.0
+	github.com/ajitpratap0/GoSQLX v1.13.0
 	github.com/alecthomas/chroma/v2 v2.23.1
 	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de
 	github.com/pkg/errors v0.9.1
