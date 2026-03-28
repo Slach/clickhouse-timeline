@@ -11,7 +11,7 @@ require (
 	github.com/alecthomas/chroma/v2 v2.23.1
 	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de
 	github.com/pkg/errors v0.9.1
-	github.com/rs/zerolog v1.34.0
+	github.com/rs/zerolog v1.35.0
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/term v0.41.0
