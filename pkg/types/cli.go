@@ -21,18 +21,20 @@ type CLI struct {
 	PprofPath        string
 	FlamegraphNative bool
 	DisableMouse     bool
+	LlmLogLevel      string
+	ExpertPrompt     string
 	LogsParams       LogsParams
 }
 
 type LogsParams struct {
-	Database  string
-	Table     string
-	Message   string
-	Time      string
-	TimeMs    string
-	Date      string
-	Level     string
-	Window    int
+	Database string
+	Table    string
+	Message  string
+	Time     string
+	TimeMs   string
+	Date     string
+	Level    string
+	Window   int
 }
 
 func (c *CLI) ParseToTime() (time.Time, error) {

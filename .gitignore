@@ -16,3 +16,4 @@ clickhouse-timeline
 main
 coverage.out
 _bmad/
+.mcp.json

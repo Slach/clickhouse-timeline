@@ -130,6 +130,17 @@ func NewRootCommand(cli *types.CLI, version string) *cobra.Command {
 	}
 	rootCmd.AddCommand(auditCmd)
 
+	expertCmd := &cobra.Command{
+		Use:   "expert",
+		Short: "Start interactive expert chat with LLM agent",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return RunSubCommand(cli, version, cmd, args)
+		},
+	}
+	expertCmd.Flags().StringVar(&cli.LlmLogLevel, "llm-log-level", "", "LLM log level: debug, info, warn, error (overrides config expert.llm_log_level)")
+	expertCmd.Flags().StringVar(&cli.ExpertPrompt, "prompt", "", "Initial prompt to send to the LLM (supports /skill prefix, e.g. --prompt '/overview check my cluster')")
+	rootCmd.AddCommand(expertCmd)
+
 	return rootCmd
 }
 

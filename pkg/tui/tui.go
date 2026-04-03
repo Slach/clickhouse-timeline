@@ -65,6 +65,7 @@ const (
 	pageAudit          pageType = "audit"
 	pageDatePicker     pageType = "datepicker"
 	pageRangePicker    pageType = "rangepicker"
+	pageExpert         pageType = "expert"
 )
 
 // App is the main bubbletea model
@@ -101,6 +102,7 @@ type App struct {
 	categoryHandler    tea.Model
 	metricHandler      tea.Model
 	scaleHandler       tea.Model
+	expertHandler      tea.Model
 
 	// CLI parameter handling
 	initialContext *config.Context // Context to connect to from CLI params
@@ -375,6 +377,47 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, tea.Batch(cmds...)
 
+	case ExpertSkillsLoadedMsg:
+		if a.currentPage == pageExpert && a.expertHandler != nil {
+			// Update agent with loaded skills
+			if msg.Err == nil {
+				if ev, ok := a.expertHandler.(*expertViewer); ok && ev.agent != nil {
+					ev.agent.SetSkills(msg.Skills)
+				}
+			}
+			a.expertHandler, cmd = a.expertHandler.Update(msg)
+			cmds = append(cmds, cmd)
+		}
+		return a, tea.Batch(cmds...)
+
+	case ExpertTokenMsg:
+		if a.currentPage == pageExpert && a.expertHandler != nil {
+			a.expertHandler, cmd = a.expertHandler.Update(msg)
+			cmds = append(cmds, cmd)
+		}
+		return a, tea.Batch(cmds...)
+
+	case ExpertDoneMsg:
+		if a.currentPage == pageExpert && a.expertHandler != nil {
+			a.expertHandler, cmd = a.expertHandler.Update(msg)
+			cmds = append(cmds, cmd)
+		}
+		return a, tea.Batch(cmds...)
+
+	case expertResponseMsg:
+		if a.currentPage == pageExpert && a.expertHandler != nil {
+			a.expertHandler, cmd = a.expertHandler.Update(msg)
+			cmds = append(cmds, cmd)
+		}
+		return a, tea.Batch(cmds...)
+
+	case expertTickMsg:
+		if a.currentPage == pageExpert && a.expertHandler != nil {
+			a.expertHandler, cmd = a.expertHandler.Update(msg)
+			cmds = append(cmds, cmd)
+		}
+		return a, tea.Batch(cmds...)
+
 	case FlamegraphConfigMsg:
 		// Handle flamegraph configuration completion
 		// Use new bubbletea viewer
@@ -541,6 +584,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Global key handlers
 		switch msg.String() {
 		case ":":
+			// Don't intercept ':' in expert mode — it's part of text input
+			if a.currentPage == pageExpert {
+				break
+			}
 			// Don't intercept ':' if logs table is in filter mode
 			if a.currentPage == pageLogs && a.logsHandler != nil {
 				if lv, ok := a.logsHandler.(*logsViewer); ok {
@@ -560,12 +607,29 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.currentPage == pageMain {
 				return a, tea.Quit
 			}
+			// Don't intercept 'q' in expert mode — it's part of text input
+			if a.currentPage == pageExpert {
+				break
+			}
 			// On other pages, 'q' goes back to main
 			a.currentPage = pageMain
 			return a, nil
 
 		case "esc":
 			// Special handling for pages that need internal ESC handling
+			// Let expert handler handle ESC (for closing skill suggestions)
+			if a.currentPage == pageExpert && a.expertHandler != nil {
+				if ev, ok := a.expertHandler.(*expertViewer); ok {
+					if ev.showSkillSuggestions {
+						a.expertHandler, cmd = a.expertHandler.Update(msg)
+						cmds = append(cmds, cmd)
+						return a, tea.Batch(cmds...)
+					}
+				}
+				// If no suggestions open, exit expert to main
+				a.SwitchToMainPage("")
+				return a, nil
+			}
 			// Let logs handler handle ESC first (for saving config and closing dropdowns)
 			if a.currentPage == pageLogs && a.logsHandler != nil {
 				// Let logs handler process ESC (it will handle dropdown closing and config saving)
@@ -671,7 +735,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.flamegraphHandler, cmd = a.flamegraphHandler.Update(msg)
 				cmds = append(cmds, cmd)
 			}
-			// Add more page handlers as we migrate them
+		case pageExpert:
+			if a.expertHandler != nil {
+				a.expertHandler, cmd = a.expertHandler.Update(msg)
+				cmds = append(cmds, cmd)
+			}
 		}
 	}
 
@@ -789,7 +857,12 @@ func (a *App) View() tea.View {
 		} else {
 			content = "Flamegraph configuration not yet implemented"
 		}
-	// Add more page renderers as we migrate them
+	case pageExpert:
+		if a.expertHandler != nil {
+			content = a.expertHandler.View().Content
+		} else {
+			content = "Expert chat not yet initialized"
+		}
 	default:
 		content = fmt.Sprintf("Page '%s' not yet implemented\nPress ESC to return to main", a.currentPage)
 	}
@@ -1009,6 +1082,9 @@ func (a *App) executeCommand(commandName string) tea.Cmd {
 	case CmdAudit:
 		return a.ShowAudit()
 
+	case CmdExpert:
+		return a.ShowExpert()
+
 	default:
 		a.SwitchToMainPage(fmt.Sprintf("Unknown command: %s\nType :help for available commands", commandName))
 	}
@@ -1126,6 +1202,11 @@ func (a *App) ApplyCLIParameters(c *types.CLI, commandName string) {
 	if commandName != "" && commandName != "clickhouse-timeline" {
 		a.initialCommand = commandName
 		mainMsg += fmt.Sprintf("Executing command: %s\n", commandName)
+	}
+
+	// Apply LLM log level from CLI flag
+	if c.LlmLogLevel != "" {
+		a.cfg.Expert.LlmLogLevel = c.LlmLogLevel
 	}
 
 	if mainMsg != "" {

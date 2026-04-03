@@ -1,27 +1,28 @@
 package tui
 
- // Available commands
- const (
- 	CmdHelp           = "help"
- 	CmdConnect        = "connect"
- 	CmdQuit           = "quit"
- 	CmdFlamegraph     = "flamegraph"
- 	CmdExplain        = "explain"
- 	CmdFrom           = "from"
- 	CmdTo             = "to"
- 	CmdRange          = "range"
- 	CmdCluster        = "cluster"
- 	CmdHeatmap        = "heatmap"
- 	CmdCategory       = "categoryType"
- 	CmdMetric         = "heatmapMetric"
- 	CmdScale          = "scale"
- 	CmdProfileEvents  = "profile_events"
- 	CmdMetricLog      = "metric_log"
- 	CmdAsyncMetricLog = "asynchronous_metric_log"
- 	CmdLogs           = "logs"
- 	CmdMemory         = "memory"
- 	CmdAudit          = "audit"
- )
+// Available commands
+const (
+	CmdHelp           = "help"
+	CmdConnect        = "connect"
+	CmdQuit           = "quit"
+	CmdFlamegraph     = "flamegraph"
+	CmdExplain        = "explain"
+	CmdFrom           = "from"
+	CmdTo             = "to"
+	CmdRange          = "range"
+	CmdCluster        = "cluster"
+	CmdHeatmap        = "heatmap"
+	CmdCategory       = "categoryType"
+	CmdMetric         = "heatmapMetric"
+	CmdScale          = "scale"
+	CmdProfileEvents  = "profile_events"
+	CmdMetricLog      = "metric_log"
+	CmdAsyncMetricLog = "asynchronous_metric_log"
+	CmdLogs           = "logs"
+	CmdMemory         = "memory"
+	CmdAudit          = "audit"
+	CmdExpert         = "expert"
+)
 
 type TraceType string
 
@@ -77,10 +78,11 @@ var availableCommands = []string{
 	CmdLogs,
 	CmdMemory,
 	CmdAudit,
+	CmdExpert,
 }
 
- // Help text
- const helpText = `ClickHouse Timeline Commands:
+// Help text
+const helpText = `ClickHouse Timeline Commands:
  :help            - Show this help
  :connect         - Connect to a ClickHouse instance
  :quit            - Exit the application
@@ -100,6 +102,7 @@ var availableCommands = []string{
  :asynchronous_metric_log - Show system.asynchronous_metric_log metrics
  :memory          - Show Memory usage (grouped by host)
  :audit          - Run system audit and show diagnostics and suggestions
+ :expert         - Interactive expert chat with LLM agent and ClickHouse skills
  
  Navigation:
  - Use arrow keys to navigate
