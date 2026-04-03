@@ -380,8 +380,12 @@ func (m *expertViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.String() {
 		case "enter":
-			// If a block is focused, toggle its expansion
-			if m.blockFocusIdx >= 0 {
+			value := strings.TrimSpace(m.input.Value())
+			// If input has text, always send message (and reset block focus)
+			if value != "" {
+				m.blockFocusIdx = -1
+			} else if m.blockFocusIdx >= 0 {
+				// Input is empty and a block is focused — toggle its expansion
 				if m.blockExpanded == nil {
 					m.blockExpanded = make(map[int]bool)
 				}
@@ -391,7 +395,6 @@ func (m *expertViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.scrollToFocusedBlock()
 				return m, nil
 			}
-			value := strings.TrimSpace(m.input.Value())
 			if value == "" {
 				return m, nil
 			}
