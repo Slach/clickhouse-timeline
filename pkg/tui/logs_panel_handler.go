@@ -767,11 +767,6 @@ func (m *logsConfigForm) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.String() {
-		case "ctrl+c":
-			m.saveCurrentConfig()
-			m.app.SwitchToMainPage("Returned from :logs")
-			return m, nil
-
 		case "tab":
 			oldFocusIndex := m.focusIndex
 			m.focusIndex = (m.focusIndex + 1) % 10

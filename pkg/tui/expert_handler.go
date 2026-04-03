@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -29,9 +30,15 @@ type ExpertDoneMsg struct {
 
 // expertResponseMsg carries the full LLM response for display.
 type expertResponseMsg struct {
-	Content string
-	Model   string
-	Events  []expert.ChatEvent
+	Content   string
+	Model     string
+	Reasoning string
+	Events    []expert.ChatEvent
+}
+
+// expertEventMsg delivers a single progressive event from the LLM chat.
+type expertEventMsg struct {
+	Event expert.ChatEvent
 }
 
 // expertTickMsg is sent every second to update the thinking timer.
@@ -69,6 +76,13 @@ type expertViewer struct {
 	streamBuffer strings.Builder
 	agentErr     error
 	skillsLoaded bool
+	cancelFunc   context.CancelFunc // cancel the in-flight LLM request
+	eventCh      <-chan expert.ChatEvent // progressive event channel
+
+	// Block navigation (reasoning, tool, assistant blocks)
+	blockFocusIdx     int          // which navigable block is focused (-1 = none)
+	blockExpanded     map[int]bool // message idx -> expanded state
+	focusedLineOffset int          // line offset of focused block in rendered content
 
 	// Config
 	cfg           config.ExpertConfig
@@ -134,6 +148,21 @@ var (
 
 	expertScrollThumbStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("62"))
+
+	expertReasonStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("240")).
+				Italic(true)
+
+	expertReasonFocusedStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("214")).
+					Italic(true)
+
+	expertReasonCollapsedStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("245")).
+					Bold(true)
+
+	expertFocusedBlockStyle = lipgloss.NewStyle().
+				Background(lipgloss.Color("236"))
 )
 
 // maxVisibleSuggestions returns how many skill suggestions fit on screen.
@@ -206,12 +235,13 @@ func newExpertViewer(width, height int, cfg config.ExpertConfig) expertViewer {
 	}
 
 	return expertViewer{
-		viewport:   vp,
-		input:      ti,
-		mdRenderer: renderer,
-		cfg:        cfg,
-		width:      width,
-		height:     height,
+		viewport:          vp,
+		input:             ti,
+		mdRenderer:        renderer,
+		cfg:               cfg,
+		width:             width,
+		height:            height,
+		blockFocusIdx: -1,
 	}
 }
 
@@ -255,9 +285,18 @@ func (m *expertViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.GotoBottom()
 		return m, nil
 
+	case expertEventMsg:
+		// Progressive event from the LLM chat — update screen immediately
+		m.applyEvent(msg.Event)
+		m.viewport.SetContent(m.renderChat())
+		m.viewport.GotoBottom()
+		// Schedule reading the next event from the channel
+		return m, waitForExpertEvent(m.eventCh)
+
 	case ExpertDoneMsg:
 		m.loading = false
-		if msg.Err != nil {
+		m.eventCh = nil
+		if msg.Err != nil && !errors.Is(msg.Err, context.Canceled) {
 			m.messages = append(m.messages, expert.ChatMessage{
 				Role:    "assistant",
 				Content: fmt.Sprintf("Error: %v", msg.Err),
@@ -270,35 +309,15 @@ func (m *expertViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case expertResponseMsg:
 		m.loading = false
-		// Add tool events as visible messages
-		for _, ev := range msg.Events {
-			switch ev.Type {
-			case "tool_start":
-				m.messages = append(m.messages, expert.ChatMessage{
-					Role:      "tool",
-					ToolName:  ev.Tool,
-					ToolQuery: ev.Query,
-				})
-			case "tool_done":
-				// Find the last tool message and update it
-				for i := len(m.messages) - 1; i >= 0; i-- {
-					if m.messages[i].Role == "tool" && m.messages[i].ToolName == ev.Tool && m.messages[i].ToolResult == "" && m.messages[i].ToolError == "" {
-						if ev.Error != "" {
-							m.messages[i].ToolError = ev.Error
-						} else {
-							m.messages[i].ToolResult = truncateForDisplay(ev.Result, 500)
-						}
-						break
-					}
-				}
-			case "retry":
-				m.messages = append(m.messages, expert.ChatMessage{
-					Role:    "system",
-					Content: fmt.Sprintf("Rate limited (429). Retry %d/%d...", ev.Attempt, ev.MaxRetries),
-				})
-			}
+		m.eventCh = nil
+		// Add the assistant response (may also have reasoning from final response)
+		if msg.Reasoning != "" {
+			m.messages = append(m.messages, expert.ChatMessage{
+				Role:      "reasoning",
+				Reasoning: msg.Reasoning,
+				ReasonLen: len(msg.Reasoning),
+			})
 		}
-		// Add the assistant response
 		m.messages = append(m.messages, expert.ChatMessage{
 			Role:    "assistant",
 			Content: msg.Content,
@@ -307,6 +326,15 @@ func (m *expertViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.streamBuffer.Reset()
 		m.viewport.SetContent(m.renderChat())
 		m.viewport.GotoBottom()
+		return m, nil
+
+	case tea.MouseWheelMsg:
+		// Handle mouse wheel scrolling
+		if msg.Button == tea.MouseWheelUp {
+			m.viewport.ScrollUp(3)
+		} else if msg.Button == tea.MouseWheelDown {
+			m.viewport.ScrollDown(3)
+		}
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -321,7 +349,7 @@ func (m *expertViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showSkillSuggestions = false
 				m.syncViewportHeight()
 				return m, nil
-			case "tab", "enter":
+			case "tab", "shift+tab", "enter":
 				if len(m.skillSuggestions) > 0 {
 					selected := m.skillSuggestions[m.selectedSkillPosition]
 					m.input.SetValue("/" + selected + " ")
@@ -352,12 +380,73 @@ func (m *expertViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.String() {
 		case "enter":
+			// If a block is focused, toggle its expansion
+			if m.blockFocusIdx >= 0 {
+				if m.blockExpanded == nil {
+					m.blockExpanded = make(map[int]bool)
+				}
+				cur := m.isBlockExpanded(m.blockFocusIdx)
+				m.blockExpanded[m.blockFocusIdx] = !cur
+				m.viewport.SetContent(m.renderChat())
+				m.scrollToFocusedBlock()
+				return m, nil
+			}
 			value := strings.TrimSpace(m.input.Value())
 			if value == "" {
 				return m, nil
 			}
+			// Handle /clear command to reset the dialog
+			if value == "/clear" {
+				m.input.SetValue("")
+				m.messages = nil
+				m.streamBuffer.Reset()
+				m.blockFocusIdx = -1
+				m.blockExpanded = nil
+				if m.agent != nil {
+					m.agent.ClearHistory()
+				}
+				m.viewport.SetContent(m.renderChat())
+				return m, nil
+			}
 			cmd := m.sendMessage(value)
 			return m, cmd
+
+		case "tab":
+			// Navigate to next block
+			if m.countNavigableBlocks() > 0 {
+				m.navigateBlocks(1)
+				m.viewport.SetContent(m.renderChat())
+				m.scrollToFocusedBlock()
+				return m, nil
+			}
+
+		case "shift+tab":
+			// Navigate to previous block
+			if m.countNavigableBlocks() > 0 {
+				m.navigateBlocks(-1)
+				m.viewport.SetContent(m.renderChat())
+				m.scrollToFocusedBlock()
+				return m, nil
+			}
+
+		case "esc":
+			// Deselect block focus
+			if m.blockFocusIdx >= 0 {
+				m.blockFocusIdx = -1
+				m.viewport.SetContent(m.renderChat())
+				return m, nil
+			}
+
+		case "up":
+			m.viewport.ScrollUp(1)
+			return m, nil
+
+		case "down":
+			m.viewport.ScrollDown(1)
+			return m, nil
+
+		case "pgup", "pgdown", "ctrl+u", "ctrl+d":
+			// Let viewport handle scrolling (falls through to viewport.Update below)
 
 		default:
 			// Update input
@@ -438,18 +527,27 @@ func (m *expertViewer) sendMessage(value string) tea.Cmd {
 
 	agentErr := m.agentErr
 	timeout := m.cfg.LlmTimeout
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	m.cancelFunc = cancel
+
+	// Create channel for progressive event updates
+	eventCh := make(chan expert.ChatEvent, 10)
+	m.eventCh = eventCh
+
 	llmCmd := func() tea.Msg {
+		defer close(eventCh)
+
 		if agent == nil {
+			cancel()
 			if agentErr != nil {
 				return ExpertDoneMsg{Err: agentErr}
 			}
 			return ExpertDoneMsg{Err: fmt.Errorf("agent not initialized — check API key configuration in expert section of clickhouse-timeline.yml")}
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 
-		result, err := agent.Chat(ctx, userMsg, selectedSkill)
+		result, err := agent.ChatWithProgress(ctx, userMsg, selectedSkill, eventCh)
 		if err != nil {
 			log.Error().Stack().Err(err).
 				Str("provider", agent.Provider()).
@@ -460,12 +558,12 @@ func (m *expertViewer) sendMessage(value string) tea.Cmd {
 		}
 
 		return expertResponseMsg{
-			Content: result.Content,
-			Model:   result.Model,
-			Events:  result.Events,
+			Content:   result.Content,
+			Model:     result.Model,
+			Reasoning: result.Reasoning,
 		}
 	}
-	return tea.Batch(llmCmd, expertTimerTick())
+	return tea.Batch(llmCmd, waitForExpertEvent(eventCh), expertTimerTick())
 }
 
 func (m *expertViewer) updateSkillSuggestions() {
@@ -513,6 +611,7 @@ func (m *expertViewer) updateSkillSuggestions() {
 
 func (m *expertViewer) renderChat() string {
 	var b strings.Builder
+	m.focusedLineOffset = -1
 
 	// Status line
 	if m.agentErr != nil {
@@ -521,16 +620,15 @@ func (m *expertViewer) renderChat() string {
 		b.WriteString("\n\n")
 	}
 
-	if !m.skillsLoaded && m.agentErr == nil {
-		b.WriteString(expertLoadingStyle.Render("Loading skills..."))
-		b.WriteString("\n\n")
-	} else if m.skillsLoaded {
-		b.WriteString(expertLoadingStyle.Render(fmt.Sprintf("%d skills loaded. Type / for autocomplete.", len(m.skills))))
-		b.WriteString("\n\n")
-	}
 
 	// Messages
-	for _, msg := range m.messages {
+	for i, msg := range m.messages {
+		if i == m.blockFocusIdx {
+			m.focusedLineOffset = strings.Count(b.String(), "\n")
+		}
+		isFocused := i == m.blockFocusIdx
+		expanded := m.isBlockExpanded(i)
+
 		switch msg.Role {
 		case "user":
 			prefix := expertUserStyle.Render("You: ")
@@ -540,39 +638,113 @@ func (m *expertViewer) renderChat() string {
 			b.WriteString(prefix + msg.Content + "\n\n")
 
 		case "tool":
-			b.WriteString(expertToolStyle.Render(fmt.Sprintf("  >> %s", msg.ToolName)))
+			icon := "[+]"
+			if expanded {
+				icon = "[-]"
+			}
+			style := expertToolStyle
+			if isFocused {
+				style = expertReasonFocusedStyle
+			}
+			var block strings.Builder
+			block.WriteString(style.Render(fmt.Sprintf("  %s >> %s", icon, msg.ToolName)))
 			if msg.ToolQuery != "" {
-				// Format and highlight SQL query
 				formatted := sqlfmt.FormatAndHighlightSQL(msg.ToolQuery)
-				queryLines := strings.Split(formatted, "\n")
-				for _, line := range queryLines {
-					b.WriteString("\n     " + line)
+				for _, line := range strings.Split(formatted, "\n") {
+					block.WriteString("\n     " + line)
 				}
 			}
-			b.WriteString("\n")
-			if msg.ToolError != "" {
-				b.WriteString(expertErrorStyle.Render("     Error: "+msg.ToolError) + "\n")
-			} else if msg.ToolResult != "" {
-				resultLines := strings.Split(msg.ToolResult, "\n")
-				for _, line := range resultLines {
-					b.WriteString(expertToolResultStyle.Render("     "+line) + "\n")
+			block.WriteString("\n")
+			if expanded {
+				if msg.ToolError != "" {
+					block.WriteString(expertErrorStyle.Render("     Error: "+msg.ToolError) + "\n")
+				} else if msg.ToolResult != "" {
+					block.WriteString(renderTSVTable(msg.ToolResult, m.width-7))
 				}
+			}
+			if isFocused {
+				for _, line := range strings.Split(block.String(), "\n") {
+					b.WriteString(expertFocusedBlockStyle.Width(m.width - 4).Render(line) + "\n")
+				}
+			} else {
+				b.WriteString(block.String())
 			}
 			b.WriteString("\n")
 
 		case "assistant":
+			icon := "[+]"
+			if expanded {
+				icon = "[-]"
+			}
 			modelInfo := ""
 			if msg.Model != "" {
 				modelInfo = expertModelStyle.Render(" [" + msg.Model + "]")
 			}
-			b.WriteString(expertAssistantStyle.Render("Expert:") + modelInfo + "\n")
-			b.WriteString(m.renderMarkdown(msg.Content))
+			style := expertAssistantStyle
+			if isFocused {
+				style = expertReasonFocusedStyle
+			}
+			var block strings.Builder
+			block.WriteString(style.Render(fmt.Sprintf("  %s Expert:", icon)) + modelInfo + "\n")
+			if expanded {
+				block.WriteString(m.renderMarkdown(msg.Content))
+			} else {
+				preview := strings.ReplaceAll(msg.Content, "\n", " ")
+				if len(preview) > 80 {
+					preview = preview[:77] + "..."
+				}
+				block.WriteString(expertToolResultStyle.Render("     " + preview))
+			}
+			if isFocused {
+				for _, line := range strings.Split(block.String(), "\n") {
+					b.WriteString(expertFocusedBlockStyle.Width(m.width - 4).Render(line) + "\n")
+				}
+			} else {
+				b.WriteString(block.String())
+			}
 			b.WriteString("\n\n")
 
+		case "reasoning":
+			tokens := estimateReasoningTokens(msg.Reasoning)
+			var block strings.Builder
+			if expanded {
+				icon := "[-]"
+				style := expertReasonStyle
+				if isFocused {
+					style = expertReasonFocusedStyle
+				}
+				block.WriteString(style.Render(fmt.Sprintf("  %s Reasoning (%d tokens)", icon, tokens)))
+				block.WriteString("\n")
+				for _, line := range strings.Split(msg.Reasoning, "\n") {
+					block.WriteString(style.Render("  | " + line) + "\n")
+				}
+			} else {
+				icon := "[+]"
+				style := expertReasonCollapsedStyle
+				if isFocused {
+					style = expertReasonFocusedStyle
+				}
+				preview := msg.Reasoning
+				if len(preview) > 80 {
+					preview = preview[:77] + "..."
+				}
+				block.WriteString(style.Render(fmt.Sprintf("  %s Reasoning (%d tokens) -- %s", icon, tokens, preview)))
+			}
+			if isFocused {
+				for _, line := range strings.Split(block.String(), "\n") {
+					b.WriteString(expertFocusedBlockStyle.Width(m.width - 4).Render(line) + "\n")
+				}
+			} else {
+				b.WriteString(block.String())
+				b.WriteString("\n")
+			}
+			b.WriteString("\n")
+
 		case "system":
-			b.WriteString(expertRetryStyle.Render("  ⟳ "+msg.Content) + "\n")
+			b.WriteString(expertRetryStyle.Render("  > "+msg.Content) + "\n")
 		}
 	}
+
 
 	// Streaming buffer
 	if m.loading {
@@ -598,24 +770,26 @@ func (m *expertViewer) renderScrollbar() string {
 	scrollPercent := m.viewport.ScrollPercent()
 	atTop := m.viewport.AtTop()
 	atBottom := m.viewport.AtBottom()
-
-	// If content fits in viewport, no scrollbar needed
-	if atTop && atBottom {
-		return ""
-	}
+	contentFits := atTop && atBottom
 
 	// Calculate thumb size and position
-	// Minimum thumb size is 1 character
-	thumbSize := max(1, vpHeight/5)
+	// Minimum thumb size is 1 character, max 1/3 of viewport
+	thumbSize := max(1, min(vpHeight/3, vpHeight/5))
 	trackSize := vpHeight - thumbSize
 
 	var thumbPos int
-	if atTop {
+	if contentFits {
+		// When content fits, thumb at top but still visible
+		thumbPos = 0
+	} else if atTop {
 		thumbPos = 0
 	} else if atBottom {
 		thumbPos = trackSize
 	} else {
 		thumbPos = int(float64(trackSize) * scrollPercent)
+		if thumbPos > trackSize {
+			thumbPos = trackSize
+		}
 	}
 
 	var sb strings.Builder
@@ -635,8 +809,14 @@ func (m *expertViewer) renderScrollbar() string {
 func (m *expertViewer) View() tea.View {
 	// Title
 	title := expertTitleStyle.Render(" Expert Chat ")
-	if len(m.skills) > 0 {
-		title += expertLoadingStyle.Render(fmt.Sprintf(" [%d skills]", len(m.skills)))
+	if !m.skillsLoaded && m.agentErr == nil {
+		title += expertLoadingStyle.Render(" Loading skills...")
+	} else if m.skillsLoaded {
+		statusLine := fmt.Sprintf(" %d skills loaded. Type / for autocomplete. | Tab/Shift+Tab: navigate blocks | Enter: expand/collapse | /clear: reset", len(m.skills))
+		title += expertLoadingStyle.Render(statusLine)
+	}
+	if m.agentErr != nil {
+		title += " " + expertErrorStyle.Render(fmt.Sprintf("Error: %v", m.agentErr))
 	}
 
 	// Viewport with scrollbar
@@ -717,6 +897,55 @@ func (m *expertViewer) renderMarkdown(text string) string {
 	return strings.TrimSpace(rendered)
 }
 
+// applyEvent processes a single chat event and updates the messages list.
+func (m *expertViewer) applyEvent(ev expert.ChatEvent) {
+	switch ev.Type {
+	case "tool_start":
+		m.messages = append(m.messages, expert.ChatMessage{
+			Role:      "tool",
+			ToolName:  ev.Tool,
+			ToolQuery: ev.Query,
+		})
+	case "tool_done":
+		// Find the last tool message and update it
+		for i := len(m.messages) - 1; i >= 0; i-- {
+			if m.messages[i].Role == "tool" && m.messages[i].ToolName == ev.Tool && m.messages[i].ToolResult == "" && m.messages[i].ToolError == "" {
+				if ev.Error != "" {
+					m.messages[i].ToolError = ev.Error
+				} else {
+					m.messages[i].ToolResult = truncateForDisplay(ev.Result, 3000)
+				}
+				break
+			}
+		}
+	case "retry":
+		m.messages = append(m.messages, expert.ChatMessage{
+			Role:    "system",
+			Content: fmt.Sprintf("Rate limited (429). Retry %d/%d...", ev.Attempt, ev.MaxRetries),
+		})
+	case "reasoning":
+		m.messages = append(m.messages, expert.ChatMessage{
+			Role:      "reasoning",
+			Reasoning: ev.Reasoning,
+			ReasonLen: len(ev.Reasoning),
+		})
+	}
+}
+
+// waitForExpertEvent returns a command that reads the next event from the channel.
+func waitForExpertEvent(ch <-chan expert.ChatEvent) tea.Cmd {
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		ev, ok := <-ch
+		if !ok {
+			return nil // channel closed
+		}
+		return expertEventMsg{Event: ev}
+	}
+}
+
 func expertTimerTick() tea.Cmd {
 	return tea.Tick(time.Second, func(time.Time) tea.Msg {
 		return expertTickMsg{}
@@ -731,9 +960,24 @@ func truncateForDisplay(s string, maxLen int) string {
 }
 
 // ShowExpert initializes and shows the expert chat view.
+// If an expert session already exists, it is reused to preserve the dialog.
 func (a *App) ShowExpert() tea.Cmd {
-	viewer := newExpertViewer(a.width, a.height, a.cfg.Expert)
 	a.currentPage = pageExpert
+
+	// Reuse existing expert session if available
+	if a.expertHandler != nil {
+		if ev, ok := a.expertHandler.(*expertViewer); ok {
+			ev.width = a.width
+			ev.height = a.height
+			ev.viewport.SetWidth(a.width - 2)
+			ev.viewport.SetHeight(a.height - 6)
+			ev.viewport.SetContent(ev.renderChat())
+			_ = ev.input.Focus()
+		}
+		return nil
+	}
+
+	viewer := newExpertViewer(a.width, a.height, a.cfg.Expert)
 
 	// Set initial prompt from --prompt CLI flag
 	if a.state.CLI != nil && a.state.CLI.ExpertPrompt != "" {
@@ -777,3 +1021,227 @@ func loadAndUpdateSkillsCmd(repoURL string) tea.Cmd {
 		return ExpertSkillsLoadedMsg{Skills: skills}
 	}
 }
+
+// scrollToFocusedBlock scrolls the viewport so the focused block is visible.
+func (m *expertViewer) scrollToFocusedBlock() {
+	if m.focusedLineOffset < 0 {
+		return
+	}
+	vpHeight := m.viewport.Height()
+	offset := m.focusedLineOffset - vpHeight/3
+	if offset < 0 {
+		offset = 0
+	}
+	m.viewport.SetYOffset(offset)
+}
+
+// isBlockExpanded returns whether a block at the given index is expanded.
+// Defaults: tool and assistant blocks start expanded, reasoning starts collapsed.
+func (m *expertViewer) isBlockExpanded(idx int) bool {
+	if m.blockExpanded == nil {
+		m.blockExpanded = make(map[int]bool)
+	}
+	if val, ok := m.blockExpanded[idx]; ok {
+		return val
+	}
+	// Default: reasoning and read_skill_sql collapsed, everything else expanded
+	if idx >= 0 && idx < len(m.messages) {
+		msg := m.messages[idx]
+		if msg.Role == "reasoning" {
+			return false
+		}
+		if msg.Role == "tool" && msg.ToolName == "read_skill_sql" {
+			return false
+		}
+	}
+	return true
+}
+
+// countNavigableBlocks returns the number of navigable blocks (reasoning, tool, assistant).
+func (m *expertViewer) countNavigableBlocks() int {
+	count := 0
+	for _, msg := range m.messages {
+		switch msg.Role {
+		case "reasoning", "tool", "assistant":
+			count++
+		}
+	}
+	return count
+}
+
+// navigateBlocks moves the focus to the next/prev navigable block.
+func (m *expertViewer) navigateBlocks(delta int) {
+	blocks := m.collectNavigableIndices()
+	if len(blocks) == 0 {
+		m.blockFocusIdx = -1
+		return
+	}
+
+	curPos := -1
+	for i, idx := range blocks {
+		if idx == m.blockFocusIdx {
+			curPos = i
+			break
+		}
+	}
+
+	curPos += delta
+	if curPos < 0 {
+		curPos = len(blocks) - 1
+	}
+	if curPos >= len(blocks) {
+		curPos = 0
+	}
+
+	m.blockFocusIdx = blocks[curPos]
+}
+
+// collectNavigableIndices returns indices of all navigable blocks.
+func (m *expertViewer) collectNavigableIndices() []int {
+	var result []int
+	for i, msg := range m.messages {
+		switch msg.Role {
+		case "reasoning", "tool", "assistant":
+			result = append(result, i)
+		}
+	}
+	return result
+}
+
+// renderTSVTable renders tab-separated data as a formatted table with box-drawing borders.
+func renderTSVTable(tsv string, maxWidth int) string {
+	lines := strings.Split(strings.TrimRight(tsv, "\n"), "\n")
+	if len(lines) == 0 {
+		return tsv
+	}
+
+	// Parse rows
+	var rows [][]string
+	for _, line := range lines {
+		if strings.HasPrefix(line, "...") {
+			// Truncation marker — pass through
+			rows = append(rows, []string{line})
+			continue
+		}
+		rows = append(rows, strings.Split(line, "\t"))
+	}
+
+	if len(rows) == 0 {
+		return tsv
+	}
+
+	// If first row has only 1 column and no tabs anywhere, it's not really TSV
+	numCols := len(rows[0])
+	if numCols <= 1 {
+		// Fallback: plain text rendering
+		var b strings.Builder
+		for _, line := range lines {
+			b.WriteString(expertToolResultStyle.Render("     " + line) + "\n")
+		}
+		return b.String()
+	}
+
+	// Calculate column widths
+	widths := make([]int, numCols)
+	for _, row := range rows {
+		for j := 0; j < numCols && j < len(row); j++ {
+			if len(row[j]) > widths[j] {
+				widths[j] = len(row[j])
+			}
+		}
+	}
+
+	// Cap column widths to fit available space
+	maxColWidth := 40
+	if maxWidth > 0 {
+		// Available = maxWidth - indent(5) - borders(numCols+1) - padding(numCols*2)
+		available := maxWidth - 5 - (numCols + 1) - (numCols * 2)
+		if available > 0 {
+			perCol := available / numCols
+			if perCol < maxColWidth {
+				maxColWidth = perCol
+			}
+		}
+	}
+	if maxColWidth < 8 {
+		maxColWidth = 8
+	}
+	for j := range widths {
+		if widths[j] > maxColWidth {
+			widths[j] = maxColWidth
+		}
+	}
+
+	pad := func(s string, w int) string {
+		if len(s) > w {
+			return s[:w-1] + "~"
+		}
+		return s + strings.Repeat(" ", w-len(s))
+	}
+
+	borderRow := func(left, mid, right string) string {
+		var b strings.Builder
+		b.WriteString("     " + left)
+		for j, w := range widths {
+			b.WriteString(strings.Repeat("\u2500", w+2))
+			if j < numCols-1 {
+				b.WriteString(mid)
+			}
+		}
+		b.WriteString(right + "\n")
+		return b.String()
+	}
+
+	dataRow := func(row []string) string {
+		var b strings.Builder
+		b.WriteString("     \u2502")
+		for j := 0; j < numCols; j++ {
+			cell := ""
+			if j < len(row) {
+				cell = row[j]
+			}
+			b.WriteString(" " + pad(cell, widths[j]) + " \u2502")
+		}
+		b.WriteString("\n")
+		return b.String()
+	}
+
+	var out strings.Builder
+
+	// Top border
+	out.WriteString(borderRow("\u250c", "\u252c", "\u2510"))
+
+	// Header row (first row)
+	out.WriteString(dataRow(rows[0]))
+
+	// Header separator
+	out.WriteString(borderRow("\u251c", "\u253c", "\u2524"))
+
+	// Data rows
+	for _, row := range rows[1:] {
+		if len(row) == 1 && strings.HasPrefix(row[0], "...") {
+			out.WriteString(expertToolResultStyle.Render("     "+row[0]) + "\n")
+			continue
+		}
+		out.WriteString(dataRow(row))
+	}
+
+	// Bottom border
+	out.WriteString(borderRow("\u2514", "\u2534", "\u2518"))
+
+	return out.String()
+}
+
+// estimateReasoningTokens estimates token count from text length (~4 chars/token for English).
+func estimateReasoningTokens(text string) int {
+	if len(text) == 0 {
+		return 0
+	}
+	// Rough estimate: ~4 chars per token for mixed English/other languages
+	tokens := len(text) / 4
+	if tokens < 10 {
+		return 10
+	}
+	return tokens
+}
+

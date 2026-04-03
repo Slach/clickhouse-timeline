@@ -9,6 +9,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/Slach/clickhouse-timeline/pkg/client"
@@ -17,15 +20,20 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/teilomillet/gollm"
+	"github.com/teilomillet/gollm/types"
 	gollmutils "github.com/teilomillet/gollm/utils"
 )
 
 // ChatMessage represents a message in the conversation history.
 type ChatMessage struct {
-	Role    string // "user", "assistant", "system", "tool"
-	Content string
-	Skill   string // skill name if invoked via /skillname
-	Model   string // actual model that responded (from API)
+	Role              string // "user", "assistant", "system", "tool", "reasoning"
+	Content           string
+	Skill             string // skill name if invoked via /skillname
+	Model             string // actual model that responded (from API)
+	Reasoning         string // chain-of-thought reasoning (hidden by default)
+	ReasonLen         int    // length of reasoning text for display
+	ToolTokens        int    // approximate reasoning tokens
+	ReasoningExpanded bool   // UI state: is reasoning block expanded?
 	// Tool call fields (when Role == "tool")
 	ToolName   string
 	ToolQuery  string // SQL query or args summary
@@ -35,31 +43,36 @@ type ChatMessage struct {
 
 // ChatEvent is sent during chat for live UI updates.
 type ChatEvent struct {
-	Type       string // "tool_start", "tool_done", "model_info", "retry"
+	Type       string // "tool_start", "tool_done", "model_info", "retry", "reasoning"
 	Tool       string
 	Query      string
 	Result     string
 	Error      string
 	Model      string
-	Attempt    int // current retry attempt (1-based)
-	MaxRetries int // total retries configured
+	Attempt    int    // current retry attempt (1-based)
+	MaxRetries int    // total retries configured
+	Reasoning  string // chain-of-thought text
+	Tokens     int    // approximate reasoning tokens
 }
 
 // ExpertAgent manages LLM interactions with skills and ClickHouse tools.
 type ExpertAgent struct {
-	llm      gollm.LLM
-	skills   []Skill
-	chClient *client.Client
-	history  []ChatMessage
-	cfg      config.ExpertConfig
+	llm            gollm.LLM
+	skills         []Skill
+	chClient       *client.Client
+	history        []ChatMessage
+	cfg            config.ExpertConfig
+	activeSkillDir string // path to current skill directory for read_skill_sql
 }
 
 const systemPrompt = `You are a ClickHouse expert assistant. You help users diagnose and optimize their ClickHouse installations.
 
 You have access to the following tools:
 - run_clickhouse_query: Execute a read-only SQL query against the connected ClickHouse server
+- read_skill_sql: Read a .sql file from the current skill directory to get predefined diagnostic queries
 
 When you need to investigate an issue, use the run_clickhouse_query tool to query system tables.
+When a skill references SQL files (e.g. "Run reporting SQL queries from files: checks.sql"), use read_skill_sql to load them first, then execute the queries.
 Always explain your findings clearly and provide actionable recommendations.
 Format SQL queries and results for readability.
 IMPORTANT: When you need data from ClickHouse, ALWAYS use the run_clickhouse_query tool. Do NOT ask the user to run queries manually or via clickhouse-client.`
@@ -110,7 +123,6 @@ func resolveGollmLogLevel(cfg config.ExpertConfig) gollm.LogLevel {
 			return gollm.LogLevelError
 		}
 	}
-	// Inherit from app-level log.Logger level
 	appLevel := log.Logger.GetLevel()
 	switch {
 	case appLevel <= zerolog.DebugLevel:
@@ -176,30 +188,39 @@ func (a *ExpertAgent) SetClickHouseClient(c *client.Client) {
 
 // ChatResult holds the final response and events from a chat call.
 type ChatResult struct {
-	Content string
-	Model   string
-	Events  []ChatEvent
-	Err     error
+	Content   string
+	Model     string
+	Reasoning string // accumulated chain-of-thought
+	Events    []ChatEvent
+	Err       error
 }
 
 // Chat sends a message to the agent and returns the result with tool events.
 func (a *ExpertAgent) Chat(ctx context.Context, userMsg string, skill *Skill) (*ChatResult, error) {
-	return a.chatSync(ctx, userMsg, skill)
+	return a.chatSync(ctx, userMsg, skill, nil)
+}
+
+// ChatWithProgress is like Chat but sends events to progressCh as they happen.
+// The channel is NOT closed by this method; the caller should close it.
+func (a *ExpertAgent) ChatWithProgress(ctx context.Context, userMsg string, skill *Skill, progressCh chan<- ChatEvent) (*ChatResult, error) {
+	return a.chatSync(ctx, userMsg, skill, progressCh)
 }
 
 // openAIResponse is the raw response from OpenAI-compatible APIs.
+// We use raw HTTP because gollm.Generate() returns only a string and
+// doesn't expose tool calls, reasoning, or model info from the response.
 type openAIResponse struct {
 	Choices []struct {
 		Message struct {
-			Content   string `json:"content"`
-			ToolCalls []struct {
-				ID       string `json:"id"`
-				Type     string `json:"type"`
-				Function struct {
-					Name      string          `json:"name"`
-					Arguments json.RawMessage `json:"arguments"`
-				} `json:"function"`
-			} `json:"tool_calls"`
+			Content          string           `json:"content"`
+			Reasoning        string           `json:"reasoning"`
+			ReasoningDetails []struct {
+				Format string `json:"format"`
+				Index  int    `json:"index"`
+				Text   string `json:"text"`
+				Type   string `json:"type"`
+			} `json:"reasoning_details"`
+			ToolCalls []types.ToolCall `json:"tool_calls"`
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -209,7 +230,7 @@ type openAIResponse struct {
 	} `json:"error"`
 }
 
-// openAIRequest builds an OpenAI-compatible request body for tool calling.
+// openAIMessage is used to build the messages array for the API request.
 type openAIMessage struct {
 	Role       string          `json:"role"`
 	Content    string          `json:"content,omitempty"`
@@ -217,11 +238,14 @@ type openAIMessage struct {
 	ToolCallID string          `json:"tool_call_id,omitempty"`
 }
 
-func (a *ExpertAgent) chatSync(ctx context.Context, userMsg string, skill *Skill) (*ChatResult, error) {
+func (a *ExpertAgent) chatSync(ctx context.Context, userMsg string, skill *Skill, progressCh chan<- ChatEvent) (*ChatResult, error) {
 	promptText := userMsg
 	if skill != nil {
 		promptText = fmt.Sprintf("Using the following expert knowledge about %s:\n\n%s\n\nUser question: %s",
 			skill.DisplayName, skill.Content, userMsg)
+		a.activeSkillDir = skill.Path
+	} else {
+		a.activeSkillDir = ""
 	}
 
 	skillName := ""
@@ -245,22 +269,38 @@ func (a *ExpertAgent) chatSync(ctx context.Context, userMsg string, skill *Skill
 	}
 	messages = append(messages, openAIMessage{Role: "user", Content: promptText})
 
-	tools := a.buildToolsJSON()
+	tools := a.buildTools()
+	var toolsJSON json.RawMessage
+	if len(tools) > 0 {
+		toolsJSON, _ = json.Marshal(tools)
+	}
 	result := &ChatResult{}
 
+	sendProgress := func(ev ChatEvent) {
+		result.Events = append(result.Events, ev)
+		if progressCh != nil {
+			select {
+			case progressCh <- ev:
+			case <-ctx.Done():
+			}
+		}
+	}
+
 	onRetry := func(attempt int) {
-		result.Events = append(result.Events, ChatEvent{
+		sendProgress(ChatEvent{
 			Type:       "retry",
 			Attempt:    attempt,
 			MaxRetries: a.cfg.LlmRetriesCount,
 		})
 	}
 
-	const maxIterations = 10
+	maxIterations := a.cfg.MaxIterations
 	var finalContent strings.Builder
+	var finalReasoning strings.Builder
+	hadToolCalls := false
 
 	for i := 0; i < maxIterations; i++ {
-		resp, err := a.callAPI(ctx, messages, tools, onRetry)
+		resp, err := a.callAPI(ctx, messages, toolsJSON, onRetry)
 		if err != nil {
 			return nil, err
 		}
@@ -273,16 +313,39 @@ func (a *ExpertAgent) chatSync(ctx context.Context, userMsg string, skill *Skill
 			return nil, fmt.Errorf("empty response from LLM")
 		}
 
-		// Capture model info
 		if resp.Model != "" {
 			result.Model = resp.Model
-			result.Events = append(result.Events, ChatEvent{
+			sendProgress(ChatEvent{
 				Type:  "model_info",
 				Model: resp.Model,
 			})
 		}
 
 		choice := resp.Choices[0]
+
+		// Capture reasoning (from top-level field or first reasoning_detail)
+		reasoning := choice.Message.Reasoning
+		if reasoning == "" && len(choice.Message.ReasoningDetails) > 0 {
+			reasoning = choice.Message.ReasoningDetails[0].Text
+		}
+		if reasoning != "" {
+			finalReasoning.WriteString(reasoning)
+			finalReasoning.WriteString("\n\n")
+			sendProgress(ChatEvent{
+				Type:      "reasoning",
+				Reasoning: reasoning,
+			})
+		}
+
+		// Some models embed tool calls as XML tags in content instead of
+		// using the proper tool_calls JSON format. Parse them out.
+		if len(choice.Message.ToolCalls) == 0 && choice.Message.Content != "" {
+			parsed := parseInlineToolCalls(choice.Message.Content)
+			if len(parsed) > 0 {
+				choice.Message.ToolCalls = parsed
+				choice.Message.Content = stripInlineToolCalls(choice.Message.Content)
+			}
+		}
 
 		if choice.Message.Content != "" {
 			finalContent.WriteString(choice.Message.Content)
@@ -292,6 +355,7 @@ func (a *ExpertAgent) chatSync(ctx context.Context, userMsg string, skill *Skill
 			break
 		}
 
+		hadToolCalls = true
 		log.Info().Int("tool_calls", len(choice.Message.ToolCalls)).Msg("LLM requested tool calls")
 
 		toolCallsJSON, _ := json.Marshal(choice.Message.ToolCalls)
@@ -302,29 +366,35 @@ func (a *ExpertAgent) chatSync(ctx context.Context, userMsg string, skill *Skill
 		})
 
 		for _, tc := range choice.Message.ToolCalls {
-			args, err := parseToolArguments(tc.Function.Arguments)
+			args, err := getToolArguments(&tc)
 			queryStr := ""
 			if q, ok := args["query"]; ok {
 				queryStr = fmt.Sprintf("%v", q)
 			}
+			if tc.GetName() == "read_skill_sql" {
+				if fn, ok := args["filename"]; ok {
+					skillName := filepath.Base(a.activeSkillDir)
+					queryStr = fmt.Sprintf("%s/%v", skillName, fn)
+				}
+			}
 
-			result.Events = append(result.Events, ChatEvent{
+			sendProgress(ChatEvent{
 				Type:  "tool_start",
-				Tool:  tc.Function.Name,
+				Tool:  tc.GetName(),
 				Query: queryStr,
 			})
 
 			log.Info().
-				Str("tool", tc.Function.Name).
+				Str("tool", tc.GetName()).
 				Str("id", tc.ID).
 				Str("query", queryStr).
 				Msg("Executing tool call")
 
 			if err != nil {
-				log.Error().Err(err).Str("tool", tc.Function.Name).Msg("Failed to parse tool args")
-				result.Events = append(result.Events, ChatEvent{
+				log.Error().Err(err).Str("tool", tc.GetName()).Msg("Failed to parse tool args")
+				sendProgress(ChatEvent{
 					Type:  "tool_done",
-					Tool:  tc.Function.Name,
+					Tool:  tc.GetName(),
 					Error: fmt.Sprintf("parse args: %v", err),
 				})
 				messages = append(messages, openAIMessage{
@@ -335,12 +405,12 @@ func (a *ExpertAgent) chatSync(ctx context.Context, userMsg string, skill *Skill
 				continue
 			}
 
-			toolResult, err := a.ExecuteToolCall(ctx, tc.Function.Name, args)
+			toolResult, err := a.ExecuteToolCall(ctx, tc.GetName(), args)
 			if err != nil {
-				log.Error().Err(err).Str("tool", tc.Function.Name).Msg("Tool execution failed")
-				result.Events = append(result.Events, ChatEvent{
+				log.Error().Err(err).Str("tool", tc.GetName()).Msg("Tool execution failed")
+				sendProgress(ChatEvent{
 					Type:  "tool_done",
-					Tool:  tc.Function.Name,
+					Tool:  tc.GetName(),
 					Error: err.Error(),
 				})
 				messages = append(messages, openAIMessage{
@@ -350,12 +420,12 @@ func (a *ExpertAgent) chatSync(ctx context.Context, userMsg string, skill *Skill
 				})
 			} else {
 				log.Info().
-					Str("tool", tc.Function.Name).
+					Str("tool", tc.GetName()).
 					Int("result_len", len(toolResult)).
 					Msg("Tool call succeeded")
-				result.Events = append(result.Events, ChatEvent{
+				sendProgress(ChatEvent{
 					Type:   "tool_done",
-					Tool:   tc.Function.Name,
+					Tool:   tc.GetName(),
 					Result: toolResult,
 				})
 				messages = append(messages, openAIMessage{
@@ -365,10 +435,9 @@ func (a *ExpertAgent) chatSync(ctx context.Context, userMsg string, skill *Skill
 				})
 			}
 
-			// Add to visible history
 			a.history = append(a.history, ChatMessage{
 				Role:       "tool",
-				ToolName:   tc.Function.Name,
+				ToolName:   tc.GetName(),
 				ToolQuery:  queryStr,
 				ToolResult: truncate(toolResult, 500),
 				ToolError:  errStr(err),
@@ -377,17 +446,128 @@ func (a *ExpertAgent) chatSync(ctx context.Context, userMsg string, skill *Skill
 		finalContent.Reset()
 	}
 
+	// If the loop exhausted iterations with tool calls but no final text,
+	// make one more API call asking the LLM to summarize its findings.
+	if finalContent.Len() == 0 && hadToolCalls {
+		log.Warn().Int("max_iterations", maxIterations).Msg("Tool-call loop exhausted without final response, requesting summary")
+		messages = append(messages, openAIMessage{
+			Role:    "user",
+			Content: "You have gathered enough data. Now summarize your findings and provide actionable recommendations based on all the data you've collected above. Do NOT make any more tool calls.",
+		})
+		resp, err := a.callAPI(ctx, messages, nil, onRetry) // no tools — force text response
+		if err == nil && len(resp.Choices) > 0 {
+			choice := resp.Choices[0]
+			if choice.Message.Content != "" {
+				finalContent.WriteString(choice.Message.Content)
+			}
+			if resp.Model != "" {
+				result.Model = resp.Model
+			}
+			reasoning := choice.Message.Reasoning
+			if reasoning == "" && len(choice.Message.ReasoningDetails) > 0 {
+				reasoning = choice.Message.ReasoningDetails[0].Text
+			}
+			if reasoning != "" {
+				finalReasoning.WriteString(reasoning)
+				finalReasoning.WriteString("\n\n")
+			}
+		}
+	}
+
 	result.Content = finalContent.String()
+	reasoningText := strings.TrimSpace(finalReasoning.String())
+	result.Reasoning = reasoningText
 
 	a.history = append(a.history, ChatMessage{
-		Role:    "assistant",
-		Content: result.Content,
-		Model:   result.Model,
+		Role:      "assistant",
+		Content:   result.Content,
+		Model:     result.Model,
+		Reasoning: reasoningText,
+		ReasonLen: len(reasoningText),
 	})
 	a.llm.AddToMemory("user", promptText)
 	a.llm.AddToMemory("assistant", result.Content)
 
 	return result, nil
+}
+
+// Regex patterns for inline tool call formats that some models use
+// instead of the proper tool_calls JSON response format.
+var (
+	// <tool_call>{"name": "...", "arguments": {...}}</tool_call>
+	toolCallTagRe = regexp.MustCompile(`(?s)<tool_call>\s*(\{.*?\})\s*(?:</tool_call>)?`)
+	// <run_clickhouse_query>SELECT ... </run_clickhouse_query> or with <sql> wrapper
+	toolNameTagRe = regexp.MustCompile(`(?s)<run_clickhouse_query>\s*(?:<sql>\s*)?(.*?)(?:\s*</sql>)?\s*</run_clickhouse_query>`)
+)
+
+// parseInlineToolCalls extracts tool calls from XML tags in LLM content.
+func parseInlineToolCalls(content string) []types.ToolCall {
+	var result []types.ToolCall
+
+	// Format 1: <tool_call>{"name": "...", "arguments": {...}}</tool_call>
+	for i, match := range toolCallTagRe.FindAllStringSubmatch(content, -1) {
+		if len(match) < 2 {
+			continue
+		}
+		var parsed struct {
+			Name      string          `json:"name"`
+			Arguments json.RawMessage `json:"arguments"`
+		}
+		if err := json.Unmarshal([]byte(match[1]), &parsed); err != nil {
+			log.Warn().Err(err).Str("raw", match[1]).Msg("Failed to parse <tool_call> JSON")
+			continue
+		}
+		tc := types.ToolCall{
+			ID:   fmt.Sprintf("inline_call_%d", i),
+			Type: "function",
+		}
+		tc.Function.Name = parsed.Name
+		tc.Function.Arguments = parsed.Arguments
+		result = append(result, tc)
+	}
+
+	// Format 2: <run_clickhouse_query>SQL</run_clickhouse_query>
+	for i, match := range toolNameTagRe.FindAllStringSubmatch(content, -1) {
+		if len(match) < 2 {
+			continue
+		}
+		toolName := "run_clickhouse_query"
+		query := strings.TrimSpace(match[1])
+		args, _ := json.Marshal(map[string]string{"query": query})
+		tc := types.ToolCall{
+			ID:   fmt.Sprintf("inline_named_%d", i),
+			Type: "function",
+		}
+		tc.Function.Name = toolName
+		tc.Function.Arguments = args
+		result = append(result, tc)
+	}
+
+	return result
+}
+
+// stripInlineToolCalls removes all tool call XML blocks from content.
+func stripInlineToolCalls(content string) string {
+	cleaned := toolCallTagRe.ReplaceAllString(content, "")
+	cleaned = toolNameTagRe.ReplaceAllString(cleaned, "")
+	return strings.TrimSpace(cleaned)
+}
+
+// getToolArguments extracts arguments from a tool call, handling both
+// direct JSON objects and double-encoded JSON strings (common in OpenAI-compatible APIs).
+func getToolArguments(tc *types.ToolCall) (map[string]interface{}, error) {
+	args, err := tc.GetArguments()
+	if err == nil {
+		return args, nil
+	}
+	// Try double-encoded string: "{\"query\": \"...\"}"
+	var s string
+	if jsonErr := json.Unmarshal(tc.Function.Arguments, &s); jsonErr == nil {
+		if jsonErr = json.Unmarshal([]byte(s), &args); jsonErr == nil {
+			return args, nil
+		}
+	}
+	return nil, err
 }
 
 func truncate(s string, maxLen int) string {
@@ -413,7 +593,7 @@ func (e *errRateLimited) Error() string {
 	return fmt.Sprintf("API rate limited (429): %s", e.body)
 }
 
-// rateLimitClassifier retries only on *errRateLimited, fails on everything else.
+// rateLimitClassifier retries only on *errRateLimited.
 type rateLimitClassifier struct{}
 
 func (rateLimitClassifier) Classify(err error) retrier.Action {
@@ -428,16 +608,15 @@ func (rateLimitClassifier) Classify(err error) retrier.Action {
 }
 
 func (a *ExpertAgent) callAPI(ctx context.Context, messages []openAIMessage, tools json.RawMessage, onRetry func(attempt int)) (*openAIResponse, error) {
-	// Build request body
 	body := map[string]interface{}{
-		"model":    a.cfg.Model,
-		"messages": messages,
+		"model":      a.cfg.Model,
+		"messages":   messages,
+		"max_tokens": 4096,
 	}
 	if tools != nil {
-		body["tools"] = tools
+		body["tools"] = json.RawMessage(tools)
 		body["tool_choice"] = "auto"
 	}
-	body["max_tokens"] = 4096
 
 	reqBody, err := json.Marshal(body)
 	if err != nil {
@@ -479,7 +658,6 @@ func (a *ExpertAgent) callAPI(ctx context.Context, messages []openAIMessage, too
 
 		resp, doErr := http.DefaultClient.Do(req)
 		if doErr != nil {
-			log.Error().Stack().Err(doErr).Str("endpoint", endpoint).Msg("LLM API request failed")
 			return fmt.Errorf("API request failed: %w", doErr)
 		}
 		defer func() {
@@ -490,19 +668,17 @@ func (a *ExpertAgent) callAPI(ctx context.Context, messages []openAIMessage, too
 
 		respBody, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
-			log.Error().Stack().Err(readErr).Str("endpoint", endpoint).Msg("Failed to read LLM API response")
 			return fmt.Errorf("read response: %w", readErr)
 		}
 
 		log.Debug().RawJSON("response", respBody).Int("status", resp.StatusCode).Msg("LLM API response")
 
 		if resp.StatusCode == http.StatusTooManyRequests {
-			log.Warn().Int("attempt", attempt).Str("endpoint", endpoint).Str("body", string(respBody)).Msg("LLM API rate limited (429), will retry")
+			log.Warn().Int("attempt", attempt).Str("body", string(respBody)).Msg("LLM API rate limited (429), will retry")
 			return &errRateLimited{body: string(respBody)}
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			log.Error().Stack().Int("status", resp.StatusCode).Str("body", string(respBody)).Str("endpoint", endpoint).Msg("LLM API error")
 			return fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(respBody))
 		}
 
@@ -518,28 +694,6 @@ func (a *ExpertAgent) callAPI(ctx context.Context, messages []openAIMessage, too
 		return nil, err
 	}
 	return result, nil
-}
-
-// parseToolArguments handles both forms of tool call arguments:
-// - JSON object: {"query": "SELECT 1"}
-// - JSON string: "{\"query\": \"SELECT 1\"}" (OpenAI-compatible APIs often return this)
-func parseToolArguments(raw json.RawMessage) (map[string]interface{}, error) {
-	// Try as object first
-	var args map[string]interface{}
-	if err := json.Unmarshal(raw, &args); err == nil {
-		return args, nil
-	}
-
-	// Try as JSON-encoded string
-	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
-		if err := json.Unmarshal([]byte(s), &args); err == nil {
-			return args, nil
-		}
-		return nil, fmt.Errorf("arguments string is not valid JSON: %s", s)
-	}
-
-	return nil, fmt.Errorf("cannot parse arguments: %s", string(raw))
 }
 
 func providerEndpoint(cfg config.ExpertConfig) string {
@@ -564,18 +718,17 @@ func providerEndpoint(cfg config.ExpertConfig) string {
 	}
 }
 
-func (a *ExpertAgent) buildToolsJSON() json.RawMessage {
-	if a.chClient == nil {
-		return nil
-	}
-
-	tools := []map[string]interface{}{
+// buildTools returns tool definitions using gollm types.
+// Tools are always declared so the model knows they exist;
+// ExecuteToolCall will return an error if the ClickHouse client is not connected.
+func (a *ExpertAgent) buildTools() []gollm.Tool {
+	tools := []gollm.Tool{
 		{
-			"type": "function",
-			"function": map[string]interface{}{
-				"name":        "run_clickhouse_query",
-				"description": "Execute a read-only SQL query against the connected ClickHouse server. Only SELECT, SHOW, DESCRIBE, EXISTS queries are allowed. Returns tab-separated results.",
-				"parameters": map[string]interface{}{
+			Type: "function",
+			Function: gollm.Function{
+				Name:        "run_clickhouse_query",
+				Description: "Execute a read-only SQL query against the connected ClickHouse server. Only SELECT, SHOW, DESCRIBE, EXISTS queries are allowed. Returns tab-separated results.",
+				Parameters: map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
 						"query": map[string]interface{}{
@@ -588,28 +741,21 @@ func (a *ExpertAgent) buildToolsJSON() json.RawMessage {
 			},
 		},
 	}
-
-	data, _ := json.Marshal(tools)
-	return data
-}
-
-func (a *ExpertAgent) buildTools() []gollm.Tool {
-	var tools []gollm.Tool
-	if a.chClient != nil {
+	if a.activeSkillDir != "" {
 		tools = append(tools, gollm.Tool{
 			Type: "function",
 			Function: gollm.Function{
-				Name:        "run_clickhouse_query",
-				Description: "Execute a read-only SQL query against the connected ClickHouse server. Only SELECT, SHOW, DESCRIBE, EXISTS queries are allowed.",
+				Name:        "read_skill_sql",
+				Description: "Read a .sql file from the current skill directory. Use this to load predefined diagnostic queries referenced in the skill description (e.g. checks.sql, metrics.sql).",
 				Parameters: map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
-						"query": map[string]interface{}{
+						"filename": map[string]interface{}{
 							"type":        "string",
-							"description": "The SQL SELECT query to execute",
+							"description": "The .sql filename to read (e.g. 'checks.sql', 'metrics.sql')",
 						},
 					},
-					"required": []string{"query"},
+					"required": []string{"filename"},
 				},
 			},
 		})
@@ -622,9 +768,35 @@ func (a *ExpertAgent) ExecuteToolCall(_ context.Context, toolName string, args m
 	switch toolName {
 	case "run_clickhouse_query":
 		return a.executeClickHouseQuery(args)
+	case "read_skill_sql":
+		return a.executeReadSkillSQL(args)
 	default:
 		return "", fmt.Errorf("unknown tool: %s", toolName)
 	}
+}
+
+func (a *ExpertAgent) executeReadSkillSQL(args map[string]interface{}) (string, error) {
+	if a.activeSkillDir == "" {
+		return "", fmt.Errorf("no active skill directory")
+	}
+	filename, ok := args["filename"].(string)
+	if !ok {
+		return "", fmt.Errorf("filename argument must be a string")
+	}
+	// Sanitize: only allow simple filenames with .sql extension
+	if strings.Contains(filename, "/") || strings.Contains(filename, "\\") || strings.Contains(filename, "..") {
+		return "", fmt.Errorf("invalid filename: path traversal not allowed")
+	}
+	if !strings.HasSuffix(filename, ".sql") {
+		return "", fmt.Errorf("only .sql files can be read")
+	}
+	filePath := filepath.Join(a.activeSkillDir, filename)
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", filename, err)
+	}
+	log.Info().Str("file", filename).Int("bytes", len(data)).Msg("Read skill SQL file")
+	return string(data), nil
 }
 
 func (a *ExpertAgent) executeClickHouseQuery(args map[string]interface{}) (string, error) {
@@ -637,10 +809,29 @@ func (a *ExpertAgent) executeClickHouseQuery(args map[string]interface{}) (strin
 		return "", fmt.Errorf("query argument must be a string")
 	}
 
-	trimmed := strings.TrimSpace(strings.ToUpper(query))
-	if !strings.HasPrefix(trimmed, "SELECT") && !strings.HasPrefix(trimmed, "SHOW") &&
-		!strings.HasPrefix(trimmed, "DESCRIBE") && !strings.HasPrefix(trimmed, "EXISTS") &&
-		!strings.HasPrefix(trimmed, "WITH") {
+	trimmed := strings.TrimSpace(query)
+	// Strip leading SQL comments (-- line comments and /* block comments */)
+	for {
+		if strings.HasPrefix(trimmed, "--") {
+			if idx := strings.Index(trimmed, "\n"); idx >= 0 {
+				trimmed = strings.TrimSpace(trimmed[idx+1:])
+			} else {
+				trimmed = ""
+			}
+		} else if strings.HasPrefix(trimmed, "/*") {
+			if idx := strings.Index(trimmed, "*/"); idx >= 0 {
+				trimmed = strings.TrimSpace(trimmed[idx+2:])
+			} else {
+				trimmed = ""
+			}
+		} else {
+			break
+		}
+	}
+	upper := strings.ToUpper(trimmed)
+	if !strings.HasPrefix(upper, "SELECT") && !strings.HasPrefix(upper, "SHOW") &&
+		!strings.HasPrefix(upper, "DESCRIBE") && !strings.HasPrefix(upper, "EXISTS") &&
+		!strings.HasPrefix(upper, "WITH") {
 		return "", fmt.Errorf("only SELECT, SHOW, DESCRIBE, EXISTS, and WITH (CTE) queries are allowed")
 	}
 

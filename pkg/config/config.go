@@ -47,6 +47,7 @@ type ExpertConfig struct {
 	LlmRetriesCount    int           `yaml:"llm_retries"`       // number of retries on HTTP 429 (default: 4)
 	LlmRetriesPauseRaw string        `yaml:"llm_retries_pause"` // initial pause between retries, e.g. "1s" (default: 1s)
 	LlmRetriesPause    time.Duration `yaml:"-"`                 // parsed from LlmRetriesPauseRaw
+	MaxIterations      int           `yaml:"max_iterations"`    // max tool-call loop iterations (default: 25)
 }
 
 // ResolveAPIKey returns the API key from config or environment.
@@ -143,6 +144,11 @@ func Load(cliInstance *types.CLI, home string) (*Config, error) {
 		cfg.Expert.LlmTimeout = dur
 	} else {
 		cfg.Expert.LlmTimeout = 5 * time.Minute
+	}
+
+	// Parse max iterations
+	if cfg.Expert.MaxIterations == 0 {
+		cfg.Expert.MaxIterations = 25
 	}
 
 	// Parse LLM retries

@@ -13,6 +13,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/Slach/clickhouse-timeline/pkg/client"
 	"github.com/Slach/clickhouse-timeline/pkg/config"
+	"github.com/Slach/clickhouse-timeline/pkg/expert"
 	"github.com/Slach/clickhouse-timeline/pkg/models"
 	"github.com/Slach/clickhouse-timeline/pkg/types"
 	"github.com/araddon/dateparse"
@@ -104,6 +105,9 @@ type App struct {
 	scaleHandler       tea.Model
 	expertHandler      tea.Model
 
+	// Ctrl+C double-press tracking
+	lastCtrlC time.Time
+
 	// CLI parameter handling
 	initialContext *config.Context // Context to connect to from CLI params
 
@@ -126,8 +130,9 @@ type App struct {
 	initialToTime   time.Time
 	CLI             *types.CLI
 
-	version string
-	cfg     *config.Config
+	version    string
+	cfg        *config.Config
+	usingMouse bool // when false, terminal handles text selection natively; when true, app captures mouse for scrolling
 }
 
 // NewApp creates a new App instance
@@ -149,7 +154,7 @@ func NewApp(cfg *config.Config, version string) *App {
 		mainMessage: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("226")).
 			Render(logo) +
-			"\n\nWelcome to ClickHouse Timeline\nPress ':' to enter command mode\n\nTip: To copy text from any view, use your terminal's selection (mouse drag) and copy (Ctrl+Shift+C or Cmd+C)",
+			"\n\nWelcome to ClickHouse Timeline\nPress ':' to enter command mode\n\nTip: To select and copy text, hold Shift and drag with mouse, then copy (Ctrl+Shift+C or Cmd+C)",
 		// Default values
 		categoryType:  CategoryQueryHash,
 		heatmapMetric: MetricCount,
@@ -189,7 +194,41 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
-		return a, nil
+		// Forward to current page handler so it can resize its viewport
+		switch a.currentPage {
+		case pageExpert:
+			if a.expertHandler != nil {
+				a.expertHandler, cmd = a.expertHandler.Update(msg)
+				cmds = append(cmds, cmd)
+			}
+		case pageLogs:
+			if a.logsHandler != nil {
+				a.logsHandler, cmd = a.logsHandler.Update(msg)
+				cmds = append(cmds, cmd)
+			}
+		case pageFlamegraph:
+			if a.flamegraphHandler != nil {
+				a.flamegraphHandler, cmd = a.flamegraphHandler.Update(msg)
+				cmds = append(cmds, cmd)
+			}
+		case pageAudit:
+			if a.auditHandler != nil {
+				a.auditHandler, cmd = a.auditHandler.Update(msg)
+				cmds = append(cmds, cmd)
+			}
+		}
+		return a, tea.Batch(cmds...)
+
+	case tea.MouseWheelMsg:
+		// Forward mouse wheel events to current page handler
+		switch a.currentPage {
+		case pageExpert:
+			if a.expertHandler != nil {
+				a.expertHandler, cmd = a.expertHandler.Update(msg)
+				cmds = append(cmds, cmd)
+			}
+		}
+		return a, tea.Batch(cmds...)
 
 	case ScaleSelectedMsg:
 		// Handle scale selection
@@ -411,6 +450,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, tea.Batch(cmds...)
 
+	case expertEventMsg:
+		if a.currentPage == pageExpert && a.expertHandler != nil {
+			a.expertHandler, cmd = a.expertHandler.Update(msg)
+			cmds = append(cmds, cmd)
+		}
+		return a, tea.Batch(cmds...)
+
 	case expertTickMsg:
 		if a.currentPage == pageExpert && a.expertHandler != nil {
 			a.expertHandler, cmd = a.expertHandler.Update(msg)
@@ -603,15 +649,61 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.updateCommandSuggestions()
 			return a, nil
 
-		case "ctrl+c", "q":
-			if a.currentPage == pageMain {
-				return a, tea.Quit
-			}
+		case "q":
 			// Don't intercept 'q' in expert mode — it's part of text input
 			if a.currentPage == pageExpert {
 				break
 			}
-			// On other pages, 'q' goes back to main
+			// Don't intercept 'q' in logs when text input is active
+			if a.currentPage == pageLogs && a.logsHandler != nil {
+				if _, ok := a.logsHandler.(*logsConfigForm); ok {
+					break // config form has text inputs
+				}
+				if lv, ok := a.logsHandler.(*logsViewer); ok && lv.IsTableFiltering() {
+					break
+				}
+			}
+			if a.currentPage == pageMain {
+				return a, tea.Quit
+			}
+			a.currentPage = pageMain
+			return a, nil
+
+		case "ctrl+c":
+			now := time.Now()
+			// Double Ctrl+C within 1 second — quit from anywhere
+			if now.Sub(a.lastCtrlC) < time.Second {
+				return a, tea.Quit
+			}
+			a.lastCtrlC = now
+
+			if a.currentPage == pageMain {
+				return a, tea.Quit
+			}
+			// On expert page: cancel in-flight request or go back
+			if a.currentPage == pageExpert && a.expertHandler != nil {
+				if ev, ok := a.expertHandler.(*expertViewer); ok && ev.loading && ev.cancelFunc != nil {
+					ev.cancelFunc()
+					ev.cancelFunc = nil
+					ev.loading = false
+					ev.eventCh = nil
+					ev.streamBuffer.Reset()
+					ev.messages = append(ev.messages, expert.ChatMessage{
+						Role:    "system",
+						Content: "Request cancelled. Press Ctrl+C again to quit.",
+					})
+					ev.viewport.SetContent(ev.renderChat())
+					ev.viewport.GotoBottom()
+					return a, nil
+				}
+			}
+			// On logs page: save config before leaving
+			if a.currentPage == pageLogs && a.logsHandler != nil {
+				if lf, ok := a.logsHandler.(*logsConfigForm); ok {
+					lf.saveCurrentConfig()
+				}
+			}
+			// On any sub-page: go back to main
 			a.currentPage = pageMain
 			return a, nil
 
@@ -751,7 +843,9 @@ func (a *App) View() tea.View {
 	if a.width == 0 {
 		v := tea.NewView("Loading...")
 		v.AltScreen = true
-		v.MouseMode = tea.MouseModeCellMotion
+		if a.usingMouse {
+			v.MouseMode = tea.MouseModeCellMotion
+		}
 		return v
 	}
 
@@ -935,7 +1029,9 @@ func (a *App) View() tea.View {
 
 	v := tea.NewView(content)
 	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion
+	if a.usingMouse {
+		v.MouseMode = tea.MouseModeCellMotion
+	}
 	return v
 }
 
@@ -1114,16 +1210,16 @@ func (a *App) Run() error {
 
 	// Determine if mouse support should be enabled
 	// Priority: CLI flag > config file > default (true)
-	usingMouse := true
+	a.usingMouse = true
 	if a.cfg != nil && !a.cfg.UI.UsingMouse {
-		usingMouse = false
+		a.usingMouse = false
 	}
 	if a.state.CLI != nil && a.state.CLI.DisableMouse {
-		usingMouse = false
+		a.usingMouse = false
 	}
 
 	log.Debug().
-		Bool("using_mouse", usingMouse).
+		Bool("using_mouse", a.usingMouse).
 		Bool("config_using_mouse", a.cfg.UI.UsingMouse).
 		Bool("cli_disable_mouse", a.state.CLI != nil && a.state.CLI.DisableMouse).
 		Msg("Mouse support configuration")

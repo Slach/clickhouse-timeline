@@ -4,6 +4,7 @@
 .vscode/
 .gigaide/
 .claude/
+.qwen/
 .vtcode/
 .coding-aider-plans
 build/

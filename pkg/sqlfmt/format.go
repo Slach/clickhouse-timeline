@@ -17,7 +17,7 @@ import (
 func FormatSQL(sql string) string {
 	parsed, err := gosqlx.ParseWithDialect(sql, keywords.DialectClickHouse)
 	if err != nil {
-		log.Debug().Err(err).Msg("gosqlx.ParseWithDialect failed, falling back to regexp formatter")
+		log.Debug().Err(err).Str("original_query", sql).Msg("gosqlx.ParseWithDialect failed, falling back to regexp formatter")
 		return FormatSQLRegexp(sql)
 	}
 	opts := ast.ReadableStyle()

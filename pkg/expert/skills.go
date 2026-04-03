@@ -83,15 +83,20 @@ func pullSkills(ctx context.Context, dir string) error {
 	}
 
 	err = wt.PullContext(ctx, &git.PullOptions{
-		Depth: 1,
-		Force: true,
+		RemoteName: "origin",
+		Force:      true,
 	})
 	if err == git.NoErrAlreadyUpToDate {
 		log.Info().Msg("Skills already up to date")
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("pull skills repo: %w", err)
+		// go-git has issues pulling shallow repos; re-clone as fallback
+		log.Warn().Err(err).Msg("Pull failed, re-cloning skills repository")
+		if removeErr := os.RemoveAll(dir); removeErr != nil {
+			return fmt.Errorf("remove skills dir for re-clone: %w", removeErr)
+		}
+		return CloneOrUpdateSkills(ctx, "")
 	}
 
 	log.Info().Msg("Skills repository updated")
