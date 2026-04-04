@@ -171,6 +171,71 @@ contexts:
     tls_verify: true
 ```
 
+### LLM Expert Mode
+
+The Expert mode provides an AI-powered assistant that can analyze your ClickHouse cluster, run diagnostic queries, and provide optimization recommendations using natural language.
+
+Use the `:expert` command in the TUI to start an interactive chat session with the AI assistant.
+
+![Expert mode chat](./screenshots/expert_1.jpg)
+
+![Expert mode analysis](./screenshots/expert_2.jpg)
+
+#### Expert Configuration
+
+Add the `expert` section to your configuration file to enable the LLM provider:
+
+```yaml
+expert:
+  provider: "anthropic"                # LLM provider: openai, anthropic, ollama, groq, openrouter, deepseek, mistral, cohere, google
+  model: "claude-sonnet-4-20250514"    # Model name (provider-specific)
+  api_key_env: "ANTHROPIC_API_KEY"     # Environment variable containing the API key
+  # api_key: "sk-..."                  # Or set the API key directly (not recommended)
+  # base_url: "https://custom.endpoint/v1"  # Custom API endpoint (optional)
+  # skills_repo: "https://github.com/Altinity/Skills"  # Repository with diagnostic SQL skills
+  # llm_timeout: "5m"                  # Request timeout (default: 5m)
+  # llm_retries: 4                     # Retry count on rate limits (default: 4)
+  # llm_retries_pause: "1s"            # Initial retry pause (default: 1s)
+  # max_iterations: 25                 # Max tool-call iterations per request (default: 25)
+  # llm_log_level: "info"              # Log level: debug, info, warn, error
+```
+
+#### Provider Examples
+
+**OpenAI:**
+```yaml
+expert:
+  provider: "openai"
+  model: "gpt-4o"
+  api_key_env: "OPENAI_API_KEY"
+```
+
+**Anthropic:**
+```yaml
+expert:
+  provider: "anthropic"
+  model: "claude-sonnet-4-20250514"
+  api_key_env: "ANTHROPIC_API_KEY"
+```
+
+**Ollama (local):**
+```yaml
+expert:
+  provider: "ollama"
+  model: "llama3"
+  base_url: "http://localhost:11434"
+```
+
+**OpenRouter:**
+```yaml
+expert:
+  provider: "openrouter"
+  model: "anthropic/claude-sonnet-4-20250514"
+  api_key_env: "OPENROUTER_API_KEY"
+```
+
+The expert assistant can execute diagnostic SQL queries against your connected ClickHouse cluster and uses a set of built-in skills from the [Altinity/Skills](https://github.com/Altinity/Skills) repository for common analysis tasks.
+
 ## Interactive Commands
 
 Once in the TUI, use these commands:
