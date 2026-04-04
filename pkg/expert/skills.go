@@ -139,6 +139,7 @@ func LoadSkills() ([]Skill, error) {
 }
 
 // parseSkillMD extracts display name, description, and content from SKILL.md.
+// Supports both YAML frontmatter (--- delimited) and markdown heading formats.
 func parseSkillMD(name, path, content string) Skill {
 	skill := Skill{
 		Name:    name,
@@ -147,40 +148,63 @@ func parseSkillMD(name, path, content string) Skill {
 	}
 
 	lines := strings.Split(content, "\n")
-	var descLines []string
-	foundHeading := false
-	inDescription := false
 
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
+	// Try YAML frontmatter first (--- delimited block at the start)
+	if len(lines) > 0 && strings.TrimSpace(lines[0]) == "---" {
+		for _, line := range lines[1:] {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "---" {
+				break // End of frontmatter
+			}
+			if val, ok := strings.CutPrefix(trimmed, "name:"); ok {
+				skill.DisplayName = strings.TrimSpace(val)
+			}
+			if val, ok := strings.CutPrefix(trimmed, "description:"); ok {
+				skill.Description = strings.TrimSpace(val)
+			}
+		}
+	}
 
-		// Extract heading
-		if !foundHeading && strings.HasPrefix(trimmed, "# ") {
-			skill.DisplayName = strings.TrimPrefix(trimmed, "# ")
-			foundHeading = true
-			inDescription = true
-			continue
+	// Fall back to markdown heading + first paragraph if frontmatter didn't provide values
+	if skill.DisplayName == "" || skill.Description == "" {
+		var descLines []string
+		foundHeading := false
+		inDescription := false
+
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+
+			if !foundHeading && strings.HasPrefix(trimmed, "# ") {
+				if skill.DisplayName == "" {
+					skill.DisplayName = strings.TrimPrefix(trimmed, "# ")
+				}
+				foundHeading = true
+				inDescription = skill.Description == ""
+				continue
+			}
+
+			if inDescription {
+				if trimmed == "" {
+					if len(descLines) > 0 {
+						break
+					}
+					continue
+				}
+				if strings.HasPrefix(trimmed, "#") {
+					break
+				}
+				descLines = append(descLines, trimmed)
+			}
 		}
 
-		// Collect description (first paragraph after heading)
-		if inDescription {
-			if trimmed == "" {
-				if len(descLines) > 0 {
-					break // End of first paragraph
-				}
-				continue // Skip blank lines before first paragraph
-			}
-			if strings.HasPrefix(trimmed, "#") {
-				break // Next heading
-			}
-			descLines = append(descLines, trimmed)
+		if skill.Description == "" && len(descLines) > 0 {
+			skill.Description = strings.Join(descLines, " ")
 		}
 	}
 
 	if skill.DisplayName == "" {
 		skill.DisplayName = name
 	}
-	skill.Description = strings.Join(descLines, " ")
 
 	return skill
 }

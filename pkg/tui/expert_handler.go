@@ -7,7 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
@@ -53,7 +54,7 @@ type ExpertSkillsLoadedMsg struct {
 // expertViewer is the TUI model for the expert chat view.
 type expertViewer struct {
 	viewport viewport.Model
-	input    textinput.Model
+	input    textarea.Model
 	messages []expert.ChatMessage
 	agent    *expert.ExpertAgent
 
@@ -199,7 +200,8 @@ func (m *expertViewer) syncViewportHeight() {
 		}
 	}
 
-	baseVpHeight := m.height - 6
+	// title(1) + \n(1) + \n(1) + input border(2) + input lines(3) = 8
+	baseVpHeight := m.height - 8
 	vpHeight := baseVpHeight - suggestionsHeight
 	if vpHeight < 5 {
 		vpHeight = 5
@@ -212,13 +214,19 @@ func (m *expertViewer) syncViewportHeight() {
 
 func newExpertViewer(width, height int, cfg config.ExpertConfig) expertViewer {
 	// Chat viewport
-	vp := viewport.New(viewport.WithWidth(width-2), viewport.WithHeight(height-6))
+	vp := viewport.New(viewport.WithWidth(width-2), viewport.WithHeight(height-8))
 
-	// Input field
-	ti := textinput.New()
-	ti.Placeholder = "Type message or /skill..."
+	// Input field (multiline textarea)
+	ti := textarea.New()
+	ti.Placeholder = "Type message or /skill... (Shift+Enter for newline)"
 	ti.Prompt = "> "
-	ti.CharLimit = 2000
+	ti.CharLimit = 4000
+	ti.ShowLineNumbers = false
+	ti.SetHeight(3)
+	ti.MaxHeight = 8
+	ti.SetWidth(width - 4)
+	// Enter sends the message; Shift+Enter inserts a newline
+	ti.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("shift+enter"))
 	_ = ti.Focus()
 
 	// Markdown renderer for LLM responses
@@ -353,7 +361,7 @@ func (m *expertViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(m.skillSuggestions) > 0 {
 					selected := m.skillSuggestions[m.selectedSkillPosition]
 					m.input.SetValue("/" + selected + " ")
-					m.input.SetCursor(len(m.input.Value()))
+					m.input.CursorEnd()
 					m.showSkillSuggestions = false
 					m.syncViewportHeight()
 				}
@@ -400,7 +408,7 @@ func (m *expertViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Handle /clear command to reset the dialog
 			if value == "/clear" {
-				m.input.SetValue("")
+				m.input.Reset()
 				m.messages = nil
 				m.streamBuffer.Reset()
 				m.blockFocusIdx = -1
@@ -441,12 +449,23 @@ func (m *expertViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "up":
-			m.viewport.ScrollUp(1)
-			return m, nil
+			// Scroll viewport when input is empty; otherwise let textarea handle cursor
+			if strings.TrimSpace(m.input.Value()) == "" {
+				m.viewport.ScrollUp(1)
+				return m, nil
+			}
+			var cmd tea.Cmd
+			m.input, cmd = m.input.Update(msg)
+			cmds = append(cmds, cmd)
 
 		case "down":
-			m.viewport.ScrollDown(1)
-			return m, nil
+			if strings.TrimSpace(m.input.Value()) == "" {
+				m.viewport.ScrollDown(1)
+				return m, nil
+			}
+			var cmd tea.Cmd
+			m.input, cmd = m.input.Update(msg)
+			cmds = append(cmds, cmd)
 
 		case "pgup", "pgdown", "ctrl+u", "ctrl+d":
 			// Let viewport handle scrolling (falls through to viewport.Update below)
@@ -466,7 +485,8 @@ func (m *expertViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.viewport.SetWidth(msg.Width - 2)
-		m.viewport.SetHeight(msg.Height - 6)
+		m.viewport.SetHeight(msg.Height - 8)
+		m.input.SetWidth(msg.Width - 4)
 		// Recreate markdown renderer with new width
 		mdWidth := msg.Width - 2
 		if mdWidth < 40 {
@@ -490,7 +510,7 @@ func (m *expertViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *expertViewer) sendMessage(value string) tea.Cmd {
-	m.input.SetValue("")
+	m.input.Reset()
 	m.showSkillSuggestions = false
 	m.loading = true
 	m.loadingStart = time.Now()
