@@ -216,6 +216,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.auditHandler, cmd = a.auditHandler.Update(msg)
 				cmds = append(cmds, cmd)
 			}
+		case pageMemory:
+			if a.memoryHandler != nil {
+				a.memoryHandler, cmd = a.memoryHandler.Update(msg)
+				cmds = append(cmds, cmd)
+			}
 		}
 		return a, tea.Batch(cmds...)
 
@@ -415,6 +420,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 		return a, tea.Batch(cmds...)
+
+	case ExpertExitMsg:
+		a.SwitchToMainPage("")
+		return a, nil
 
 	case ExpertSkillsLoadedMsg:
 		if a.currentPage == pageExpert && a.expertHandler != nil {
@@ -1046,18 +1055,19 @@ func (a *App) updateCommandSuggestions() {
 		return
 	}
 
-	// Filter commands that start with the input
+	// Filter commands that start with the input (case-insensitive)
 	var suggestions []string
+	lowerInput := strings.ToLower(input)
 	for _, cmd := range availableCommands {
-		if strings.HasPrefix(cmd, input) {
+		if strings.HasPrefix(strings.ToLower(cmd), lowerInput) {
 			suggestions = append(suggestions, cmd)
 		}
 	}
 
-	// If no exact prefix matches, try contains
+	// If no exact prefix matches, try contains (case-insensitive)
 	if len(suggestions) == 0 {
 		for _, cmd := range availableCommands {
-			if strings.Contains(cmd, input) {
+			if strings.Contains(strings.ToLower(cmd), lowerInput) {
 				suggestions = append(suggestions, cmd)
 			}
 		}
@@ -1103,6 +1113,7 @@ func (a *App) SwitchToMainPage(mainMsg string) {
 
 // executeCommand executes a command and returns a tea.Cmd
 func (a *App) executeCommand(commandName string) tea.Cmd {
+	commandName = strings.ToLower(commandName)
 	log.Info().Str("command", commandName).Msg("Executing command")
 
 	// Check prerequisites for commands that need them

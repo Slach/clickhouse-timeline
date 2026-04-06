@@ -257,6 +257,7 @@ Once in the TUI, use these commands:
 - `:metric_log` - Show system.metric_log metrics
 - `:asynchronous_metric_log` - Show system.asynchronous_metric_log metrics
 - `:audit` - Run system audit and show diagnostics and suggestions
+- `:expert` - Start an AI-powered chat session for cluster analysis and optimization (requires LLM provider configuration)
 
 ### Navigation:
 - Use arrow keys to navigate

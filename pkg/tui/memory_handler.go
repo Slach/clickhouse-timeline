@@ -36,7 +36,7 @@ func newMemoryViewer(width, height int) memoryViewer {
 		"Memory Usage",
 		[]string{"Group", "Name"},
 		width,
-		height-4,
+		height,
 	)
 
 	return memoryViewer{
@@ -55,6 +55,12 @@ func (m memoryViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m.table.SetSize(msg.Width, msg.Height)
+		return m, nil
+
 	case MemoryDataMsg:
 		m.loading = false
 		if msg.Err != nil {
@@ -67,7 +73,7 @@ func (m memoryViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			"Memory Usage",
 			msg.Headers,
 			m.width,
-			m.height-4,
+			m.height,
 		)
 		m.table.SetRows(msg.Rows)
 		return m, nil

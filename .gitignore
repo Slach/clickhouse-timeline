@@ -6,6 +6,7 @@
 .claude/
 .qwen/
 .vtcode/
+.bg-shell/
 .coding-aider-plans
 build/
 AGENTS.md

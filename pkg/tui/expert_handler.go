@@ -29,6 +29,9 @@ type ExpertDoneMsg struct {
 	Err error
 }
 
+// ExpertExitMsg signals that the user wants to exit the expert view.
+type ExpertExitMsg struct{}
+
 // expertResponseMsg carries the full LLM response for display.
 type expertResponseMsg struct {
 	Content   string
@@ -218,7 +221,7 @@ func newExpertViewer(width, height int, cfg config.ExpertConfig) expertViewer {
 
 	// Input field (multiline textarea)
 	ti := textarea.New()
-	ti.Placeholder = "Type message or /skill... (Shift+Enter for newline)"
+	ti.Placeholder = "Type message or /skill... (Shift+Enter newline, /exit to quit)"
 	ti.Prompt = "> "
 	ti.CharLimit = 4000
 	ti.ShowLineNumbers = false
@@ -406,8 +409,13 @@ func (m *expertViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if value == "" {
 				return m, nil
 			}
+			// Handle /exit command to return to main window
+			if strings.EqualFold(value, "/exit") {
+				m.input.Reset()
+				return m, func() tea.Msg { return ExpertExitMsg{} }
+			}
 			// Handle /clear command to reset the dialog
-			if value == "/clear" {
+			if strings.EqualFold(value, "/clear") {
 				m.input.Reset()
 				m.messages = nil
 				m.streamBuffer.Reset()
@@ -589,6 +597,9 @@ func (m *expertViewer) sendMessage(value string) tea.Cmd {
 	return tea.Batch(llmCmd, waitForExpertEvent(eventCh), expertTimerTick())
 }
 
+// builtinCommands are always available in autocomplete alongside skills.
+var builtinCommands = []string{"clear", "exit"}
+
 func (m *expertViewer) updateSkillSuggestions() {
 	value := m.input.Value()
 
@@ -598,21 +609,23 @@ func (m *expertViewer) updateSkillSuggestions() {
 		return
 	}
 
-	prefix := value[1:] // Remove /
+	prefix := strings.ToLower(value[1:]) // Remove / and lowercase for case-insensitive match
 	m.showSkillSuggestions = true
 	m.skillSuggestions = nil
 
-	// Prefix match
-	for _, name := range m.skillNames {
-		if strings.HasPrefix(name, prefix) {
+	allNames := append(builtinCommands, m.skillNames...)
+
+	// Prefix match (case-insensitive)
+	for _, name := range allNames {
+		if strings.HasPrefix(strings.ToLower(name), prefix) {
 			m.skillSuggestions = append(m.skillSuggestions, name)
 		}
 	}
 
-	// Contains fallback
+	// Contains fallback (case-insensitive)
 	if len(m.skillSuggestions) == 0 {
-		for _, name := range m.skillNames {
-			if strings.Contains(name, prefix) {
+		for _, name := range allNames {
+			if strings.Contains(strings.ToLower(name), prefix) {
 				m.skillSuggestions = append(m.skillSuggestions, name)
 			}
 		}
@@ -620,7 +633,7 @@ func (m *expertViewer) updateSkillSuggestions() {
 
 	// Show all if just "/"
 	if prefix == "" {
-		m.skillSuggestions = append([]string{}, m.skillNames...)
+		m.skillSuggestions = append([]string{}, allNames...)
 	}
 
 	if len(m.skillSuggestions) == 0 {

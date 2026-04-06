@@ -109,7 +109,7 @@ func createFilteredTableBubble(title string, headers []string, columns []table.C
 	s := table.Styles{
 		Header:   lipgloss.NewStyle().Bold(true).Padding(0, 1),
 		Cell:     lipgloss.NewStyle().Padding(0, 1),
-		Selected: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")),
+		Selected: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("255")).Background(lipgloss.Color("62")),
 	}
 
 	t := table.New(
@@ -176,7 +176,7 @@ func (m *FilteredTable) SetBorderColor(color color.Color) {
 	s := table.Styles{
 		Header:   lipgloss.NewStyle().Bold(true).Padding(0, 1).BorderForeground(color),
 		Cell:     lipgloss.NewStyle().Padding(0, 1),
-		Selected: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")).BorderForeground(color),
+		Selected: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("255")).Background(lipgloss.Color("62")).BorderForeground(color),
 	}
 	m.table.SetStyles(s)
 }
@@ -359,10 +359,10 @@ func (m FilteredTable) View() string {
 		}
 	}
 
-	// Debug: count actual lines rendered
+	// Pad result to fill the full height so there's no empty space at the bottom
 	actualLines := strings.Count(result, "\n") + 1
-	if actualLines != m.height {
-		_ = actualLines
+	if actualLines < m.height {
+		result += strings.Repeat("\n", m.height-actualLines)
 	}
 
 	return result
