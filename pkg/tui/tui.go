@@ -21,29 +21,29 @@ import (
 	"golang.org/x/term"
 )
 
-var logo = `████ ████ ████ ████
-████ ████ ████ ████
-████ ████ ████ ████
-████ ████ ████ ████  ██
-████ ████ ████ ████  ██
-████ ████ ████ ████  ██
-████ ████ ████ ████  ██
-████ ████ ████ ████  ██
-████ ████ ████ ████  ██
-████ ████ ████ ████
-████ ████ ████ ████
-████ ████ ████ ████
-████ ████ ████ ████
-████ ████ ████ ████
-████ ████ ████ ████
-████ ████ ████ ████
-████ ████ ████ ████
-████ ████ ████ ████
-████ ████ ████ ████
-████ ████ ████ ████
-████ ████ ████ ████
-████ ████ ████ ████
-████ ████ ████ ████`
+// renderLogo returns the ClickHouse logo with yellow columns and red accent
+func renderLogo() string {
+	yellow := lipgloss.NewStyle().Foreground(lipgloss.Color("226"))
+	red := lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+	pad := "          "
+	col := yellow.Render("████")
+	redPip := red.Render("████")
+	row4 := pad + col + "  " + col + "  " + col + "  " + col
+	row5 := pad + col + "  " + col + "  " + col + "  " + col + "  " + col
+	lines := []string{
+		row4, row4,
+		row5, row5, row5, row5,
+		row4, row4, row4, row4, row4, row4, row4,
+		pad + redPip,
+	}
+	return strings.Join(lines, "\n")
+}
+
+// renderHint returns the red-colored hint line for the main page
+func renderHint() string {
+	red := lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+	return red.Render("Press ':' to continue. Press q / ctrl+c to exit")
+}
 
 // Page types
 type pageType string
@@ -151,10 +151,8 @@ func NewApp(cfg *config.Config, version string) *App {
 		bubbleCommandInput: ti,
 		version:            version,
 		cfg:                cfg,
-		mainMessage: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("226")).
-			Render(logo) +
-			"\n\nWelcome to ClickHouse Timeline\nPress ':' to enter command mode\n\nTip: To select and copy text, hold Shift and drag with mouse, then copy (Ctrl+Shift+C or Cmd+C)",
+		mainMessage: renderLogo() +
+			"\n\nWelcome to ClickHouse Timeline\n\nTip: To select and copy text, hold Shift and drag with mouse, then copy (Ctrl+Shift+C or Cmd+C)",
 		// Default values
 		categoryType:  CategoryQueryHash,
 		heatmapMetric: MetricCount,
@@ -292,14 +290,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Handle connection result
 		if msg.Err != nil {
-			a.SwitchToMainPage(fmt.Sprintf("Error connecting to ClickHouse: %v\nPress ':' to try again", msg.Err))
+			a.SwitchToMainPage(fmt.Sprintf("Error connecting to ClickHouse: %v", msg.Err))
 		} else {
 			// Update state
 			a.state.ClickHouse = msg.Client
 			a.state.SelectedContext = &msg.Context
 			a.clickHouse = msg.Client
 			a.selectedContext = &msg.Context
-			a.SwitchToMainPage(fmt.Sprintf("Connected to %s:%d : version %s\nPress ':' to continue",
+			a.SwitchToMainPage(fmt.Sprintf("Connected to %s:%d : version %s",
 				msg.Context.Host, msg.Context.Port, msg.Version))
 
 			// If we have an initial command from CLI params, execute it now
@@ -1100,6 +1098,7 @@ func (a *App) renderMainPage() string {
 		content.WriteString(fmt.Sprintf("\nSet flamegraph category to %s", a.categoryValue))
 	}
 
+	content.WriteString("\n\n" + renderHint())
 	return content.String()
 }
 
@@ -1107,7 +1106,7 @@ func (a *App) renderMainPage() string {
 func (a *App) SwitchToMainPage(mainMsg string) {
 	a.currentPage = pageMain
 	if mainMsg != "" {
-		a.mainMessage = mainMsg
+		a.mainMessage = renderLogo() + "\n\n" + mainMsg
 	}
 }
 
@@ -1317,8 +1316,7 @@ func (a *App) ApplyCLIParameters(c *types.CLI, commandName string) {
 	}
 
 	if mainMsg != "" {
-		mainMsg += "Press ':' to continue"
-		a.mainMessage = mainMsg
+		a.mainMessage = renderLogo() + "\n\n" + mainMsg
 	}
 }
 
