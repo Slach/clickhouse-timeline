@@ -4,7 +4,7 @@ go 1.26.1
 
 require (
 	charm.land/bubbles/v2 v2.1.0
-	charm.land/bubbletea/v2 v2.0.5
+	charm.land/bubbletea/v2 v2.0.6
 	charm.land/glamour/v2 v2.0.0
 	charm.land/lipgloss/v2 v2.0.3
 	github.com/ClickHouse/clickhouse-go/v2 v2.45.0
@@ -36,7 +36,7 @@ require (
 	github.com/caarlos0/env/v11 v11.4.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
-	github.com/charmbracelet/ultraviolet v0.0.0-20260413211237-bd52878bcec2 // indirect
+	github.com/charmbracelet/ultraviolet v0.0.0-20260416155717-489999b90468 // indirect
 	github.com/charmbracelet/x/ansi v0.11.7 // indirect
 	github.com/charmbracelet/x/exp/slice v0.0.0-20260330094520-2dce04b6f8a4 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
