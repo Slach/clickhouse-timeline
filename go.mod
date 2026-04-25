@@ -14,7 +14,7 @@ require (
 	github.com/eapache/go-resiliency v1.7.0
 	github.com/go-git/go-git/v5 v5.17.2
 	github.com/pkg/errors v0.9.1
-	github.com/rs/zerolog v1.35.0
+	github.com/rs/zerolog v1.35.1
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	github.com/teilomillet/gollm v0.1.11
