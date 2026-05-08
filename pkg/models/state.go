@@ -1,6 +1,8 @@
 package models
 
 import (
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Slach/clickhouse-timeline/pkg/client"
@@ -12,9 +14,10 @@ import (
 // This is separated from UI state to enable better testing and business logic separation
 type AppState struct {
 	// Configuration
-	Config  *config.Config
-	Version string
-	CLI     *types.CLI
+	Config    *config.Config
+	Version   string
+	CHVersion string // ClickHouse server version (e.g. "26.4.1.1234")
+	CLI       *types.CLI
 
 	// Connection state
 	ClickHouse      *client.Client
@@ -67,6 +70,27 @@ func (s *AppState) ConnectionInfo() string {
 // IsConnected returns true if there is an active connection
 func (s *AppState) IsConnected() bool {
 	return s.ClickHouse != nil && s.SelectedContext != nil
+}
+
+// CHVersionAtLeast checks if the connected ClickHouse server version is >= major.minor
+// Handles version strings like "26.4.1.1234" or "25.12.3.1-lts"
+func (s *AppState) CHVersionAtLeast(major, minor int) bool {
+	if s.CHVersion == "" {
+		return false
+	}
+	parts := strings.SplitN(s.CHVersion, ".", 3)
+	if len(parts) < 2 {
+		return false
+	}
+	vMajor, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return false
+	}
+	vMinor, err := strconv.Atoi(strings.Split(parts[1], "-")[0])
+	if err != nil {
+		return false
+	}
+	return vMajor > major || (vMajor == major && vMinor >= minor)
 }
 
 // TimeRangeFormatted returns formatted time range string

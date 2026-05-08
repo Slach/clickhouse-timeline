@@ -295,6 +295,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Update state
 			a.state.ClickHouse = msg.Client
 			a.state.SelectedContext = &msg.Context
+			a.state.CHVersion = msg.Version
 			a.clickHouse = msg.Client
 			a.selectedContext = &msg.Context
 			a.SwitchToMainPage(fmt.Sprintf("Connected to %s:%d : version %s",
