@@ -46,12 +46,13 @@ type ExplainPercentilesMsg struct {
 }
 
 type ExplainResultsMsg struct {
-	QueryText   string
-	Duration    float64
-	ExplainPlan string
-	ExplainPipe string
-	ExplainEst  string
-	Err         error
+	QueryText     string
+	Duration      float64
+	ExplainPlan   string
+	ExplainPipe   string
+	ExplainEst    string
+	ExplainPretty string
+	Err           error
 }
 
 type QueryRow struct {
@@ -89,12 +90,14 @@ type explainViewer struct {
 	selectedPercentile int // 0=p50, 1=p90, 2=p99, -1=back
 
 	// Results
-	queryText     string
-	duration      float64
-	explainPlan   viewport.Model
-	explainPipe   viewport.Model
-	explainEst    viewport.Model
-	focusedResult int // 0=plan, 1=pipe, 2=est
+	queryText      string
+	duration       float64
+	explainPlan    viewport.Model
+	explainPipe    viewport.Model
+	explainEst     viewport.Model
+	explainPretty  viewport.Model
+	hasPrettyPlan  bool
+	focusedResult  int // 0=plan, 1=pipe, 2=est, 3=pretty
 
 	loading      bool
 	err          error
@@ -151,6 +154,7 @@ func newExplainViewer(categoryType CategoryType, prefillHash string, fromTime, t
 	explainPlan := viewport.New(viewport.WithWidth(width-4), viewport.WithHeight(vpHeight))
 	explainPipe := viewport.New(viewport.WithWidth(width-4), viewport.WithHeight(vpHeight))
 	explainEst := viewport.New(viewport.WithWidth(width-4), viewport.WithHeight(vpHeight))
+	explainPretty := viewport.New(viewport.WithWidth(width-4), viewport.WithHeight(vpHeight))
 
 	viewer := explainViewer{
 		stage:              stageFilter,
@@ -164,6 +168,7 @@ func newExplainViewer(categoryType CategoryType, prefillHash string, fromTime, t
 		explainPlan:        explainPlan,
 		explainPipe:        explainPipe,
 		explainEst:         explainEst,
+		explainPretty:      explainPretty,
 		loading:            true,
 		fromTime:           fromTime,
 		toTime:             toTime,
@@ -270,6 +275,10 @@ func (m explainViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.explainPlan.SetContent(msg.ExplainPlan)
 		m.explainPipe.SetContent(msg.ExplainPipe)
 		m.explainEst.SetContent(msg.ExplainEst)
+		m.hasPrettyPlan = msg.ExplainPretty != ""
+		if m.hasPrettyPlan {
+			m.explainPretty.SetContent(msg.ExplainPretty)
+		}
 		m.stage = stageResults
 		m.focusedResult = 0
 
@@ -312,6 +321,8 @@ func (m explainViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.explainPipe, cmd = m.explainPipe.Update(msg)
 		case 2:
 			m.explainEst, cmd = m.explainEst.Update(msg)
+		case 3:
+			m.explainPretty, cmd = m.explainPretty.Update(msg)
 		}
 		cmds = append(cmds, cmd)
 	}
@@ -510,17 +521,20 @@ func (m explainViewer) handlePercentilesKeys(msg tea.KeyPressMsg) (tea.Model, te
 }
 
 func (m explainViewer) handleResultsKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	maxResult := 2
+	if m.hasPrettyPlan {
+		maxResult = 3
+	}
 	switch msg.String() {
 	case "esc", "q":
-		// Go back to percentiles
 		m.stage = stagePercentiles
 		return m, nil
 	case "tab":
-		m.focusedResult = (m.focusedResult + 1) % 3
+		m.focusedResult = (m.focusedResult + 1) % (maxResult + 1)
 	case "shift+tab":
 		m.focusedResult--
 		if m.focusedResult < 0 {
-			m.focusedResult = 2
+			m.focusedResult = maxResult
 		}
 	}
 	return m, nil
@@ -922,6 +936,17 @@ func (m explainViewer) viewResults() string {
 	sb.WriteString(m.renderViewport(m.explainEst))
 	sb.WriteString("\n")
 
+	if m.hasPrettyPlan {
+		prettyTitle := "EXPLAIN PLAN pretty=1"
+		if m.focusedResult == 3 {
+			prettyTitle = "> " + prettyTitle
+		}
+		sb.WriteString(lipgloss.NewStyle().Bold(true).Render(prettyTitle))
+		sb.WriteString("\n")
+		sb.WriteString(m.renderViewport(m.explainPretty))
+		sb.WriteString("\n")
+	}
+
 	sb.WriteString(helpStyle.Render("Tab: Switch view  |  ↑↓: Scroll  |  Esc: Back"))
 
 	return sb.String()
@@ -1196,6 +1221,8 @@ func (a *App) loadExplainResultsCmd(hash string, threshold float64, fromTime, to
 		explain2 := fmt.Sprintf("EXPLAIN PIPELINE %s", queryText)
 		explain3 := fmt.Sprintf("EXPLAIN ESTIMATE %s", queryText)
 
+		usePretty := a.state.CHVersionAtLeast(26, 4)
+
 		// Run EXPLAIN PLAN
 		var explainPlan strings.Builder
 		if rows1, err1 := a.state.ClickHouse.Query(explain1); err1 == nil {
@@ -1310,12 +1337,32 @@ func (a *App) loadExplainResultsCmd(hash string, threshold float64, fromTime, to
 			explainEst.WriteString(fmt.Sprintf("Error: %v", err3))
 		}
 
+		// Run EXPLAIN PLAN pretty=1 for ClickHouse 26.4+
+		var explainPrettyStr string
+		if usePretty {
+			explain4 := fmt.Sprintf("EXPLAIN PLAN pretty=1 %s", queryText)
+			var explainPrettySB strings.Builder
+			if rows4, err4 := a.state.ClickHouse.Query(explain4); err4 == nil {
+				for rows4.Next() {
+					var s string
+					_ = rows4.Scan(&s)
+					explainPrettySB.WriteString(s)
+					explainPrettySB.WriteString("\n")
+				}
+				rows4.Close()
+			} else {
+				explainPrettySB.WriteString(fmt.Sprintf("Error: %v", err4))
+			}
+			explainPrettyStr = explainPrettySB.String()
+		}
+
 		return ExplainResultsMsg{
-			QueryText:   queryText,
-			Duration:    duration,
-			ExplainPlan: explainPlan.String(),
-			ExplainPipe: explainPipe.String(),
-			ExplainEst:  explainEst.String(),
+			QueryText:     queryText,
+			Duration:      duration,
+			ExplainPlan:   explainPlan.String(),
+			ExplainPipe:   explainPipe.String(),
+			ExplainEst:    explainEst.String(),
+			ExplainPretty: explainPrettyStr,
 		}
 	}
 }
