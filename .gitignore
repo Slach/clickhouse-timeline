@@ -12,6 +12,7 @@ build/
 AGENTS.md
 CLAUDE.md
 CRUSH.md
+opencode.json
 vtcode.toml
 .env
 clickhouse-timeline

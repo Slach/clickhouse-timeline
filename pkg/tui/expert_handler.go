@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -517,6 +518,44 @@ func (m *expertViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+func isRetriableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	// User-initiated cancellation is NOT retriable
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	msg := err.Error()
+	for _, pattern := range []string{
+		"context deadline exceeded",
+		"connection reset by peer",
+		"connection refused",
+		"i/o timeout",
+		"TLS handshake timeout",
+		"EOF",
+		"broken pipe",
+		"connection timed out",
+		"network is unreachable",
+		"API error (status 502)",
+		"API error (status 503)",
+		"API error (status 504)",
+		"API error (status 529)",
+	} {
+		if strings.Contains(msg, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *expertViewer) sendMessage(value string) tea.Cmd {
 	m.input.Reset()
 	m.showSkillSuggestions = false
@@ -558,8 +597,14 @@ func (m *expertViewer) sendMessage(value string) tea.Cmd {
 
 	agentErr := m.agentErr
 	timeout := m.cfg.LlmTimeout
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	m.cancelFunc = cancel
+	maxRetries := m.cfg.LlmRetriesCount
+	basePause := m.cfg.LlmRetriesPause
+	if basePause == 0 {
+		basePause = time.Second
+	}
+
+	parentCtx, parentCancel := context.WithCancel(context.Background())
+	m.cancelFunc = parentCancel
 
 	// Create channel for progressive event updates
 	eventCh := make(chan expert.ChatEvent, 10)
@@ -567,32 +612,86 @@ func (m *expertViewer) sendMessage(value string) tea.Cmd {
 
 	llmCmd := func() tea.Msg {
 		defer close(eventCh)
+		defer parentCancel()
 
 		if agent == nil {
-			cancel()
 			if agentErr != nil {
 				return ExpertDoneMsg{Err: agentErr}
 			}
 			return ExpertDoneMsg{Err: fmt.Errorf("agent not initialized — check API key configuration in expert section of clickhouse-timeline.yml")}
 		}
 
-		defer cancel()
+		historyLen := agent.HistoryLen()
+		var lastErr error
 
-		result, err := agent.ChatWithProgress(ctx, userMsg, selectedSkill, eventCh)
-		if err != nil {
-			log.Error().Stack().Err(err).
-				Str("provider", agent.Provider()).
-				Str("model", agent.Model()).
-				Dur("timeout", timeout).
-				Msg("Expert LLM call failed")
-			return ExpertDoneMsg{Err: fmt.Errorf("%w (timeout=%s)", err, timeout)}
+		for attempt := 0; attempt <= maxRetries; attempt++ {
+			if attempt > 0 {
+				agent.TruncateHistory(historyLen)
+
+				backoff := basePause * time.Duration(1<<uint(attempt-1))
+				const maxBackoff = 60 * time.Second
+				if backoff > maxBackoff {
+					backoff = maxBackoff
+				}
+
+				errMsg := lastErr.Error()
+				if len(errMsg) > 120 {
+					errMsg = errMsg[:120] + "..."
+				}
+				log.Warn().Err(lastErr).
+					Int("attempt", attempt+1).
+					Int("max_attempts", maxRetries+1).
+					Dur("backoff", backoff).
+					Msg("Retrying LLM call after transient error")
+
+				select {
+				case eventCh <- expert.ChatEvent{
+					Type:       "retry",
+					Attempt:    attempt,
+					MaxRetries: maxRetries,
+					Error:      errMsg,
+				}:
+				default:
+				}
+
+				select {
+				case <-time.After(backoff):
+				case <-parentCtx.Done():
+					return ExpertDoneMsg{Err: parentCtx.Err()}
+				}
+			}
+
+			attemptCtx, attemptCancel := context.WithTimeout(parentCtx, timeout)
+
+			result, err := agent.ChatWithProgress(attemptCtx, userMsg, selectedSkill, eventCh)
+			attemptCancel()
+
+			if err != nil {
+				if isRetriableError(err) && attempt < maxRetries {
+					lastErr = err
+					continue
+				}
+				log.Error().Stack().Err(err).
+					Str("provider", agent.Provider()).
+					Str("model", agent.Model()).
+					Dur("timeout", timeout).
+					Int("attempt", attempt+1).
+					Int("max_attempts", maxRetries+1).
+					Msg("Expert LLM call failed")
+				if attempt > 0 {
+					return ExpertDoneMsg{Err: fmt.Errorf("%w (timeout=%s, attempt %d/%d)", err, timeout, attempt+1, maxRetries+1)}
+				}
+				return ExpertDoneMsg{Err: fmt.Errorf("%w (timeout=%s)", err, timeout)}
+			}
+
+			return expertResponseMsg{
+				Content:   result.Content,
+				Model:     result.Model,
+				Reasoning: result.Reasoning,
+			}
 		}
 
-		return expertResponseMsg{
-			Content:   result.Content,
-			Model:     result.Model,
-			Reasoning: result.Reasoning,
-		}
+		return ExpertDoneMsg{Err: fmt.Errorf("%w (timeout=%s, %d retries exhausted)", lastErr, timeout, maxRetries)}
 	}
 	return tea.Batch(llmCmd, waitForExpertEvent(eventCh), expertTimerTick())
 }
@@ -955,9 +1054,13 @@ func (m *expertViewer) applyEvent(ev expert.ChatEvent) {
 			}
 		}
 	case "retry":
+		reason := "Rate limited (429)"
+		if ev.Error != "" {
+			reason = ev.Error
+		}
 		m.messages = append(m.messages, expert.ChatMessage{
 			Role:    "system",
-			Content: fmt.Sprintf("Rate limited (429). Retry %d/%d...", ev.Attempt, ev.MaxRetries),
+			Content: fmt.Sprintf("%s. Retry %d/%d...", reason, ev.Attempt, ev.MaxRetries),
 		})
 	case "reasoning":
 		m.messages = append(m.messages, expert.ChatMessage{

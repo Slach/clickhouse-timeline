@@ -366,6 +366,12 @@ func (a *ExpertAgent) chatSync(ctx context.Context, userMsg string, skill *Skill
 		})
 
 		for _, tc := range choice.Message.ToolCalls {
+			log.Debug().
+				Str("tool", tc.GetName()).
+				Str("id", tc.ID).
+				RawJSON("raw_arguments", tc.Function.Arguments).
+				Bool("has_newlines", bytes.Contains(tc.Function.Arguments, []byte{'\n'})).
+				Msg("Raw tool call arguments from LLM")
 			args, err := getToolArguments(&tc)
 			queryStr := ""
 			if q, ok := args["query"]; ok {
@@ -809,25 +815,14 @@ func (a *ExpertAgent) executeClickHouseQuery(args map[string]interface{}) (strin
 		return "", fmt.Errorf("query argument must be a string")
 	}
 
-	trimmed := strings.TrimSpace(query)
-	// Strip leading SQL comments (-- line comments and /* block comments */)
-	for {
-		if strings.HasPrefix(trimmed, "--") {
-			if idx := strings.Index(trimmed, "\n"); idx >= 0 {
-				trimmed = strings.TrimSpace(trimmed[idx+1:])
-			} else {
-				trimmed = ""
-			}
-		} else if strings.HasPrefix(trimmed, "/*") {
-			if idx := strings.Index(trimmed, "*/"); idx >= 0 {
-				trimmed = strings.TrimSpace(trimmed[idx+2:])
-			} else {
-				trimmed = ""
-			}
-		} else {
-			break
-		}
-	}
+	hasNewlines := strings.Contains(query, "\n")
+	log.Debug().
+		Bool("has_newlines", hasNewlines).
+		Int("query_len", len(query)).
+		Str("query_start", truncate(query, 120)).
+		Msg("executeClickHouseQuery received query")
+
+	trimmed := stripLeadingComments(query)
 	upper := strings.ToUpper(trimmed)
 	if !strings.HasPrefix(upper, "SELECT") && !strings.HasPrefix(upper, "SHOW") &&
 		!strings.HasPrefix(upper, "DESCRIBE") && !strings.HasPrefix(upper, "EXISTS") &&
@@ -848,6 +843,58 @@ func (a *ExpertAgent) executeClickHouseQuery(args map[string]interface{}) (strin
 	}()
 
 	return formatRows(rows)
+}
+
+// stripLeadingComments removes leading SQL line comments (--) and block comments (/* */).
+// Handles multi-line and single-line flattened comments from LLM (e.g. "-- description SELECT ...").
+func stripLeadingComments(query string) string {
+	trimmed := strings.TrimSpace(query)
+	for {
+		trimmed = strings.TrimLeft(trimmed, " \t\r\n")
+		if trimmed == "" {
+			return ""
+		}
+
+		if strings.HasPrefix(trimmed, "--") {
+			if nlIdx := strings.Index(trimmed, "\n"); nlIdx >= 0 {
+				trimmed = strings.TrimSpace(trimmed[nlIdx+1:])
+			} else {
+				// LLM flattened: "-- comment SELECT/WITH ..." on one line — find earliest SQL keyword
+				upperRest := strings.ToUpper(trimmed)
+				bestIdx := -1
+				for _, kw := range []string{"SELECT", "WITH", "SHOW", "DESCRIBE", "EXISTS"} {
+					for _, sep := range []string{" ", "\t", "\n"} {
+						if idx := strings.Index(upperRest, sep+kw+sep); idx >= 0 {
+							if bestIdx == -1 || idx < bestIdx {
+								bestIdx = idx
+							}
+						}
+						if idx := strings.Index(upperRest, sep+kw); idx >= 0 {
+							cut := trimmed[idx+1:]
+							if len(strings.TrimSpace(cut)) > len(kw) {
+								if bestIdx == -1 || idx < bestIdx {
+									bestIdx = idx
+								}
+							}
+						}
+					}
+				}
+				if bestIdx >= 0 {
+					return strings.TrimSpace(trimmed[bestIdx+1:])
+				}
+				return ""
+			}
+		} else if strings.HasPrefix(trimmed, "/*") {
+			if endIdx := strings.Index(trimmed, "*/"); endIdx >= 0 {
+				trimmed = strings.TrimSpace(trimmed[endIdx+2:])
+			} else {
+				return ""
+			}
+		} else {
+			break
+		}
+	}
+	return trimmed
 }
 
 func formatRows(rows *sql.Rows) (string, error) {
@@ -892,6 +939,19 @@ func formatRows(rows *sql.Rows) (string, error) {
 // History returns the conversation history.
 func (a *ExpertAgent) History() []ChatMessage {
 	return a.history
+}
+
+// HistoryLen returns the current conversation history length.
+func (a *ExpertAgent) HistoryLen() int {
+	return len(a.history)
+}
+
+// TruncateHistory removes history entries beyond the given length.
+// Used to roll back partial state when retrying after transient errors.
+func (a *ExpertAgent) TruncateHistory(n int) {
+	if n < len(a.history) {
+		a.history = a.history[:n]
+	}
 }
 
 // ClearHistory clears the conversation history and LLM memory.
