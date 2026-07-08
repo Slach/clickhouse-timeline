@@ -15,7 +15,7 @@ Interactive performance analysis tool for ClickHouse that provides detailed time
 ## Installation
 
 ```bash
-go install github.com/Slach/clickhouse-timeline@latest
+go install github.com/Slach/clickhouse-timeline/cmd/clickhouse-timeline@latest
 ```
 
 ## Usage
